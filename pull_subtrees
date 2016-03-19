@@ -1,2 +1,5 @@
+# git remote add net4cpp_remote https://github.com/ruoka/json4cpp.git
+# git remote add net4cpp_remote https://github.com/ruoka/net4cpp.git
+
 git pull -s subtree json4cpp_remote master
 git pull -s subtree net4cpp_remote master

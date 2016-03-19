@@ -11,8 +11,7 @@ using xson::fson::decoder;
 
 struct header
 {
-    enum : std::int8_t {create = 'C', update = 'U', destroy = 'D', query = 'Q', reply = 'R'};
-    std::uint8_t operaion;
+    enum : std::int8_t {create = 'C', update = 'U', destroy = 'D', query = 'Q', reply = 'R'} operaion;
     std::string collection;
 };
 
@@ -24,11 +23,19 @@ inline std::istream& operator >> (std::istream& is, header& hdr)
     return is;
 }
 
+inline std::ostream& operator << (std::ostream& os, const header& hdr)
+{
+    encoder e{os};
+    e.encode(hdr.operaion);
+    e.encode(hdr.collection);
+    return os;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 struct create
 {
-    header hdr;
+    header hdr = {header::create, "fdb"};
     object document;
 };
 
@@ -52,7 +59,7 @@ inline std::ostream& operator << (std::ostream& os, const create& crt)
 
 struct update
 {
-    header hdr;
+    header hdr = {header::update, "fdb"};
     object selector;
     object document;
 };
@@ -61,7 +68,7 @@ struct update
 
 struct destroy
 {
-    header hdr;
+    header hdr = {header::destroy, "fdb"};;
     object selector;
 };
 
@@ -69,7 +76,7 @@ struct destroy
 
 struct query
 {
-    header hdr;
+    header hdr = {header::query, "fdb"};;
     object selector;
 };
 
@@ -93,14 +100,14 @@ inline std::ostream& operator << (std::ostream& os, const query& qry)
 
 struct reply
 {
-    header hdr;
-    object documents;
+    header hdr = {header::reply, "fdb"};;
+    object document;
 };
 
 inline std::istream& operator >> (std::istream& is, reply& rply)
 {
     decoder d{is};
-    d.decode(rply.documents);
+    d.decode(rply.document);
     return is;
 }
 
@@ -109,7 +116,7 @@ inline std::ostream& operator << (std::ostream& os, const reply& rply)
     encoder e{os};
     e.encode(rply.hdr.operaion);
     e.encode(rply.hdr.collection);
-    e.encode(rply.documents);
+    e.encode(rply.document);
     return os;
 }
 

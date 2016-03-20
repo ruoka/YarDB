@@ -41,7 +41,7 @@ clean:
 
 .PHONY: test
 test: $(BINDIR)/test
-	$(BINDIR)/test --gtest_filter=-*.CommandLine
+	$(BINDIR)/test --gtest_filter=-*.CommandLine:FdbServerTest.*
 
 .PHONY: dump
 dump:

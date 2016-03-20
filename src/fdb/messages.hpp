@@ -5,13 +5,13 @@
 
 namespace fdb {
 
-using xson::fson::object;
-using xson::fson::encoder;
-using xson::fson::decoder;
+using object = xson::fson::object;
+using encoder = xson::fson::encoder;
+using decoder = xson::fson::decoder;
 
 struct header
 {
-    enum : std::int8_t {create = 'C', update = 'U', destroy = 'D', query = 'Q', reply = 'R'} operaion;
+    enum : std::int8_t {create = 'C', read = 'R', update = 'U', destroy = 'D', reply = 'R'} operaion;
     std::string collection;
 };
 
@@ -39,19 +39,43 @@ struct create
     object document;
 };
 
-inline std::istream& operator >> (std::istream& is, create& crt)
+inline std::istream& operator >> (std::istream& is, create& msg)
 {
     decoder d{is};
-    d.decode(crt.document);
+    d.decode(msg.document);
     return is;
 }
 
-inline std::ostream& operator << (std::ostream& os, const create& crt)
+inline std::ostream& operator << (std::ostream& os, const create& msg)
 {
     encoder e{os};
-    e.encode(crt.hdr.operaion);
-    e.encode(crt.hdr.collection);
-    e.encode(crt.document);
+    e.encode(msg.hdr.operaion);
+    e.encode(msg.hdr.collection);
+    e.encode(msg.document);
+    return os;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+struct read
+{
+    header hdr = {header::read, "fdb"};;
+    object selector;
+};
+
+inline std::istream& operator >> (std::istream& is, read& msg)
+{
+    decoder d{is};
+    d.decode(msg.selector);
+    return is;
+}
+
+inline std::ostream& operator << (std::ostream& os, const read& msg)
+{
+    encoder e{os};
+    e.encode(msg.hdr.operaion);
+    e.encode(msg.hdr.collection);
+    e.encode(msg.selector);
     return os;
 }
 
@@ -64,6 +88,14 @@ struct update
     object document;
 };
 
+inline std::istream& operator >> (std::istream& is, update& msg)
+{
+    decoder d{is};
+    d.decode(msg.selector);
+    d.decode(msg.selector);
+    return is;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 struct destroy
@@ -72,28 +104,11 @@ struct destroy
     object selector;
 };
 
-///////////////////////////////////////////////////////////////////////////////
-
-struct query
-{
-    header hdr = {header::query, "fdb"};;
-    object selector;
-};
-
-inline std::istream& operator >> (std::istream& is, query& qry)
+inline std::istream& operator >> (std::istream& is, destroy& msg)
 {
     decoder d{is};
-    d.decode(qry.selector);
+    d.decode(msg.selector);
     return is;
-}
-
-inline std::ostream& operator << (std::ostream& os, const query& qry)
-{
-    encoder e{os};
-    e.encode(qry.hdr.operaion);
-    e.encode(qry.hdr.collection);
-    e.encode(qry.selector);
-    return os;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -104,19 +119,19 @@ struct reply
     object document;
 };
 
-inline std::istream& operator >> (std::istream& is, reply& rply)
+inline std::istream& operator >> (std::istream& is, reply& msg)
 {
     decoder d{is};
-    d.decode(rply.document);
+    d.decode(msg.document);
     return is;
 }
 
-inline std::ostream& operator << (std::ostream& os, const reply& rply)
+inline std::ostream& operator << (std::ostream& os, const reply& msg)
 {
     encoder e{os};
-    e.encode(rply.hdr.operaion);
-    e.encode(rply.hdr.collection);
-    e.encode(rply.document);
+    e.encode(msg.hdr.operaion);
+    e.encode(msg.hdr.collection);
+    e.encode(msg.document);
     return os;
 }
 

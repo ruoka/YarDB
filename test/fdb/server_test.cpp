@@ -28,6 +28,7 @@ TEST(FdbServerTest, Connect)
     server >> header >> reply;
     std::clog << "Received:\n" << xson::json::stringify(reply.document) << std::endl;
 
+    read.selector = {"_id", 4};
     server << read << net::flush;
     std::clog << "Sent:\n" << xson::json::stringify(read.selector) << std::endl;
 

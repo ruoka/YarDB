@@ -26,7 +26,7 @@ public:
 
     bool create(fdb::object& document);
 
-    bool read(fdb::object& selector, std::vector<fdb::object>& result);
+    bool read(fdb::object& selector, std::vector<fdb::object>& result) const;
 
     bool update(fdb::object& selector, fdb::object& document);
 
@@ -40,7 +40,7 @@ private:
 
     fdb::index m_index;
 
-    std::fstream m_storage;
+    mutable std::fstream m_storage;
 };
 
 }

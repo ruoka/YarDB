@@ -27,9 +27,12 @@ inline std::istream& operator >> (std::istream& is, metadata& data)
 {
     xson::fson::decoder d{is};
     d.decode(data.deleted);
-    d.decode(data.collection);
-    d.decode(data.index);
-    d.decode(data.position);
+    if(!data.deleted)
+    {
+        d.decode(data.collection);
+        d.decode(data.index);
+        d.decode(data.position);
+    }
     return is;
 }
 

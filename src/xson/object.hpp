@@ -157,6 +157,11 @@ public:
         return m_objects.empty();
     }
 
+    bool has (const std::string& name) const
+    {
+        return m_objects.count(name) > 0;
+    }
+
     std::map<std::string,object>::const_iterator begin() const
     {
         return m_objects.cbegin();

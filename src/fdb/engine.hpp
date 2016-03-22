@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include "xson/fson.hpp"
+#include "fdb/index.hpp"
 
 namespace fdb {
 
@@ -23,19 +24,21 @@ public:
         m_collection = col;
     }
 
-    bool create(const fdb::object& document);
+    bool create(fdb::object& document);
 
-    bool read(const fdb::object& selector, std::vector<fdb::object>& result);
+    bool read(fdb::object& selector, std::vector<fdb::object>& result);
 
-    bool update(const fdb::object& selector, const fdb::object& document);
+    bool update(fdb::object& selector, fdb::object& document);
 
-    bool destroy(const fdb::object& selector);
+    bool destroy(fdb::object& selector);
 
 private:
 
     std::string m_database;
 
     std::string m_collection;
+
+    fdb::index m_index;
 
     std::fstream m_storage;
 };

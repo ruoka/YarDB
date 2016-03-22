@@ -1,39 +1,35 @@
 #pragma once
 
 #include <iosfwd>
-#include "xson/fast/encoder.hpp"
-#include "xson/fast/decoder.hpp"
+#include "xson/fson.hpp"
 
 namespace fdb {
 
 struct metadata
 {
+    bool deleted            = false;
     std::string collection  = "fdb";
-    std::uint64_t id        = 0;
-    std::streamoff previous = 0;
-    std::streamoff current  = 0;
-    std::streamoff next     = 0;
+    std::int64_t index      = 0; // FIXME: Use uint64_t!
+    std::streamoff position = 0;
 };
 
 inline std::ostream& operator << (std::ostream& os, const metadata& data)
 {
-    xson::fast::encoder e{os};
+    xson::fson::encoder e{os};
+    e.encode(data.deleted);
     e.encode(data.collection);
-    e.encode(data.id);
-    e.encode(data.previous);
-    e.encode(data.current);
-    e.encode(data.next);
+    e.encode(data.index);
+    e.encode(data.position);
     return os;
 }
 
 inline std::istream& operator >> (std::istream& is, metadata& data)
 {
-    xson::fast::decoder d{is};
+    xson::fson::decoder d{is};
+    d.decode(data.deleted);
     d.decode(data.collection);
-    d.decode(data.id);
-    d.decode(data.previous);
-    d.decode(data.current);
-    d.decode(data.next);
+    d.decode(data.index);
+    d.decode(data.position);
     return is;
 }
 

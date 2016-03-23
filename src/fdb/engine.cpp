@@ -62,7 +62,7 @@ void fdb::engine::update(fdb::object& selector, fdb::object& changes)
     std::vector<fdb::object> array;
     read(selector, array);
     destroy(selector);
-    for(auto document : array)
+    for(auto& document : array)
         create(document);
 }
 

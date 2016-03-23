@@ -21,7 +21,7 @@ public:
         m_current{}
     {}
 
-    index_iterator(object& selector, std::map<std::int64_t,std::streamoff>::iterator itr) :
+    index_iterator(object& selector, implementation_iterator itr) :
         m_selector{selector},
         m_current{itr}
     {}
@@ -36,13 +36,13 @@ public:
         return m_current->second;
     }
 
-    index_iterator& operator ++ () // FIXME
+    auto& operator ++ () // FIXME
     {
         ++m_current;
         return *this;
     }
 
-    bool operator != (const index_iterator& itr) const
+    auto operator != (const index_iterator& itr) const
     {
         return m_current != itr.m_current;
     }
@@ -65,12 +65,12 @@ public:
         m_end{end}
     {}
 
-    index_iterator begin()
+    auto begin()
     {
         return m_begin;
     }
 
-    index_iterator end()
+    auto end()
     {
         return m_end;
     }

@@ -63,7 +63,7 @@ void fdb::engine::update(fdb::object& selector, fdb::object& changes)
     read(selector, array);
     destroy(selector);
     for(auto& document : array)
-        create(document);
+        create(document + changes);
 }
 
 void fdb::engine::destroy(fdb::object& selector)

@@ -84,6 +84,11 @@ class index
 {
 public:
 
+    auto sequence()
+    {
+        return ++m_sequence;
+    }
+
     auto& operator [] (const sequence_type& id)
     {
         m_sequence = std::max(m_sequence, id);
@@ -105,11 +110,6 @@ public:
             end.m_current = m_implementation.end();
         }
         return {begin, end};
-    }
-
-    auto sequence()
-    {
-        return ++m_sequence;
     }
 
     index_iterator erase(index_iterator& itr)

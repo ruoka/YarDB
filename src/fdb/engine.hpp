@@ -11,12 +11,7 @@ class engine
 {
 public:
 
-    engine();
-
-    void database(const std::string& db)
-    {
-        m_database = db;
-    }
+    engine(const std::string file = "./fson.db"s);
 
     void collection(const std::string& col)
     {
@@ -33,7 +28,7 @@ public:
 
 private:
 
-    std::string m_database;
+    void rebuild_indexes();
 
     std::string m_collection;
 

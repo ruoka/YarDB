@@ -1,3 +1,4 @@
+#include <iostream>
 #include "fdb/metadata.hpp"
 #include "fdb/engine.hpp"
 
@@ -9,97 +10,63 @@ fdb::engine::engine() : m_storage{}
     if (!m_storage.is_open())
         throw "Perkele!";
 
+    m_storage.clear();
     while(m_storage)
     {
         fdb::metadata metadata;
         fdb::object document;
         m_storage >> metadata >> document;
-        if(m_storage && !metadata.deleted)
+        if(m_storage && metadata.valid)
+        {
+            std::clog << metadata.valid << ':' << metadata.index << ':' << metadata.position << std::endl;
             m_index[metadata.index] = metadata.position;
+        }
     }
 }
 
-bool fdb::engine::create(fdb::object& document)
+void fdb::engine::create(fdb::object& document)
 {
-    if(!document.has("_id"))
-        document["_id"s].value((std::int64_t)m_index.size()); // FIXME
-
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
-
-    fdb::metadata metadata;
-    metadata.index = document["_id"s];
+    fdb::metadata metadata{true};
+    metadata.index = document["_id"s].value(m_index.sequence());
     metadata.position = m_storage.tellp();
-
     m_storage << metadata << document << std::flush;
-    if(m_storage)
-        m_index[metadata.index] = metadata.position;
-
-    return true;
+    m_index[metadata.index] = metadata.position;
 }
 
-bool fdb::engine::read(fdb::object& selector, std::vector<fdb::object>& result) const
+void fdb::engine::read(fdb::object& selector, std::vector<fdb::object>& result)
 {
-    m_storage.clear();
-
-    if(selector.has("_id"s)) // Can we use index?
+    for(const auto position : m_index.range(selector))
     {
-        for(auto itr = m_index.find(selector["_id"s]); itr != m_index.cend(); itr = m_index.cend())
-        {
-            const auto position = itr->second;
-            m_storage.seekp(position, m_storage.beg);
-
-            fdb::metadata metadata; fdb::object document;
-            m_storage >> metadata >> document;
-            if(m_storage)
-                result.emplace_back(document);
-        }
+        m_storage.clear();
+        m_storage.seekp(position, m_storage.beg);
+        fdb::metadata metadata;
+        fdb::object document;
+        m_storage >> metadata >> document;
+        result.emplace_back(document);
     }
-    else // Fallback to full table scan :-(
-    {
-        for(auto itr = m_index.cbegin(); itr != m_index.cend(); ++itr)
-        {
-            const auto position = itr->second;
-            m_storage.seekp(position, m_storage.beg);
-
-            fdb::metadata metadata; fdb::object document;
-            m_storage >> metadata >> document;
-            if(m_storage)
-                result.emplace_back(document);
-        }
-    }
-    return true;
 }
 
-bool fdb::engine::update(fdb::object& selector, fdb::object& document)
+void fdb::engine::update(fdb::object& selector, fdb::object& changes)
 {
-    if(selector.has("_id"s)) // Can we use index?
-    {
-        destroy(selector);
-        create(document);
-        return true;
-    }
-    return false;
+    std::vector<fdb::object> array;
+    read(selector, array);
+    destroy(selector);
+    for(auto document : array)
+        create(document + changes);
 }
 
-bool fdb::engine::destroy(fdb::object& selector)
+void fdb::engine::destroy(fdb::object& selector)
 {
-    if(selector.has("_id"s)) // Can we use index?
+    auto range = m_index.range(selector);
+    for(auto itr = range.begin(); itr != range.end(); ++itr)
     {
-        for(auto itr = m_index.find(selector["_id"s]); itr != m_index.end(); itr = m_index.end())
-        {
-            const auto position = itr->second;
-            m_storage.seekp(position, m_storage.beg);
-
-            fdb::metadata metadata;
-            metadata.deleted = true;
-            m_storage << metadata;
-
-            if(m_storage)
-                itr = m_index.erase(itr);
-
-            return true;
-        }
+        const auto position = *itr;
+        m_storage.clear();
+        m_storage.seekp(position, m_storage.beg);
+        fdb::metadata metadata{false};
+        m_storage << metadata;
+        range.destroy(itr);
     }
-    return false;
 }

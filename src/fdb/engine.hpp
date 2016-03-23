@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fstream>
-#include "xson/fson.hpp"
 #include "fdb/index.hpp"
 
 namespace fdb {
@@ -24,13 +23,13 @@ public:
         m_collection = col;
     }
 
-    bool create(fdb::object& document);
+    void create(fdb::object& document);
 
-    bool read(fdb::object& selector, std::vector<fdb::object>& result) const;
+    void read(fdb::object& selector, std::vector<fdb::object>& result);
 
-    bool update(fdb::object& selector, fdb::object& document);
+    void update(fdb::object& selector, fdb::object& document);
 
-    bool destroy(fdb::object& selector);
+    void destroy(fdb::object& selector);
 
 private:
 

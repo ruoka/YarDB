@@ -106,10 +106,11 @@ public:
     }
 
     template <typename T>
-    void value(const T& val)
+    const T& value(const T& value)
     {
-        m_type = xson::to_type(val);
-        m_value = std::to_string(val);
+        m_type = xson::to_type(value);
+        m_value = std::to_string(value);
+        return value;
     }
 
     object& operator [] (const std::string& name)
@@ -150,6 +151,11 @@ public:
     operator std::chrono::system_clock::time_point () const
     {
         return std::chrono::system_clock::now(); // FIXME
+    }
+
+    object& operator + (const object&)
+    {
+        return *this; // FIXME
     }
 
     bool empty () const

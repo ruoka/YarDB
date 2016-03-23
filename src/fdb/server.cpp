@@ -39,9 +39,9 @@ void fdb::server::handle_create(net::endpointstream& client)
     fdb::create request;
     client >> request;
     if(client) {
-        const bool ack = m_engine.create(request.document);
+        m_engine.create(request.document);
         fdb::reply reply;
-        reply.document = {"ack", ack};
+        reply.document = {"ack", true};
         client << reply << net::flush;
     }
 }
@@ -66,9 +66,9 @@ void fdb::server::handle_update(net::endpointstream& client)
     fdb::update request;
     client >> request;
     if(client) {
-        const bool ack = m_engine.update(request.selector, request.document);
+        m_engine.update(request.selector, request.document);
         fdb::reply reply;
-        reply.document = {"ack", ack};
+        reply.document = {"ack", true};
         client << reply << net::flush;
     }
 }
@@ -79,9 +79,9 @@ void fdb::server::handle_destroy(net::endpointstream& client)
     fdb::destroy request;
     client >> request;
     if(client) {
-        const bool ack = m_engine.destroy(request.selector);
+        m_engine.destroy(request.selector);
         fdb::reply reply;
-        reply.document = {"ack", ack};
+        reply.document = {"ack", true};
         client << reply << net::flush;
     }
 }

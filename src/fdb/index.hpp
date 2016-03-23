@@ -8,120 +8,120 @@ using namespace std::string_literals;
 namespace fdb {
 
 using object = xson::fson::object;
+using sequence_type = std::int64_t;
+using implementation_type = std::map<sequence_type,std::streamoff>;
+using implementation_iterator = implementation_type::iterator;
 
-class range_iterator
+class index_iterator
 {
 public:
 
-    range_iterator(fdb::object* selector, std::map<std::int64_t,std::streamoff>::iterator itr) :
+    index_iterator(object& selector) :
+        m_selector{selector},
+        m_current{}
+    {}
+
+    index_iterator(object& selector, std::map<std::int64_t,std::streamoff>::iterator itr) :
         m_selector{selector},
         m_current{itr}
     {}
 
-    range_iterator(const range_iterator& itr) :
+    index_iterator(const index_iterator& itr) :
         m_selector{itr.m_selector},
         m_current{itr.m_current}
     {}
 
-    std::streamoff operator * ()
+    auto operator * ()
     {
         return m_current->second;
     }
 
-    range_iterator& operator ++ () // FIXME
+    index_iterator& operator ++ () // FIXME
     {
         ++m_current;
         return *this;
     }
 
-    bool operator != (const range_iterator& itr) const
+    bool operator != (const index_iterator& itr) const
     {
         return m_current != itr.m_current;
     }
 
 private:
 
-    fdb::object* m_selector;
+    std::reference_wrapper<object> m_selector;
 
-    std::map<std::int64_t,std::streamoff>::iterator m_current;
+    implementation_iterator m_current;
 
-    friend class range;
+    friend class index;
 };
 
-class range
+class index_range
 {
 public:
 
-    range(fdb::object* selector, std::map<std::int64_t,std::streamoff>* sequence) :
-        m_selector{selector},
-        m_sequence{sequence},
-        m_begin{selector, sequence->begin()},
-        m_end{selector, sequence->end()}
-    {
-        if(selector->has("_id"s)) // We have a primary key
-        {
-            m_begin.m_current = m_end.m_current = m_sequence->find((*selector)["_id"s]);
-            if(m_end.m_current != m_sequence->end())
-                ++m_end.m_current;
-        }
-    }
-
-    range(const range& r) :
-        m_selector{r.m_selector},
-        m_sequence{r.m_sequence},
-        m_begin{r.m_begin},
-        m_end{r.m_end}
+    index_range(index_iterator& begin, index_iterator& end) :
+        m_begin{begin},
+        m_end{end}
     {}
 
-    range_iterator begin()
+    index_iterator begin()
     {
         return m_begin;
     }
 
-    range_iterator end()
+    index_iterator end()
     {
         return m_end;
     }
 
-    range_iterator destroy(range_iterator& itr)
-    {
-        return {m_selector, m_sequence->erase(itr.m_current)};
-    }
-
 private:
 
-    fdb::object* m_selector;
-
-    std::map<std::int64_t,std::streamoff>* m_sequence;
-
-    range_iterator m_begin, m_end;
+    index_iterator m_begin, m_end;
 };
 
 class index
 {
 public:
 
-    std::streamoff& operator [] (const std::int64_t& id)
+    auto& operator [] (const sequence_type& id)
     {
-        m_xxx = std::max(id,m_xxx);
-        return m_sequence[id];
+        m_sequence = std::max(m_sequence, id);
+        return m_implementation[id];
     }
 
-    fdb::range range(fdb::object& selector)
+    index_range range(object& selector)
     {
-        return fdb::range{&selector, &m_sequence};
+        index_iterator begin{selector}, end{selector};
+        if(selector.has("_id"s)) // We have a primary key
+        {
+            begin.m_current = end.m_current = m_implementation.find(selector["_id"s]);
+            if(end.m_current != m_implementation.end())
+                ++end.m_current;
+        }
+        else // Full table scan
+        {
+            begin.m_current = m_implementation.begin();
+            end.m_current = m_implementation.end();
+        }
+        return {begin, end};
     }
 
-    std::int64_t sequence()
+    auto sequence()
     {
-        return ++m_xxx;
+        return ++m_sequence;
+    }
+
+    index_iterator erase(index_iterator& itr)
+    {
+        return {itr.m_selector, m_implementation.erase(itr.m_current)};
     }
 
 private:
 
-    std::int64_t m_xxx{0};
+    sequence_type  m_sequence{0};
 
-    std::map<std::int64_t,std::streamoff> m_sequence;
+    implementation_type m_implementation;
 };
 
 } // namespace fdb

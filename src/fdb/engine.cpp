@@ -70,7 +70,7 @@ void fdb::engine::destroy(fdb::object& selector)
 {
     m_storage.clear();
     auto range = m_index.range(selector);
-    for(auto itr = range.begin(); itr != range.end(); itr = range.destroy(itr))
+    for(auto itr = range.begin(); itr != range.end(); itr = m_index.erase(itr))
     {
         const auto position = *itr;
         m_storage.seekp(position, m_storage.beg);

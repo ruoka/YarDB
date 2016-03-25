@@ -25,8 +25,9 @@ public:
         m_objects[name] = obj;
     }
 
-    template <typename T, std::size_t N>
-    object(const std::enable_if_t<std::is_same<T,object>::value,std::string>& name, const std::array<T,N>& array) : object()
+    template <typename T, std::size_t N,
+              typename = std::enable_if_t<std::is_same<T,object>::value>>
+    object(const std::string& name, const std::array<T,N>& array) : object()
     {
         object& parent = m_objects[name];
         parent.type(type::array);
@@ -38,8 +39,9 @@ public:
         }
     }
 
-    template <typename T, typename A>
-    object(const std::enable_if_t<std::is_same<T,object>::value,std::string>& name, const std::vector<T,A>& array) : object()
+    template <typename T, typename A,
+              typename = std::enable_if_t<std::is_same<T,object>::value>>
+    object(const std::string& name, const std::vector<T,A>& array) : object()
     {
         object& parent = m_objects[name];
         parent.type(type::array);
@@ -51,8 +53,9 @@ public:
         }
     }
 
-    template <typename T>
-    object(const std::enable_if_t<is_array<T>::value,std::string>& name, const T& array) : object()
+    template <typename T,
+              typename = std::enable_if_t<is_array<T>::value>>
+    object(const std::string& name, const T& array) : object()
     {
         object& parent = m_objects[name];
         parent.type(type::array);

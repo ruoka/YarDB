@@ -56,7 +56,7 @@ inline auto convert(const time_point<T>& tp) noexcept
     return make_tuple(YY,MM,DD,hh,mm,ss,ff);
 }
 
-inline std::ostream& operator << (std::ostream& os, const months& m) noexcept
+inline auto& operator << (std::ostream& os, const months& m) noexcept
 {
     const char* name[] = {"XXX", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
     os << name[m.count()];
@@ -65,7 +65,8 @@ inline std::ostream& operator << (std::ostream& os, const months& m) noexcept
 
 } // namespace chrono
 
-inline std::string to_string(chrono::system_clock::time_point tp) noexcept
+template<typename T>
+inline auto to_string(const chrono::time_point<T>& tp) noexcept
 {
     using namespace std;
     using namespace std::chrono;
@@ -97,30 +98,30 @@ inline std::string to_string(chrono::system_clock::time_point tp) noexcept
     return os.str();
 }
 
-inline std::string to_string(bool b) noexcept
+inline auto to_string(bool b) noexcept
 {
     std::stringstream ss;
     ss << std::boolalpha << b;
     return ss.str();
 }
 
-inline std::string to_string(const std::nullptr_t&) noexcept
+inline auto to_string(const std::nullptr_t&) noexcept
 {
-    return "null";
+    return "null"s;
 }
 
-inline const std::string& to_string(const string& str) noexcept
+inline auto to_string(const string& str) noexcept
 {
     return str;
 }
 
-inline bool stob(const string& str)
+inline auto stob(const string& str)
 {
     bool b;
     stringstream ss;
     ss << str;
     ss >> boolalpha >> b;
-    if(!ss) throw std::invalid_argument{"No conversion could be performed for '"s + str + "'"s};
+    if(!ss) throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};
     return b;
 }
 

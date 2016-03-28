@@ -19,12 +19,12 @@ public:
 
     void leave();
 
-    const std::string& group() const
+    const auto& group() const
     {
         return m_group;
     }
 
-    const std::string& service() const
+    const auto& service() const
     {
         return m_service;
     }

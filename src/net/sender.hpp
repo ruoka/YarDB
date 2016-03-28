@@ -17,12 +17,12 @@ public:
 
     oendpointstream distribute();
 
-    const std::string& group() const
+    const auto& group() const
     {
         return m_group;
     }
 
-    const std::string& service_or_port() const
+    const auto& service_or_port() const
     {
         return m_service_or_port;
     }

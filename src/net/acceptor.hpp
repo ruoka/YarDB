@@ -23,17 +23,17 @@ public:
 
     endpointstream accept(std::string& peer, std::string& port);
 
-    const std::string& host() const
+    const auto& host() const
     {
         return m_host;
     }
 
-    const std::string& service_or_port() const
+    const auto& service_or_port() const
     {
         return m_service_or_port;
     }
 
-    const std::chrono::milliseconds& timeout() const
+    const auto& timeout() const
     {
         return m_timeout;
     }

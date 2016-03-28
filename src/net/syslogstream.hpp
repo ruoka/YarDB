@@ -5,7 +5,6 @@
 
 namespace net
 {
-
 namespace syslog
 {
     enum class facility : int

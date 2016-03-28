@@ -68,8 +68,7 @@ inline auto& operator << (std::ostream& os, const months& m) noexcept
 template<typename T>
 inline auto to_string(const chrono::time_point<T>& tp) noexcept
 {
-    using namespace std;
-    using namespace std::chrono;
+    using namespace chrono;
     years YY;
     months MM;
     days DD;
@@ -77,23 +76,16 @@ inline auto to_string(const chrono::time_point<T>& tp) noexcept
     minutes mm;
     seconds ss;
     milliseconds ff;
-    std::tie(YY,MM,DD,hh,mm,ss,ff) = convert(tp);
+    tie(YY,MM,DD,hh,mm,ss,ff) = convert(tp);
 
-    std::ostringstream os;
-    os << YY.count()
-       << '-' << std::setw(2) << std::setfill('0')
-       << MM.count()
-       << '-' << std::setw(2) << std::setfill('0')
-       << DD.count()
-       << 'T'
-       << hh.count()
-       << ':' << std::setw(2) << std::setfill('0')
-       << mm.count()
-       << ':' << std::setw(2) << std::setfill('0')
-       << ss.count()
-       << '.' << std::setw(3) << std::setfill('0')
-       << ff.count()
-       << 'Z';
+    ostringstream os;
+    os << setw(4) << setfill('0') << YY.count() << '-'
+       << setw(2) << setfill('0') << MM.count() << '-'
+       << setw(2) << setfill('0') << DD.count() << 'T'
+       << setw(2) << setfill('0') << hh.count() << ':'
+       << setw(2) << setfill('0') << mm.count() << ':'
+       << setw(2) << setfill('0') << ss.count() << '.'
+       << setw(3) << setfill('0') << ff.count() << 'Z';
 
     return os.str();
 }

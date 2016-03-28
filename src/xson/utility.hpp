@@ -4,6 +4,7 @@
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
+#include <vector>
 
 namespace std
 {
@@ -17,7 +18,7 @@ using years = duration<int, ratio_multiply<days::period, ratio<365>>::type>;
 
 using months = duration<int, ratio_divide<years::period, ratio<12>>::type>;
 
-inline constexpr tuple<years,months,days> split(const days& ds) noexcept
+constexpr auto convert(const days& ds) noexcept
 {
     static_assert(std::numeric_limits<unsigned>::digits >= 18,
              "This algorithm has not been ported to a 16 bit unsigned integer");
@@ -35,25 +36,47 @@ inline constexpr tuple<years,months,days> split(const days& ds) noexcept
     return make_tuple(years{y + (m <= 2)}, months{m}, days{d});
 }
 
-} // namespace chrono
-
-inline std::string to_string(chrono::system_clock::time_point tp)
+template<typename T>
+inline auto convert(const time_point<T>& tp) noexcept
 {
-    using namespace chrono;
-
-    const auto dd = duration_cast<days>(tp.time_since_epoch());
+    auto tmp = tp;
+    const auto dd = duration_cast<days>(tmp.time_since_epoch());
     years YY;
     months MM;
     days DD;
-    tie(YY,MM,DD) = split(dd);
-    tp -= dd;
-    const auto hh = duration_cast<hours>(tp.time_since_epoch());
-    tp -= hh;
-    const auto mm = duration_cast<minutes>(tp.time_since_epoch());
-    tp -= mm;
-    const auto ss = duration_cast<seconds>(tp.time_since_epoch());
-    tp -= ss;
+    tie(YY,MM,DD) = convert(dd);
+    tmp -= dd;
+    const auto hh = duration_cast<hours>(tmp.time_since_epoch());
+    tmp -= hh;
+    const auto mm = duration_cast<minutes>(tmp.time_since_epoch());
+    tmp -= mm;
+    const auto ss = duration_cast<seconds>(tmp.time_since_epoch());
+    tmp -= ss;
     const auto ff = duration_cast<milliseconds>(tp.time_since_epoch());
+    return make_tuple(YY,MM,DD,hh,mm,ss,ff);
+}
+
+inline std::ostream& operator << (std::ostream& os, const months& m) noexcept
+{
+    const char* name[] = {"XXX", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    os << name[m.count()];
+    return os;
+}
+
+} // namespace chrono
+
+inline std::string to_string(chrono::system_clock::time_point tp) noexcept
+{
+    using namespace std;
+    using namespace std::chrono;
+    years YY;
+    months MM;
+    days DD;
+    hours hh;
+    minutes mm;
+    seconds ss;
+    milliseconds ff;
+    std::tie(YY,MM,DD,hh,mm,ss,ff) = convert(tp);
 
     std::ostringstream os;
     os << YY.count()
@@ -74,48 +97,19 @@ inline std::string to_string(chrono::system_clock::time_point tp)
     return os.str();
 }
 
-inline std::string to_string2(chrono::system_clock::time_point tp)
-{
-    using namespace chrono;
-
-    const auto dd = duration_cast<days>(tp.time_since_epoch());
-    years YY;
-    months MM;
-    days DD;
-    tie(YY,MM,DD) = split(dd);
-    tp -= dd;
-    const auto hh = duration_cast<hours>(tp.time_since_epoch());
-    tp -= hh;
-    const auto mm = duration_cast<minutes>(tp.time_since_epoch());
-    tp -= mm;
-    const auto ss = duration_cast<seconds>(tp.time_since_epoch());
-
-    std::vector<std::string> month = {"XXX", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-    std::ostringstream os;
-
-    os << month[MM.count()] << ' '
-       << std::setw(2) << std::setfill(' ') << DD.count() << ' '
-       << std::setw(2) << std::setfill('0') << hh.count() << ':'
-       << std::setw(2) << std::setfill('0') << mm.count() << ':'
-       << std::setw(2) << std::setfill('0') << ss.count();
-
-    return os.str();
-}
-
-inline std::string to_string(bool b)
+inline std::string to_string(bool b) noexcept
 {
     std::stringstream ss;
     ss << std::boolalpha << b;
     return ss.str();
 }
 
-inline std::string to_string(std::nullptr_t)
+inline std::string to_string(const std::nullptr_t&) noexcept
 {
     return "null";
 }
 
-inline const std::string& to_string(const string& str)
+inline const std::string& to_string(const string& str) noexcept
 {
     return str;
 }

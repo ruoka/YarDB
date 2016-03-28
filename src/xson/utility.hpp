@@ -74,6 +74,35 @@ inline std::string to_string(chrono::system_clock::time_point tp)
     return os.str();
 }
 
+inline std::string to_string2(chrono::system_clock::time_point tp)
+{
+    using namespace chrono;
+
+    const auto dd = duration_cast<days>(tp.time_since_epoch());
+    years YY;
+    months MM;
+    days DD;
+    tie(YY,MM,DD) = split(dd);
+    tp -= dd;
+    const auto hh = duration_cast<hours>(tp.time_since_epoch());
+    tp -= hh;
+    const auto mm = duration_cast<minutes>(tp.time_since_epoch());
+    tp -= mm;
+    const auto ss = duration_cast<seconds>(tp.time_since_epoch());
+
+    std::vector<std::string> month = {"XXX", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+    std::ostringstream os;
+
+    os << month[MM.count()] << ' '
+       << std::setw(2) << std::setfill(' ') << DD.count() << ' '
+       << std::setw(2) << std::setfill('0') << hh.count() << ':'
+       << std::setw(2) << std::setfill('0') << mm.count() << ':'
+       << std::setw(2) << std::setfill('0') << ss.count();
+
+    return os.str();
+}
+
 inline std::string to_string(bool b)
 {
     std::stringstream ss;

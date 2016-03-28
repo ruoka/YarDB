@@ -38,99 +38,23 @@ public:
     syslog() :
         m_facility{facility::user},
         m_severity{severity::debug},
-        m_version{'1'},
-        m_hostname{"Kaiuss-MBP.Home"},
-        m_appname{"fi.kaius.syslog"},
-        m_procid{2112},
-        m_msgid{"-"},
-        m_remote{distribute("127.0.0.1","syslog")},
+        m_level{severity::debug},
+        m_host{"Kaiuss-MBP.Home"},
+        m_tag{"syslog"},
+        m_pid{2112},
+        m_remote{distribute("localhost","syslog")},
         m_local{std::clog},
         m_empty{true}
     {}
 
-    auto& set_severity(severity s)
+    void set_severity(severity s)
     {
         m_severity = s;
-        return *this;
     }
 
-    auto& header()
+    void set_level(severity s)
     {
-// syslog
-        m_local << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
-                 << m_version                                            // VERSION
-                 << ' '                                                  // SP
-                 << std::to_string(std::chrono::system_clock::now())     // TIMESTAMP
-                 << ' '                                                  // SP
-                 << m_hostname                                           // HOSTNAME
-                 << ' '                                                  // SP
-                 << m_appname                                            // APP-NAME
-                 << ' '                                                  // SP
-                 << m_procid                                             // PROCID
-                 << ' '                                                  // SP
-                 << '-'                                                  // STRUCTURED-DATA
-                 << ' '                                                  // SP
-                 << m_msgid                                              // MSGID
-                 << ' '                                                  // SP
-                 << "BOM"                                                // BOM
-                 << ' ';                                                 // SP
-
-        m_remote << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
-                 << m_version                                            // VERSION
-                 << ' '                                                  // SP
-                 << std::to_string(std::chrono::system_clock::now())     // TIMESTAMP
-                 << ' '                                                  // SP
-                 << m_hostname                                           // HOSTNAME
-                 << ' '                                                  // SP
-                 << m_appname                                            // APP-NAME
-                 << ' '                                                  // SP
-                 << m_procid                                             // PROCID
-                 << ' '                                                  // SP
-                 << '-'                                                  // STRUCTURED-DATA
-                 << ' '                                                  // SP
-                 << m_msgid                                              // MSGID
-                 << ' '                                                  // SP
-                 << "BOM"                                                // BOM
-                 << ' ';                                                 // SP
-// asl
-/*
-        auto now = std::chrono::system_clock::now();
-        auto duration = now.time_since_epoch();
-        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
-        duration -= seconds;
-        auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(duration);
-
-        m_local <<  "[Time "        << seconds.count() << ']'
-                << " [TimeNanoSec " << nanoseconds.count() << ']'
-                << " [Level "       << (int)m_severity << ']'
-                << " [Host "        << m_hostname << ']'
-                << " [Sender "      << m_appname << ']'
-                << " [PID "         << m_procid << ']'
-                << " [Facility syslog] [UID 501] [GID 20] [ReadGID 80]"
-                << " [Message ";
-
-        m_remote <<  "[Time "        << seconds.count() << ']'
-                 << " [TimeNanoSec " << nanoseconds.count() << ']'
-                 << " [Level "       << (int)m_severity << ']'
-                 << " [Host "        << m_hostname << ']'
-                 << " [Sender "      << m_appname << ']'
-                 << " [PID "         << m_procid << ']'
-                 << " [Facility syslog] [UID 501] [GID 20] [ReadGID 80]"
-                 << " [Message ";
-*/
-        m_empty = false;
-
-        return *this;
-    }
-
-    auto& flush()
-    {
-        //m_local  << ']' << std::flush;
-        //m_remote << ']' << std::flush;
-        m_local  << std::flush;
-        m_remote << std::flush;
-        m_empty = true;
-        return *this;
+        m_severity = s;
     }
 
     auto& operator<< (syslog& (*pf)(syslog&))
@@ -143,27 +67,66 @@ public:
               typename = std::enable_if_t<!std::is_pointer<T>::value>>
     auto& operator<< (const T& t)
     {
-        if(m_empty) header();
-        m_local  << t;
-        m_remote << t;
+        if(m_level >= m_severity)
+        {
+            if(m_empty) header();
+            m_local  << t;
+            m_remote << t;
+        }
+        return *this;
+    }
+
+    auto& flush()
+    {
+        if(m_level >= m_severity)
+        {
+            m_local.flush();
+            m_remote.flush();
+            m_empty = true;
+        }
         return *this;
     }
 
 private:
 
+    void header()
+    {
+        m_local << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
+                 << std::to_string2(std::chrono::system_clock::now())     // TIMESTAMP
+                 << ' '                                                  // SP
+                 << m_host                                           // HOSTNAME
+                 << ' '                                                  // SP
+                 << m_tag                                            // APP-NAME
+                 << '['                                                  //
+                 << m_pid                                             // PID
+                 << ']'                                                  //
+                 << ':'                                                  //
+                 << ' ';                                                 // SP
+        m_remote << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
+                 << std::to_string2(std::chrono::system_clock::now())     // TIMESTAMP
+                 << ' '                                                  // SP
+                 << m_host                                           // HOSTNAME
+                 << ' '                                                  // SP
+                 << m_tag                                            // APP-NAME
+                 << '['                                                  //
+                 << m_pid                                             // PID
+                 << ']'                                                  //
+                 << ':'                                                  //
+                 << ' ';                                                 // SP
+        m_empty = false;
+    }
+
     facility m_facility;
 
     severity m_severity;
 
-    const char m_version;
+    severity m_level;
 
-    const std::string m_hostname;
+    const std::string m_host;
 
-    std::string m_appname;
+    std::string m_tag;
 
-    const int m_procid;
-
-    std::string m_msgid;
+    const int m_pid;
 
     bool m_empty;
 
@@ -174,32 +137,38 @@ private:
 
 auto& error(syslog& sl)
 {
-    return sl.set_severity(syslog::severity::error);
+    sl.set_severity(syslog::severity::error);
+    return sl;
 }
 
 auto& warning(syslog& sl)
 {
-    return sl.set_severity(syslog::severity::warning);
+    sl.set_severity(syslog::severity::warning);
+    return sl;
 }
 
 auto& notice(syslog& sl)
 {
-    return sl.set_severity(syslog::severity::notice);
+    sl.set_severity(syslog::severity::notice);
+    return sl;
 }
 
 auto& info(syslog& sl)
 {
-    return sl.set_severity(syslog::severity::info);
+    sl.set_severity(syslog::severity::info);
+    return sl;
 }
 
 auto& debug(syslog& sl)
 {
-    return sl.set_severity(syslog::severity::debug);
+    sl.set_severity(syslog::severity::debug);
+    return sl;
 }
 
 auto& flush2(syslog& sl)
 {
-    return sl.flush();
+    sl.flush();
+    return sl;
 }
 
 static auto slog = syslog{};

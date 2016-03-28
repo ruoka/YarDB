@@ -42,8 +42,8 @@ public:
         m_hostname{"Kaiuss-MBP.Home"},
         m_appname{"fi.kaius.syslog"},
         m_procid{2112},
-        m_msgid{0},
-        m_remote{distribute("localhost","syslog")},
+        m_msgid{"-"},
+        m_remote{distribute("127.0.0.1","syslog")},
         m_local{std::clog},
         m_empty{true}
     {}
@@ -56,25 +56,44 @@ public:
 
     auto& header()
     {
-/* syslog
-        m_os << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
-             << m_version                                            // VERSION
-             << ' '                                                  // SP
-             << std::to_string(std::chrono::system_clock::now())     // TIMESTAMP
-             << ' '                                                  // SP
-             << m_hostname                                           // HOSTNAME
-             << ' '                                                  // SP
-             << m_appname                                            // APP-NAME
-             << ' '                                                  // SP
-             << m_procid                                             // PROCID
-             << ' '                                                  // SP
-             << '-'                                                  // STRUCTURED-DATA
-             << ' '                                                  // SP
-             << ++m_msgid                                            // MSGID
-             << ' ';                                                 // SP
-*/
-// asl
+// syslog
+        m_local << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
+                 << m_version                                            // VERSION
+                 << ' '                                                  // SP
+                 << std::to_string(std::chrono::system_clock::now())     // TIMESTAMP
+                 << ' '                                                  // SP
+                 << m_hostname                                           // HOSTNAME
+                 << ' '                                                  // SP
+                 << m_appname                                            // APP-NAME
+                 << ' '                                                  // SP
+                 << m_procid                                             // PROCID
+                 << ' '                                                  // SP
+                 << '-'                                                  // STRUCTURED-DATA
+                 << ' '                                                  // SP
+                 << m_msgid                                              // MSGID
+                 << ' '                                                  // SP
+                 << "BOM"                                                // BOM
+                 << ' ';                                                 // SP
 
+        m_remote << '<' << 8 * (int)m_facility + (int)m_severity << '>'  // PRI
+                 << m_version                                            // VERSION
+                 << ' '                                                  // SP
+                 << std::to_string(std::chrono::system_clock::now())     // TIMESTAMP
+                 << ' '                                                  // SP
+                 << m_hostname                                           // HOSTNAME
+                 << ' '                                                  // SP
+                 << m_appname                                            // APP-NAME
+                 << ' '                                                  // SP
+                 << m_procid                                             // PROCID
+                 << ' '                                                  // SP
+                 << '-'                                                  // STRUCTURED-DATA
+                 << ' '                                                  // SP
+                 << m_msgid                                              // MSGID
+                 << ' '                                                  // SP
+                 << "BOM"                                                // BOM
+                 << ' ';                                                 // SP
+// asl
+/*
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
         auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
@@ -98,7 +117,7 @@ public:
                  << " [PID "         << m_procid << ']'
                  << " [Facility syslog] [UID 501] [GID 20] [ReadGID 80]"
                  << " [Message ";
-
+*/
         m_empty = false;
 
         return *this;
@@ -106,8 +125,10 @@ public:
 
     auto& flush()
     {
-        m_local  << ']' << std::flush;
-        m_remote << ']' << std::flush;
+        //m_local  << ']' << std::flush;
+        //m_remote << ']' << std::flush;
+        m_local  << std::flush;
+        m_remote << std::flush;
         m_empty = true;
         return *this;
     }
@@ -142,7 +163,7 @@ private:
 
     const int m_procid;
 
-    int m_msgid;
+    std::string m_msgid;
 
     bool m_empty;
 

@@ -19,13 +19,13 @@ oendpointstream distribute(const std::string& group, const std::string& service_
         net::socket s{address.ai_family, address.ai_socktype, address.ai_protocol};
         if(!s)
             continue;
-
+/*
         auto t2l = ttl;
         auto status = net::setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &t2l, sizeof t2l);
         if(status < 0)
             continue;
-
-        status = net::connect(s, address.ai_addr, address.ai_addrlen);
+*/
+        auto status = net::connect(s, address.ai_addr, address.ai_addrlen);
         if(status < 0)
             continue;
 

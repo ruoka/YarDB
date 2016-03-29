@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <tuple>
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
@@ -41,10 +42,6 @@ inline auto convert(const time_point<T>& tp) noexcept
 {
     auto tmp = tp;
     const auto dd = duration_cast<days>(tmp.time_since_epoch());
-    years YY;
-    months MM;
-    days DD;
-    tie(YY,MM,DD) = convert(dd);
     tmp -= dd;
     const auto hh = duration_cast<hours>(tmp.time_since_epoch());
     tmp -= hh;
@@ -53,7 +50,7 @@ inline auto convert(const time_point<T>& tp) noexcept
     const auto ss = duration_cast<seconds>(tmp.time_since_epoch());
     tmp -= ss;
     const auto ff = duration_cast<milliseconds>(tp.time_since_epoch());
-    return make_tuple(YY,MM,DD,hh,mm,ss,ff);
+    return tuple_cat(convert(dd),make_tuple(hh,mm,ss,ff));
 }
 
 inline auto& operator << (std::ostream& os, const months& m) noexcept

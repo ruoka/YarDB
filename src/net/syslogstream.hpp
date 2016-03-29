@@ -79,14 +79,12 @@ public:
         {
             using namespace std;
             using namespace std::chrono;
-            years YY;
             months MM;
             days DD;
             hours hh;
             minutes mm;
             seconds ss;
-            milliseconds ff;
-            std::tie(YY,MM,DD,hh,mm,ss,ff) = convert(system_clock::now());
+            std::tie(ignore,MM,DD,hh,mm,ss,ignore) = convert(system_clock::now());
             m_parent << '<' << 8 * (int)m_facility + (int)m_severity << '>' // <PRI>
                      << MM << ' '                                           // TIMESTAMP
                      << setw(2) << setfill(' ') << DD.count() << ' '

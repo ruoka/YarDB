@@ -126,7 +126,7 @@ TEST(XsonFsonTest, Date)
     using namespace std::chrono;
     xson::fson::object o1
     {
-        { "Test"s,  system_clock::now()}
+        { "Test"s, system_clock::now()}
     };
 
     std::stringstream ss;
@@ -135,7 +135,9 @@ TEST(XsonFsonTest, Date)
     xson::fson::object o2;
     ss >> o2;
 
-    EXPECT_EQ(o1["Test"s].value(), o2["Test"s].value());
+    std::string expected = o1["Test"s];
+    std::string actual   = o2["Test"s];
+    EXPECT_EQ(expected,actual);
 }
 
 TEST(XsonFsonTest, Null)

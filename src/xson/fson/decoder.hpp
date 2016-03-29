@@ -40,12 +40,12 @@ public:
         b = static_cast<bool>(byte);
     }
 
-    void decode(std::chrono::system_clock::time_point& tp)
+    void decode(std::chrono::milliseconds& us)
     {
         using namespace std::chrono;
         std::uint64_t i64;
         decode(i64);
-        tp = system_clock::time_point{milliseconds{i64}};
+        us = milliseconds{i64};
     }
 
     void decode(object& parent)
@@ -65,7 +65,7 @@ public:
             double d;
             std::string str;
             bool b;
-            std::chrono::system_clock::time_point tp;
+            std::chrono::milliseconds us;
 
             switch(type)
             {
@@ -101,8 +101,8 @@ public:
                 break;
 
                 case type::date:
-                decode(tp);
-                child.value(tp);
+                decode(us);
+                child.value(us);
                 break;
 
                 case type::null:

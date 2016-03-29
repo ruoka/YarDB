@@ -39,11 +39,9 @@ public:
             encode(std::uint8_t{'\x00'});
     }
 
-    void encode(date_type d)
+    void encode(const date_type& d)
     {
-        using namespace std::chrono;
-        const std::int64_t i64 = duration_cast<milliseconds>(d.time_since_epoch()).count();
-        encode(i64);
+        encode(static_cast<std::uint64_t>(d.count()));
     }
 
     void encode(const object& ob)

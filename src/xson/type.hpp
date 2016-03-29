@@ -18,7 +18,7 @@ using array_type = object;                                  // \x04
 //using undefined_type = void;                              // \x06 — Deprecated
 //using objectid_type = objectid;                           // \x07
 using boolean_type = bool;                                  // \x08
-using date_type = std::chrono::system_clock::time_point;    // \x09
+using date_type = std::chrono::milliseconds;                // \x09
 using null_type = std::nullptr_t;                           // \x0A
 //using regular_expression_type = regular_expression;       // \x0B
 //using dbpointer_type = dbpointer;                         // \x0C — Deprecated
@@ -88,6 +88,11 @@ template <> constexpr type to_type(const bool&)
 template <> constexpr type to_type(const std::nullptr_t&)
 {
     return type::null;
+}
+
+template <> constexpr type to_type(const std::chrono::milliseconds&)
+{
+    return type::date;
 }
 
 template <> constexpr type to_type(const std::chrono::system_clock::time_point&)

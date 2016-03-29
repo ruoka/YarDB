@@ -146,10 +146,15 @@ TEST(XsonObjectTest,Date)
 {
     auto now = system_clock::now();
     auto ob = object{"Date"s, now};
+
     TRACE(ob);
     ASSERT_EQ(type::date, ob["Date"s].type());
+
     const string s = ob["Date"s];
     ASSERT_EQ(to_string(now), s);
+
+    const milliseconds tp = ob["Date"s];
+    ASSERT_EQ(duration_cast<milliseconds>(now.time_since_epoch()).count(), tp.count());
 }
 
 TEST(XsonObjectTest,ObjectWithArray)

@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <vector>
+#include <iostream>
 
 namespace std
 {
@@ -49,7 +50,7 @@ inline auto convert(const time_point<T>& tp) noexcept
     tmp -= mm;
     const auto ss = duration_cast<seconds>(tmp.time_since_epoch());
     tmp -= ss;
-    const auto ff = duration_cast<milliseconds>(tp.time_since_epoch());
+    const auto ff = duration_cast<milliseconds>(tmp.time_since_epoch());
     return tuple_cat(convert(dd),make_tuple(hh,mm,ss,ff));
 }
 
@@ -65,6 +66,7 @@ inline auto& operator << (std::ostream& os, const months& m) noexcept
 template<typename T>
 inline auto to_string(const chrono::time_point<T>& tp) noexcept
 {
+    //YYYY-MM-DDThh:mm:ss.fffZ
     using namespace chrono;
     years YY;
     months MM;
@@ -87,21 +89,47 @@ inline auto to_string(const chrono::time_point<T>& tp) noexcept
     return os.str();
 }
 
+inline auto to_string(const chrono::milliseconds& us) noexcept
+{
+    using namespace chrono;
+    return to_string(system_clock::time_point{us});
+}
+
+inline auto stot(const string& str)
+{
+    //YYYY-MM-DDThh:mm:ss.fffZ
+    using namespace chrono;
+    years YY{stoi(str.substr(0,4))};
+    months MM{stoi(str.substr(5,2))};
+    days DD{stoi(str.substr(8,2))};
+    hours hh{stoi(str.substr(11,2))};
+    minutes mm{stoi(str.substr(14,2))};
+    seconds ss{stoi(str.substr(17,2))};
+    milliseconds ff{stoi(str.substr(20,3))};
+
+    clog << str << '\n';
+    clog << stoi(str.substr(0,4))  << ' ';
+    clog << stoi(str.substr(5,2))  << ' ';
+    clog << stoi(str.substr(8,2))  << ' ';
+    clog << stoi(str.substr(11,2)) << ' ';
+    clog << stoi(str.substr(14,2)) << ' ';
+    clog << stoi(str.substr(17,2)) << ' ';
+    clog << stoi(str.substr(20,3)) << '\n';
+
+    ff += ss;
+    ff += mm;
+    ff += hh;
+    ff += DD;
+    ff += MM;
+    ff += YY;
+    return ff;
+}
+
 inline auto to_string(bool b) noexcept
 {
     std::stringstream ss;
     ss << std::boolalpha << b;
     return ss.str();
-}
-
-inline auto to_string(const std::nullptr_t&) noexcept
-{
-    return "null"s;
-}
-
-inline auto to_string(const string& str) noexcept
-{
-    return str;
 }
 
 inline auto stob(const string& str)
@@ -112,6 +140,16 @@ inline auto stob(const string& str)
     ss >> boolalpha >> b;
     if(!ss) throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};
     return b;
+}
+
+inline auto to_string(const std::nullptr_t&) noexcept
+{
+    return "null"s;
+}
+
+inline auto to_string(const string& str) noexcept
+{
+    return str;
 }
 
 template <typename T, int N> struct is_array<std::array<T,N>> : std::true_type {};

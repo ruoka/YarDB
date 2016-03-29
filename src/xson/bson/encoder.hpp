@@ -107,10 +107,8 @@ inline void encoder::encode(boolean_type b)
 template <>
 inline void encoder::encode(date_type d)
 {
-    using namespace std::chrono;
     TRACE("(date)");
-    const int64_type i = duration_cast<milliseconds>(d.time_since_epoch()).count();
-    encode(i);
+    encode(static_cast<std::int64_t>(d.count()));
 }
 
 template <>

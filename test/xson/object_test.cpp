@@ -233,3 +233,39 @@ TEST(XsonObjectTest,Complex)
     const int i2 = ob["Ages"s][4];
     ASSERT_EQ(2, i2);
 }
+
+TEST(XsonObjectTest,Plus)
+{
+    object ob1
+    {
+        { "A"s, 1},
+        { "B"s, 2},
+    };
+    ASSERT_EQ(static_cast<int>(ob1["A"s]), 1);
+    ASSERT_EQ(static_cast<int>(ob1["B"s]), 2);
+
+    object ob2
+    {
+        { "C"s, 3},
+        { "D"s, 4},
+    };
+    ASSERT_EQ(static_cast<int>(ob2["C"s]), 3);
+    ASSERT_EQ(static_cast<int>(ob2["D"s]), 4);
+
+    auto ob3 = ob1 + ob2;
+    ASSERT_EQ(static_cast<int>(ob3["A"s]), 1);
+    ASSERT_EQ(static_cast<int>(ob3["B"s]), 2);
+    ASSERT_EQ(static_cast<int>(ob3["C"s]), 3);
+    ASSERT_EQ(static_cast<int>(ob3["D"s]), 4);
+
+    auto ob4 = ob3 + object{"array", vector<int>{39, 40, 9, 5, 2}};
+    ASSERT_EQ(static_cast<int>(ob4["A"s]), 1);
+    ASSERT_EQ(static_cast<int>(ob4["B"s]), 2);
+    ASSERT_EQ(static_cast<int>(ob4["C"s]), 3);
+    ASSERT_EQ(static_cast<int>(ob4["D"s]), 4);
+    ASSERT_EQ(static_cast<int>(ob4["array"s][0]), 39);
+    ASSERT_EQ(static_cast<int>(ob4["array"s][1]), 40);
+    ASSERT_EQ(static_cast<int>(ob4["array"s][2]),  9);
+    ASSERT_EQ(static_cast<int>(ob4["array"s][3]),  5);
+    ASSERT_EQ(static_cast<int>(ob4["array"s][4]),  2);
+}

@@ -156,9 +156,10 @@ public:
         return std::chrono::system_clock::now(); // FIXME
     }
 
-    object& operator + (const object&)
+    object& operator + (const object& obj)
     {
-        return *this; // FIXME
+        m_objects.insert(obj.cbegin(), obj.cend());
+        return *this;
     }
 
     bool empty () const

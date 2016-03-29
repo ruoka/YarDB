@@ -137,7 +137,8 @@ TEST(XsonFsonTest, Date)
 
     std::string expected = o1["Test"s];
     std::string actual   = o2["Test"s];
-    EXPECT_EQ(expected,actual);
+    //EXPECT_EQ(expected,actual);
+    EXPECT_EQ(o1["Test"s].value(), o2["Test"s].value());
 }
 
 TEST(XsonFsonTest, Null)

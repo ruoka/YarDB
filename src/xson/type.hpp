@@ -122,6 +122,8 @@ template <> struct is_value<bool> : std::true_type {};
 
 template <> struct is_value<std::string> : std::true_type {};
 
+template <> struct is_value<std::chrono::milliseconds> : std::true_type {};
+
 template <> struct is_value<std::chrono::system_clock::time_point> : std::true_type {};
 
 template <> struct is_value<std::nullptr_t> : std::true_type {};

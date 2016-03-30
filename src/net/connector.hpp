@@ -4,8 +4,7 @@
 #include <chrono>
 #include "net/endpointstream.hpp"
 
-namespace net
-{
+namespace net {
 
 const std::chrono::seconds default_connect_timeout{3};
 

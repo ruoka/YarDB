@@ -3,8 +3,7 @@
 #include <string>
 #include "net/endpointstream.hpp"
 
-namespace net
-{
+namespace net {
 
 class receiver
 {

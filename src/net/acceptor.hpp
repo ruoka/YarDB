@@ -6,8 +6,7 @@
 #include "net/endpointstream.hpp"
 #include "net/socket.hpp"
 
-namespace net
-{
+namespace net {
 
 const std::chrono::minutes default_accept_timeout{1};
 

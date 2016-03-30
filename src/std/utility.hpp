@@ -6,7 +6,6 @@
 #include <iomanip>
 #include <stdexcept>
 #include <vector>
-#include <iostream>
 
 namespace std {
 namespace chrono {

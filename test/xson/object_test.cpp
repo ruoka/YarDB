@@ -153,8 +153,9 @@ TEST(XsonObjectTest,Date)
     const string s = ob["Date"s];
     ASSERT_EQ(to_string(now), s);
 
-    const milliseconds tp = ob["Date"s];
-    ASSERT_EQ(duration_cast<milliseconds>(now.time_since_epoch()).count(), tp.count());
+    const system_clock::time_point tp = ob["Date"s];
+    ASSERT_EQ(duration_cast<milliseconds>(now.time_since_epoch()), duration_cast<milliseconds>(tp.time_since_epoch()));
+    ASSERT_EQ(duration_cast<milliseconds>(now.time_since_epoch()).count(), duration_cast<milliseconds>(tp.time_since_epoch()).count());
 }
 
 TEST(XsonObjectTest,ObjectWithArray)

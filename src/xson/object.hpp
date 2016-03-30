@@ -151,11 +151,9 @@ public:
         return std::stob(m_value);
     }
 
-    operator std::chrono::milliseconds () const
+    operator std::chrono::system_clock::time_point () const
     {
-        using namespace std::chrono;
-        return duration_cast<milliseconds>(system_clock::now().time_since_epoch()); // FIXME
-        //return std::stot(m_value);
+        return std::stotp(m_value);
     }
 
     object& operator + (const object& obj)

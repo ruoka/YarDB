@@ -3,8 +3,7 @@
 #include "xson/object.hpp"
 #include "xson/fast/decoder.hpp"
 
-namespace xson {
-namespace fson {
+namespace xson::fson {
 
 class decoder : public fast::decoder
 {
@@ -40,12 +39,12 @@ public:
         b = static_cast<bool>(byte);
     }
 
-    void decode(std::chrono::milliseconds& us)
+    void decode(std::chrono::system_clock::time_point& tp)
     {
         using namespace std::chrono;
         std::uint64_t i64;
         decode(i64);
-        us = milliseconds{i64};
+        tp = system_clock::time_point{milliseconds{i64}};
     }
 
     void decode(object& parent)
@@ -65,7 +64,7 @@ public:
             double d;
             std::string str;
             bool b;
-            std::chrono::milliseconds us;
+            std::chrono::system_clock::time_point tp;
 
             switch(type)
             {
@@ -101,8 +100,8 @@ public:
                 break;
 
                 case type::date:
-                decode(us);
-                child.value(us);
+                decode(tp);
+                child.value(tp);
                 break;
 
                 case type::null:
@@ -116,8 +115,7 @@ public:
 
 };
 
-} // namespace fson
-} // namespace xson
+} // namespace xson::fson
 
 namespace std {
 

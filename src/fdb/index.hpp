@@ -75,6 +75,16 @@ public:
         return m_end;
     }
 
+    auto begin() const
+    {
+        return m_begin;
+    }
+
+    auto end() const
+    {
+        return m_end;
+    }
+
 private:
 
     index_iterator m_begin, m_end;
@@ -97,7 +107,8 @@ public:
 
     index_range range(object& selector)
     {
-        index_iterator begin{selector}, end{selector};
+        auto begin = index_iterator{selector};
+        auto end = index_iterator{selector};
         if(selector.has("_id"s)) // We have a primary key
         {
             begin.m_current = end.m_current = m_implementation.find(selector["_id"s]);

@@ -17,7 +17,7 @@ struct header
 
 inline std::istream& operator >> (std::istream& is, header& hdr)
 {
-    decoder d{is};
+    auto d = decoder{is};
     d.decode(hdr.operaion);
     d.decode(hdr.collection);
     return is;
@@ -25,7 +25,7 @@ inline std::istream& operator >> (std::istream& is, header& hdr)
 
 inline std::ostream& operator << (std::ostream& os, const header& hdr)
 {
-    encoder e{os};
+    auto e = encoder{os};
     e.encode(hdr.operaion);
     e.encode(hdr.collection);
     return os;
@@ -41,14 +41,14 @@ struct create
 
 inline std::istream& operator >> (std::istream& is, create& msg)
 {
-    decoder d{is};
+    auto d = decoder{is};
     d.decode(msg.document);
     return is;
 }
 
 inline std::ostream& operator << (std::ostream& os, const create& msg)
 {
-    encoder e{os};
+    auto e = encoder{os};
     e.encode(msg.hdr.operaion);
     e.encode(msg.hdr.collection);
     e.encode(msg.document);
@@ -65,14 +65,14 @@ struct read
 
 inline std::istream& operator >> (std::istream& is, read& msg)
 {
-    decoder d{is};
+    auto d = decoder{is};
     d.decode(msg.selector);
     return is;
 }
 
 inline std::ostream& operator << (std::ostream& os, const read& msg)
 {
-    encoder e{os};
+    auto e = encoder{os};
     e.encode(msg.hdr.operaion);
     e.encode(msg.hdr.collection);
     e.encode(msg.selector);
@@ -90,7 +90,7 @@ struct update
 
 inline std::istream& operator >> (std::istream& is, update& msg)
 {
-    decoder d{is};
+    auto d = decoder{is};
     d.decode(msg.selector);
     d.decode(msg.selector);
     return is;
@@ -106,7 +106,7 @@ struct destroy
 
 inline std::istream& operator >> (std::istream& is, destroy& msg)
 {
-    decoder d{is};
+    auto d = decoder{is};
     d.decode(msg.selector);
     return is;
 }
@@ -121,14 +121,14 @@ struct reply
 
 inline std::istream& operator >> (std::istream& is, reply& msg)
 {
-    decoder d{is};
+    auto d = decoder{is};
     d.decode(msg.document);
     return is;
 }
 
 inline std::ostream& operator << (std::ostream& os, const reply& msg)
 {
-    encoder e{os};
+    auto e = encoder{os};
     e.encode(msg.hdr.operaion);
     e.encode(msg.hdr.collection);
     e.encode(msg.document);

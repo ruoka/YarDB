@@ -10,7 +10,7 @@ void fdb::server::start()
     auto client = m_acceptor.accept();
     while(client)
     {
-        fdb::header header;
+        auto header = fdb::header{};
         client >> header;
         m_engine.collection(header.collection);
         switch (header.operaion) {
@@ -36,11 +36,11 @@ void fdb::server::start()
 void fdb::server::handle_create(net::endpointstream& client)
 {
     std::clog << "fdb::server::handle_create" << std::endl;
-    fdb::create request;
+    auto request = fdb::create{};
     client >> request;
     if(client) {
+        auto reply = fdb::reply{};
         m_engine.create(request.document);
-        fdb::reply reply;
         reply.document = {"ack", true};
         client << reply << net::flush;
     }
@@ -49,12 +49,12 @@ void fdb::server::handle_create(net::endpointstream& client)
 void fdb::server::handle_read(net::endpointstream& client)
 {
     std::clog << "fdb::server::handle_read" << std::endl;
-    fdb::read request;
+    auto request = fdb::read{};
     client >> request;
     if(client) {
-        std::vector<object> result;
+        auto result = std::vector<object>{};
+        auto reply = fdb::reply{};
         m_engine.read(request.selector, result);
-        fdb::reply reply;
         reply.document = {"result", result};
         client << reply << net::flush;
     }
@@ -63,11 +63,11 @@ void fdb::server::handle_read(net::endpointstream& client)
 void fdb::server::handle_update(net::endpointstream& client)
 {
     std::clog << "fdb::server::handle_update" << std::endl;
-    fdb::update request;
+    auto request = fdb::update{};
     client >> request;
     if(client) {
+        auto reply = fdb::reply{};
         m_engine.update(request.selector, request.document);
-        fdb::reply reply;
         reply.document = {"ack", true};
         client << reply << net::flush;
     }
@@ -76,11 +76,11 @@ void fdb::server::handle_update(net::endpointstream& client)
 void fdb::server::handle_destroy(net::endpointstream& client)
 {
     std::clog << "fdb::server::handle_destroy" << std::endl;
-    fdb::destroy request;
+    auto request = fdb::destroy{};
     client >> request;
     if(client) {
+        auto reply = fdb::reply{};
         m_engine.destroy(request.selector);
-        fdb::reply reply;
         reply.document = {"ack", true};
         client << reply << net::flush;
     }

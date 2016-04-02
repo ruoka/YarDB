@@ -7,17 +7,17 @@
 
 TEST(FdbServerTest, Create)
 {
-    fdb::engine e;
-    fdb::server s{e};
+    auto e = fdb::engine{};
+    auto s = fdb::server{e};
     s.start();
 }
 
 TEST(FdbServerTest, Connect)
 {
-    fdb::header header;
-    fdb::reply reply;
-    fdb::create create;
-    fdb::read read;
+    auto header = fdb::header{};
+    auto reply = fdb::reply{};
+    auto create = fdb::create{};
+    auto read = fdb::read{};
 
     auto server = net::connect("localhost", "50888");
 

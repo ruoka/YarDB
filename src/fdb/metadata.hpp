@@ -3,7 +3,8 @@
 #include <iosfwd>
 #include "xson/fson.hpp"
 
-namespace fdb {
+namespace fdb
+{
 
 struct metadata
 {
@@ -17,7 +18,7 @@ struct metadata
 
 inline std::ostream& operator << (std::ostream& os, const metadata& data)
 {
-    xson::fson::encoder e{os};
+    auto e = xson::fson::encoder{os};
     e.encode(data.valid);
     if(data.valid)
     {
@@ -30,7 +31,7 @@ inline std::ostream& operator << (std::ostream& os, const metadata& data)
 
 inline std::istream& operator >> (std::istream& is, metadata& data)
 {
-    xson::fson::decoder d{is};
+    auto d = xson::fson::decoder{is};
     d.decode(data.valid);
     d.decode(data.collection);
     d.decode(data.index);

@@ -69,10 +69,6 @@ public:
         parent.type(type::array);
     }
 
-    object(const std::string& name, std::initializer_list<object> array) :
-    object{name, std::vector<object>{array}}
-    {}
-
     object(std::initializer_list<object> il) :
     object{}
     {

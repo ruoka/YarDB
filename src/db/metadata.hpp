@@ -3,7 +3,7 @@
 #include <iosfwd>
 #include "xson/fson.hpp"
 
-namespace fdb
+namespace db
 {
 
 struct metadata

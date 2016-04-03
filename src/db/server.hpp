@@ -1,15 +1,15 @@
 #pragma once
 
 #include "net/acceptor.hpp"
-#include "fdb/engine.hpp"
+#include "db/engine.hpp"
 
-namespace fdb {
+namespace db {
 
     class server
     {
     public:
 
-        explicit server(fdb::engine&);
+        explicit server(db::engine& engine, const std::string& service_or_port);
 
         void start();
 
@@ -27,7 +27,7 @@ namespace fdb {
 
         net::acceptor m_acceptor;
 
-        fdb::engine& m_engine;
+        db::engine& m_engine;
     };
 
-} // namespace fdb
+} // namespace db

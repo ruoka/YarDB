@@ -3,7 +3,7 @@
 #include <string>
 #include "xson/fson.hpp"
 
-namespace fdb {
+namespace db::msg {
 
 using object = xson::fson::object;
 using encoder = xson::fson::encoder;
@@ -35,7 +35,7 @@ inline std::ostream& operator << (std::ostream& os, const header& hdr)
 
 struct create
 {
-    header hdr = {header::create, "fdb"};
+    header hdr = {header::create, "db"};
     object document;
 };
 
@@ -59,7 +59,7 @@ inline std::ostream& operator << (std::ostream& os, const create& msg)
 
 struct read
 {
-    header hdr = {header::read, "fdb"};;
+    header hdr = {header::read, "db"};;
     object selector;
 };
 
@@ -83,7 +83,7 @@ inline std::ostream& operator << (std::ostream& os, const read& msg)
 
 struct update
 {
-    header hdr = {header::update, "fdb"};
+    header hdr = {header::update, "db"};
     object selector;
     object document;
 };
@@ -100,7 +100,7 @@ inline std::istream& operator >> (std::istream& is, update& msg)
 
 struct destroy
 {
-    header hdr = {header::destroy, "fdb"};;
+    header hdr = {header::destroy, "db"};;
     object selector;
 };
 
@@ -115,7 +115,7 @@ inline std::istream& operator >> (std::istream& is, destroy& msg)
 
 struct reply
 {
-    header hdr = {header::reply, "fdb"};;
+    header hdr = {header::reply, "db"};;
     object document;
 };
 
@@ -135,4 +135,4 @@ inline std::ostream& operator << (std::ostream& os, const reply& msg)
     return os;
 }
 
-} // namespace fdb
+} // namespace db::msg

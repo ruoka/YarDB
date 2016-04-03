@@ -1,9 +1,9 @@
 #pragma once
 
 #include <fstream>
-#include "fdb/index.hpp"
+#include "db/index.hpp"
 
-namespace fdb {
+namespace db {
 
 using object = xson::fson::object;
 
@@ -18,13 +18,13 @@ public:
         m_collection = col;
     }
 
-    void create(fdb::object& document);
+    void create(db::object& document);
 
-    void read(fdb::object& selector, std::vector<fdb::object>& result);
+    void read(db::object& selector, std::vector<db::object>& result);
 
-    void update(fdb::object& selector, fdb::object& document);
+    void update(db::object& selector, db::object& document);
 
-    void destroy(fdb::object& selector);
+    void destroy(db::object& selector);
 
 private:
 
@@ -32,9 +32,9 @@ private:
 
     std::string m_collection;
 
-    fdb::index m_index;
+    db::index m_index;
 
     mutable std::fstream m_storage;
 };
 
-}
+} // namespace db

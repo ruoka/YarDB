@@ -5,7 +5,7 @@
 
 using namespace std::string_literals;
 
-namespace fdb {
+namespace db {
 
 using object = xson::fson::object;
 using sequence_type = std::int64_t;
@@ -135,4 +135,4 @@ private:
     implementation_type m_implementation;
 };
 
-} // namespace fdb
+} // namespace db

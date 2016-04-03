@@ -4,6 +4,7 @@
 #include "xson/json.hpp"
 #include "db/messages.hpp"
 #include "db/server.hpp"
+#include "db/engine.hpp"
 
 using namespace std;
 using namespace xson;

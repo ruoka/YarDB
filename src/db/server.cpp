@@ -1,4 +1,5 @@
 #include <iostream>
+#include "db/engine.hpp"
 #include "db/messages.hpp"
 #include "db/server.hpp"
 
@@ -53,7 +54,7 @@ void db::server::handle_read(net::endpointstream& client)
     auto request = msg::read{};
     client >> request;
     if(client) {
-        auto result = std::vector<object>{};
+        auto result = std::vector<db::object>{};
         auto reply = msg::reply{};
         m_engine.read(request.selector, result);
         reply.document = {"result", result};

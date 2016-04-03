@@ -1,15 +1,16 @@
 #pragma once
 
 #include "net/acceptor.hpp"
-#include "db/engine.hpp"
 
 namespace db {
+
+    class engine;
 
     class server
     {
     public:
 
-        explicit server(db::engine& engine, const std::string& service_or_port);
+        explicit server(db::engine& e, const std::string& service_or_port);
 
         void start();
 

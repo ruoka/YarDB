@@ -80,10 +80,11 @@ inline auto& operator << (std::ostream& os, const duration<T,R>& d) noexcept
 
 } // namespace chrono
 
-inline auto& to_string(const chrono::months& m)
+static const std::string number2name[] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+constexpr auto& to_string(const chrono::months& m)
 {
-    static const std::string name[] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    return name[m.count()];
+    return number2name[m.count()];
 }
 
 template<typename T>
@@ -121,22 +122,18 @@ inline auto stotp(const string& str)
 
 inline auto to_string(bool b) noexcept
 {
-    auto ss = std::ostringstream{};
-    ss << std::boolalpha << b;
-    return ss.str();
+    if(b) return "true"s;
+    else  return "false"s;
 }
 
 inline auto stob(const string& str) noexcept
 {
-    auto b = bool{};
-    auto ss = std::stringstream{};
-    ss << str;
-    ss >> boolalpha >> b;
-    if(!ss) throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};
-    return b;
+    if(str == "true"s  || str == "1"s) return true;
+    if(str == "false"s || str == "0"s) return false;
+    throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};
 }
 
-inline auto to_string(const std::nullptr_t&) noexcept
+inline auto to_string(std::nullptr_t) noexcept
 {
     return "null"s;
 }

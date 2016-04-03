@@ -5,13 +5,14 @@
 
 namespace db
 {
+using namespace std::string_literals;
 
 struct metadata
 {
     metadata(bool v = false) : valid{v}
     {};
     bool valid              = false;
-    std::string collection  = "fdb";
+    std::string collection  = u8"db"s;
     std::int64_t index      = 0; // FIXME: Use uint64_t!
     std::streamoff position = 0;
 };

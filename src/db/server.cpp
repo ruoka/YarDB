@@ -43,7 +43,7 @@ void db::server::handle_create(net::endpointstream& client)
     if(client) {
         auto reply = msg::reply{};
         m_engine.create(request.document);
-        reply.document = {"ack", true};
+        reply.document = {u8"ack"s, true};
         client << reply << net::flush;
     }
 }
@@ -57,7 +57,7 @@ void db::server::handle_read(net::endpointstream& client)
         auto result = std::vector<db::object>{};
         auto reply = msg::reply{};
         m_engine.read(request.selector, result);
-        reply.document = {"result", result};
+        reply.document = {u8"result"s, result};
         client << reply << net::flush;
     }
 }
@@ -70,7 +70,7 @@ void db::server::handle_update(net::endpointstream& client)
     if(client) {
         auto reply = msg::reply{};
         m_engine.update(request.selector, request.document);
-        reply.document = {"ack", true};
+        reply.document = {u8"ack"s, true};
         client << reply << net::flush;
     }
 }
@@ -83,7 +83,7 @@ void db::server::handle_destroy(net::endpointstream& client)
     if(client) {
         auto reply = msg::reply{};
         m_engine.destroy(request.selector);
-        reply.document = {"ack", true};
+        reply.document = {u8"ack"s, true};
         client << reply << net::flush;
     }
 }

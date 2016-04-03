@@ -5,8 +5,6 @@
 
 namespace db {
 
-using object = xson::fson::object;
-
 class engine
 {
 public:

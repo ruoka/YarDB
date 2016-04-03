@@ -8,7 +8,7 @@ db::engine::engine(const std::string file) : m_storage{}
 {
     m_storage.open(file, std::ios_base::out | std::ios_base::in | std::ios_base::binary);
     if (!m_storage.is_open())
-        throw "Perkele!";
+        throw u8"Perkele!"s;
     rebuild_indexes();
 }
 
@@ -34,10 +34,10 @@ void db::engine::create(db::object& document)
     auto metadata = db::metadata{true};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
-    if(document.has("_id"s))
-        metadata.index = document["_id"s]; // Validate if key already exists
+    if(document.has(u8"_id"s))
+        metadata.index = document[u8"_id"s]; // Validate if key already exists
     else
-        metadata.index = document["_id"s].value(m_index.sequence());
+        metadata.index = document[u8"_id"s].value(m_index.sequence());
     metadata.position = m_storage.tellp();
     m_storage << metadata << document << std::flush;
     m_index[metadata.index] = metadata.position;

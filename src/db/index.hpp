@@ -109,9 +109,9 @@ public:
     {
         auto begin = index_iterator{selector};
         auto end = index_iterator{selector};
-        if(selector.has("_id"s)) // We have a primary key
+        if(selector.has(u8"_id"s)) // We have a primary key
         {
-            begin.m_current = end.m_current = m_implementation.find(selector["_id"s]);
+            begin.m_current = end.m_current = m_implementation.find(selector[u8"_id"s]);
             if(end.m_current != m_implementation.end())
                 ++end.m_current;
         }

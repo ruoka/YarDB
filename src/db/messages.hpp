@@ -5,6 +5,8 @@
 
 namespace db::msg {
 
+using namespace std::string_literals;
+
 using object = xson::fson::object;
 using encoder = xson::fson::encoder;
 using decoder = xson::fson::decoder;
@@ -35,7 +37,7 @@ inline std::ostream& operator << (std::ostream& os, const header& hdr)
 
 struct create
 {
-    header hdr = {header::create, "db"};
+    header hdr = {header::create, u8"db"s};
     object document;
 };
 
@@ -59,7 +61,7 @@ inline std::ostream& operator << (std::ostream& os, const create& msg)
 
 struct read
 {
-    header hdr = {header::read, "db"};;
+    header hdr = {header::read, u8"db"s};;
     object selector;
 };
 
@@ -83,7 +85,7 @@ inline std::ostream& operator << (std::ostream& os, const read& msg)
 
 struct update
 {
-    header hdr = {header::update, "db"};
+    header hdr = {header::update, u8"db"s};
     object selector;
     object document;
 };
@@ -100,7 +102,7 @@ inline std::istream& operator >> (std::istream& is, update& msg)
 
 struct destroy
 {
-    header hdr = {header::destroy, "db"};;
+    header hdr = {header::destroy, u8"db"s};;
     object selector;
 };
 
@@ -115,7 +117,7 @@ inline std::istream& operator >> (std::istream& is, destroy& msg)
 
 struct reply
 {
-    header hdr = {header::reply, "db"};;
+    header hdr = {header::reply, u8"db"s};;
     object document;
 };
 

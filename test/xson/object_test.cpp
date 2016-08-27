@@ -348,3 +348,38 @@ TEST(XsonObjectTest,InitializerList3)
     };
     clog << ob << endl;
 }
+
+TEST(XsonObjectTest,HasObject)
+{
+    auto ob = object
+    {
+        {"_id",  987654321},
+        {"object", {{"A"s,1},{"B"s,2},{"C"s,3},{"D"s,4}}},
+        {"array",  {1, 2, 3, 4, 5}},
+        {"bool", true},
+        {"name", "Hepokatti Maantiella"s}
+    };
+    ASSERT_TRUE(ob.has(object{"_id", 987654321}));
+    ASSERT_FALSE(ob.has(object{"XXXX", 1}));
+    ASSERT_FALSE(ob.has(object{"_id", 1}));
+    ASSERT_TRUE(ob.has(object{}));
+    ASSERT_FALSE(ob.has(object{"bool", false}));
+    ASSERT_TRUE(ob.has(object{"bool", true}));
+    ASSERT_FALSE(ob.has(object{"keitto", "XYZ"s}));
+    ASSERT_TRUE(ob.has(object{"array", {1, 2, 3, 4, 5}}));
+    ASSERT_FALSE(ob.has(object{"array", {1, 2, 3, 4, 6}}));
+    ASSERT_FALSE(ob.has(object{"name", "asd"s}));
+    ASSERT_TRUE(ob.has(object{"object", {{"A"s,1},{"B"s,2},{"C"s,3},{"D"s,4}}}));
+    ASSERT_FALSE(ob.has(object{"object", {{"A"s,1},{"B"s,13},{"C"s,3},{"D"s,4}}}));
+    ASSERT_TRUE(ob.has(object{"name", object{}}));
+}
+
+TEST(XsonObjectTest,HasObject2)
+{
+    auto ob = object
+    {
+        {"_id",  987654321},
+    };
+    ASSERT_TRUE(ob.has(object{"_id", 987654321}));
+    ASSERT_FALSE(ob.has(object{{"_id", 987654321}, {"fail", 1}}));
+}

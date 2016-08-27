@@ -175,6 +175,34 @@ public:
         return m_objects.count(name) > 0;
     }
 
+    bool has(const object& subset) const
+    {
+        if(subset.type() == type::object || subset.type() == type::array)
+        {
+            auto lf = m_objects.cbegin();
+            auto ll = m_objects.cend();
+            auto rf = subset.m_objects.cbegin();
+            auto rl = subset.m_objects.cend();
+            while(lf != ll && rf != rl)
+            {
+                if(lf->first < rf->first)
+                    ++lf;
+                else if(lf->first > rf->first)
+                    return subset.empty();
+                else if(lf->second.has(rf->second)) {
+                    ++lf;
+                    ++rf;
+                }
+                else
+                    return false;
+            }
+
+            return rf == rl;
+        }
+        else
+            return value() == subset.value();
+    }
+
     const_iterator begin() const
     {
         return m_objects.cbegin();

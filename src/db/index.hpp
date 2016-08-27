@@ -9,26 +9,24 @@ namespace db {
 
 using object = xson::fson::object;
 using sequence_type = std::int64_t;
-using implementation_type = std::map<sequence_type,std::streamoff>;
-using implementation_iterator = implementation_type::iterator;
+using index_implementation_type = std::map<sequence_type,std::streamoff>;
 
 class index_iterator
 {
 public:
 
-    index_iterator(object& selector) :
-        m_selector{selector},
-        m_current{}
-    {}
+    using iterator = index_implementation_type::iterator;
 
-    index_iterator(object& selector, implementation_iterator itr) :
+    index_iterator(object& selector, iterator current, iterator end) :
         m_selector{selector},
-        m_current{itr}
+        m_current{current},
+        m_end{end}
     {}
 
     index_iterator(const index_iterator& itr) :
         m_selector{itr.m_selector},
-        m_current{itr.m_current}
+        m_current{itr.m_current},
+        m_end{itr.m_end}
     {}
 
     auto operator * ()
@@ -51,7 +49,9 @@ private:
 
     std::reference_wrapper<object> m_selector;
 
-    implementation_iterator m_current;
+    iterator m_current;
+
+    iterator m_end;
 
     friend class index;
 };
@@ -102,37 +102,35 @@ public:
     auto& operator [] (const sequence_type& id)
     {
         m_sequence = std::max(m_sequence, id);
-        return m_implementation[id];
+        return m_impl[id];
     }
 
     index_range range(object& selector)
     {
-        auto begin = index_iterator{selector};
-        auto end = index_iterator{selector};
         if(selector.has(u8"_id"s)) // We have a primary key
         {
-            begin.m_current = end.m_current = m_implementation.find(selector[u8"_id"s]);
-            if(end.m_current != m_implementation.end())
-                ++end.m_current;
+            auto begin = index_iterator{selector, m_impl.find(selector[u8"_id"s]), m_impl.end()};
+            auto end = index_iterator{selector, m_impl.end(), m_impl.end()};
+            return {begin, end};
         }
-        else // Full table scan
+        else // Fall back to full table scan
         {
-            begin.m_current = m_implementation.begin();
-            end.m_current = m_implementation.end();
+            auto begin = index_iterator{selector, m_impl.begin(), m_impl.end()};
+            auto end = index_iterator{selector, m_impl.end(), m_impl.end()};
+            return {begin, end};
         }
-        return {begin, end};
     }
 
     index_iterator erase(index_iterator& itr)
     {
-        return {itr.m_selector, m_implementation.erase(itr.m_current)};
+        return {itr.m_selector, m_impl.erase(itr.m_current), m_impl.end()};
     }
 
 private:
 
     sequence_type  m_sequence{0};
 
-    implementation_type m_implementation;
+    index_implementation_type m_impl;
 };
 
 } // namespace db

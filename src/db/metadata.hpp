@@ -9,25 +9,29 @@ using namespace std::string_literals;
 
 struct metadata
 {
-    metadata(bool v = true) : valid{v}
+    enum action : char {created = 'C', updated = 'U', deleted = 'D'};
+    metadata(action s = created) : status{s}
     {};
-    bool valid              = true;
+    action status           = created;
     std::string collection  = u8"db"s;
-    std::int64_t index      = 0; // FIXME: Use uint64_t!
+    std::int64_t id         = 0; // FIXME: Use uint64_t!
     std::streamoff position = 0;
     std::streamoff previous = -1;
+    bool valid() const {return status == created;}
 };
 
-static const metadata destroyed{false};
+static const metadata updated{metadata::updated};
+
+static const metadata deleted{metadata::deleted};
 
 inline std::ostream& operator << (std::ostream& os, const metadata& data)
 {
     auto encoder = xson::fson::encoder{os};
-    encoder.encode(data.valid);
-    if(data.valid)
+    encoder.encode(data.status);
+    if(data.valid())
     {
         encoder.encode(data.collection);
-        encoder.encode(data.index);
+        encoder.encode(data.id);
         encoder.encode(data.position);
         encoder.encode(data.previous);
     }
@@ -37,9 +41,9 @@ inline std::ostream& operator << (std::ostream& os, const metadata& data)
 inline std::istream& operator >> (std::istream& is, metadata& data)
 {
     auto decoder = xson::fson::decoder{is};
-    decoder.decode(data.valid);
+    decoder.decode(data.status);
     decoder.decode(data.collection);
-    decoder.decode(data.index);
+    decoder.decode(data.id);
     decoder.decode(data.position);
     decoder.decode(data.previous);
     return is;

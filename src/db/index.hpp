@@ -9,22 +9,24 @@ namespace db {
 
 using object = xson::fson::object;
 using sequence_type = std::int64_t;
-using index_implementation_type = std::map<sequence_type,std::streamoff>;
+using position_type = std::streamoff;
+using primary_index_type = std::map<std::string,position_type>;
+using secondary_index_type = std::map<std::string,std::map<std::string,position_type>>;
 
 class index_iterator
 {
 public:
 
-    using iterator = index_implementation_type::iterator;
+    using iterator = primary_index_type::iterator;
 
-    index_iterator(const object& selector, iterator current, iterator end) :
-        m_selector{selector},
+    index_iterator() = default;
+
+    index_iterator(iterator current, iterator end) :
         m_current{current},
         m_end{end}
     {}
 
     index_iterator(const index_iterator& itr) :
-        m_selector{itr.m_selector},
         m_current{itr.m_current},
         m_end{itr.m_end}
     {}
@@ -47,8 +49,6 @@ public:
     }
 
 private:
-
-    std::reference_wrapper<const object> m_selector;
 
     iterator m_current, m_end;
 
@@ -98,53 +98,85 @@ public:
         return ++m_sequence;
     }
 
-    auto& operator [] (const sequence_type& id)
-    {
-        m_sequence = std::max(m_sequence, id);
-        return m_impl[id];
-    }
-
-    const auto primary_key(const object& selector)
+    const auto primary_key(const object& selector) const
     {
         return selector.has(u8"_id"s);
     }
 
-    const auto seek(const object& selector)
+    const auto secondary_key(const object& selector) const
     {
-        return primary_key(selector); // FIXME Not yet implemented
+        for(auto& key : m_secondary_keys)
+            if(selector.has(key.first))
+                return true;
+        return false;
     }
 
-    const auto scan(const object& selector)
+    const auto seek(const object& selector) const
     {
-        return !primary_key(selector);
+        return primary_key(selector) || secondary_key(selector);
+    }
+
+    const auto scan(const object& selector) const
+    {
+        return !seek(selector);
     }
 
     index_range range(const object& selector)
     {
-        if(primary_key(selector)) // We have a primary key
+        index_iterator begin, end;
+
+        if(primary_key(selector)) // Use the primary key
         {
-            auto begin = index_iterator{selector, m_impl.find(selector[u8"_id"s]), m_impl.end()};
-            auto end = begin;
-            return {begin, ++end};
+            begin = end = index_iterator{m_primary_keys.find(selector[u8"_id"s]), m_primary_keys.end()};
+            ++end;
         }
-        else // Fall back to full table scan / seek
+        else if(secondary_key(selector)) // Use a secondary key
         {
-            auto begin = index_iterator{selector, m_impl.begin(), m_impl.end()};
-            auto end = index_iterator{selector, m_impl.end(), m_impl.end()};
-            return {begin, end};
+            for(auto& key : m_secondary_keys)
+                if(selector.has(key.first))
+                    begin = end = index_iterator{key.second.find(selector[key.first]), key.second.end()};
+            ++end;
         }
+        else // Fllback to full scan
+        {
+            begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
+            end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
+        }
+        return {begin, end};
     }
 
-    index_iterator erase(index_iterator& itr)
+    void create(const std::string& key)
     {
-        return {itr.m_selector, m_impl.erase(itr.m_current), m_impl.end()};
+        m_secondary_keys[key] = primary_index_type{};
+    }
+
+    void insert(sequence_type id, position_type position, const object& document)
+    {
+        m_sequence = std::max(m_sequence, id);
+        m_primary_keys[std::to_string(id)] = position;
+
+        for(auto& key : m_secondary_keys)
+            if(document.has(key.first))
+                key.second.insert(std::pair<std::string, position_type>{document[key.first], position});
+
+    }
+
+    void erase(sequence_type id, position_type position, const object& document)
+    {
+        m_primary_keys.erase(std::to_string(id));
+
+        for(auto& key : m_secondary_keys)
+            if(document.has(key.first))
+                key.second.erase(document[key.first]);
     }
 
 private:
 
     sequence_type  m_sequence{0};
 
-    index_implementation_type m_impl;
+    primary_index_type m_primary_keys;
+
+    secondary_index_type m_secondary_keys;
 };
 
 } // namespace db

@@ -18,11 +18,13 @@ public:
 
     void create(db::object& document);
 
-    void read(const db::object& selector, std::vector<db::object>& result);
+    void read(const db::object& selector, std::vector<db::object>& results);
 
-    void update(const db::object& selector, const db::object& document, bool replace = false);
+    void update(const db::object& selector, const db::object& changes, bool replace = true);
 
     void destroy(const db::object& selector);
+
+    void history(const db::object& selector, std::vector<db::object>& results);
 
 private:
 

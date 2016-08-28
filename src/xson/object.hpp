@@ -23,11 +23,11 @@ public:
               typename = std::enable_if_t<!is_object<T>::value       &&
                                           !is_value_array<T>::value  &&
                                           !is_object_array<T>::value >>
-    object(const std::string& name, const T& value) :
+    object(const std::string& name, const T& val) :
     object{}
     {
         static_assert(is_value<T>::value, "Invalid type!");
-        m_objects[name].value(value);
+        m_objects[name].value(val);
     }
 
     template <typename T>
@@ -93,6 +93,17 @@ public:
     object& operator = (object&& ob)
     {
         m_value = std::move(ob.m_value); m_type = ob.m_type; m_objects = std::move(ob.m_objects);
+        return *this;
+    }
+
+    template <typename T,
+              typename = std::enable_if_t<!is_object<T>::value       &&
+                                          !is_value_array<T>::value  &&
+                                          !is_object_array<T>::value >>
+    object& operator = (const T& val)
+    {
+        static_assert(is_value<T>::value, "Invalid type!");
+        value(val);
         return *this;
     }
 

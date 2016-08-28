@@ -9,34 +9,39 @@ using namespace std::string_literals;
 
 struct metadata
 {
-    metadata(bool v = false) : valid{v}
+    metadata(bool v = true) : valid{v}
     {};
-    bool valid              = false;
+    bool valid              = true;
     std::string collection  = u8"db"s;
     std::int64_t index      = 0; // FIXME: Use uint64_t!
     std::streamoff position = 0;
+    std::streamoff previous = -1;
 };
+
+static const metadata destroyed{false};
 
 inline std::ostream& operator << (std::ostream& os, const metadata& data)
 {
-    auto e = xson::fson::encoder{os};
-    e.encode(data.valid);
+    auto encoder = xson::fson::encoder{os};
+    encoder.encode(data.valid);
     if(data.valid)
     {
-        e.encode(data.collection);
-        e.encode(data.index);
-        e.encode(data.position);
+        encoder.encode(data.collection);
+        encoder.encode(data.index);
+        encoder.encode(data.position);
+        encoder.encode(data.previous);
     }
     return os;
 }
 
 inline std::istream& operator >> (std::istream& is, metadata& data)
 {
-    auto d = xson::fson::decoder{is};
-    d.decode(data.valid);
-    d.decode(data.collection);
-    d.decode(data.index);
-    d.decode(data.position);
+    auto decoder = xson::fson::decoder{is};
+    decoder.decode(data.valid);
+    decoder.decode(data.collection);
+    decoder.decode(data.index);
+    decoder.decode(data.position);
+    decoder.decode(data.previous);
     return is;
 }
 

@@ -78,7 +78,7 @@ TEST_F(DbEngineTest, Update1ByID)
     dump(engine);
     auto document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
     auto selector = object{u8"_id"s, 1};
-    engine.update(selector, document2);
+    engine.update(selector, document2, false);
     dump(engine);
     auto documents = vector<object>{};
     engine.read(selector, documents);
@@ -107,7 +107,7 @@ TEST_F(DbEngineTest, Update2ByValue)
 
     auto document4 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
     auto selector4 = object{u8"A"s, 1};
-    engine.update(selector4, document4);
+    engine.update(selector4, document4, false);
 
     {
         dump(engine);
@@ -216,4 +216,29 @@ TEST_F(DbEngineTest, Destroy2ByValue)
         engine.read(selector3, documents3);
         EXPECT_EQ(1, documents3.size());
     }
+}
+
+TEST_F(DbEngineTest, History)
+{
+    auto engine = db::engine{test_file};
+    auto selector = object{u8"_id"s, 1};
+
+    auto document1 = object{{u8"A"s, 1}};
+    engine.create(document1);
+    dump(engine);
+    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}};
+    engine.update(selector, document2);
+    dump(engine);
+    auto document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    engine.update(selector, document3);
+    dump(engine);
+
+    auto all = object{};
+    auto documents = vector<object>{};
+    engine.read(all, documents);
+    EXPECT_EQ(1, documents.size());
+    auto history = vector<object>{};
+    engine.history(selector, history);
+    EXPECT_EQ(3, history.size());
+    std::clog << xson::json::stringify({"history"s, history}) << std::endl;
 }

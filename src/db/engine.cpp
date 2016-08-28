@@ -69,19 +69,14 @@ void db::engine::update(const db::object& selector, const db::object& changes, b
 {
     m_storage.clear();
 
-    for(const auto position : m_index.range(selector))
-    {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
-        m_storage.seekg(position, m_storage.beg);
-        m_storage >> metadata >> document;
-
-        if(document.has(selector))
+    if(selector.has(u8"_id"s) && replace)
+        for(const auto position : m_index.range(selector))
         {
             m_storage.seekp(position, m_storage.beg);
             m_storage << destroyed;
 
-            metadata.index = document[u8"_id"s];
+            auto metadata = db::metadata{};
+            metadata.index = selector[u8"_id"s];
             m_storage.seekp(0, m_storage.end);
             metadata.position = m_storage.tellp();
             metadata.previous = position;
@@ -89,12 +84,35 @@ void db::engine::update(const db::object& selector, const db::object& changes, b
 
             auto new_document = changes;
             new_document[u8"_id"s] = metadata.index;
-            if(replace)
-                m_storage << metadata << new_document << std::flush;
-            else
-                m_storage << metadata << new_document + document << std::flush;
+            m_storage << metadata << new_document << std::flush;
         }
-    }
+    else
+        for(const auto position : m_index.range(selector))
+        {
+            auto metadata = db::metadata{};
+            auto document = db::object{};
+            m_storage.seekg(position, m_storage.beg);
+            m_storage >> metadata >> document;
+
+            if(document.has(selector))
+            {
+                m_storage.seekp(position, m_storage.beg);
+                m_storage << destroyed;
+
+                metadata.index = document[u8"_id"s];
+                m_storage.seekp(0, m_storage.end);
+                metadata.position = m_storage.tellp();
+                metadata.previous = position;
+                m_index[metadata.index] = metadata.position;
+
+                auto new_document = changes;
+                new_document[u8"_id"s] = metadata.index;
+                if(replace)
+                    m_storage << metadata << new_document << std::flush;
+                else
+                    m_storage << metadata << new_document + document << std::flush;
+            }
+        }
 }
 
 void db::engine::destroy(const db::object& selector)

@@ -128,8 +128,30 @@ TEST_F(DbEngineTest, Replace1ByID)
     auto document3 = object{{u8"A"s, 2}, {u8"B"s, 3}, {u8"C"s, 4}};
     engine.create(document3);
     dump(engine);
-    auto document4 = object{{u8"X"s, 4}, {u8"Y"s, 5}, {u8"Z"s, 6}};
     auto selector4 = object{u8"_id"s, 2};
+    auto document4 = object{{u8"X"s, 4}, {u8"Y"s, 5}, {u8"Z"s, 6}};
+    engine.update(selector4, document4, true);
+    dump(engine);
+    auto selector = object{};
+    auto documents = vector<object>{};
+    engine.read(selector, documents);
+    ASSERT_EQ(3, documents.size());
+    EXPECT_TRUE(documents[1].has(document4));
+    EXPECT_FALSE(documents[1].has(document2));
+}
+
+TEST_F(DbEngineTest, Replace2ByValue)
+{
+    auto engine = db::engine{test_file};
+    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    engine.create(document1);
+    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    engine.create(document2);
+    auto document3 = object{{u8"A"s, 2}, {u8"B"s, 3}, {u8"C"s, 4}};
+    engine.create(document3);
+    dump(engine);
+    auto selector4 = object{u8"A"s, 1};
+    auto document4 = object{{u8"X"s, 4}, {u8"Y"s, 5}, {u8"Z"s, 6}};
     engine.update(selector4, document4, true);
     dump(engine);
     auto selector = object{};

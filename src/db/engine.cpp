@@ -33,14 +33,15 @@ void db::engine::rebuild_indexes()
 void db::engine::create(db::object& document)
 {
     m_storage.clear();
-    m_storage.seekp(0, m_storage.end);
 
     auto metadata = db::metadata{true};
+
     if(document.has(u8"_id"s))
         metadata.index = document[u8"_id"s]; // FIXME Validate if key already exists
     else
         metadata.index = document[u8"_id"s].value(m_index.sequence());
 
+    m_storage.seekp(0, m_storage.end);
     metadata.position = m_storage.tellp();
     m_index[metadata.index] = metadata.position;
     m_storage << metadata << document << std::flush;
@@ -64,17 +65,17 @@ void db::engine::read(const db::object& selector, std::vector<db::object>& resul
 
 void db::engine::update(const db::object& selector, const db::object& changes, bool replace)
 {
-    auto array = std::vector<db::object>{};
-    read(selector, array);
-    for(const auto& document : array)
+    auto documents = std::vector<db::object>{};
+    read(selector, documents);
+    for(const auto& document : documents)
     {
         destroy(document);
-        auto updates = changes;
-        updates[u8"_id"s] = document[u8"_id"s];
+        auto update = changes;
+        update[u8"_id"s] = document[u8"_id"s];
         if(replace)
-            create(updates);
+            create(update);
         else
-            create(updates + document);
+            create(update + document);
     }
 }
 

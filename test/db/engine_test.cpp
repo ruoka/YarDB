@@ -89,6 +89,7 @@ TEST_F(DbEngineTest, Update1ByID)
 TEST_F(DbEngineTest, Update2ByValue)
 {
     auto engine = db::engine{test_file};
+    engine.build_indexes({"A"s, "G"s});
 
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document1);

@@ -10,15 +10,15 @@ db::engine::engine(const std::string file) : m_storage{}
     m_storage.open(file, std::ios_base::out | std::ios_base::in | std::ios_base::binary);
     if (!m_storage.is_open())
         throw std::invalid_argument("Cannot open file "s + file);
-    rebuild_indexes();
 }
 
-void db::engine::rebuild_indexes()
+void db::engine::build_indexes(std::initializer_list<std::string> keys)
 {
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
 
-    m_index.create("A"s);
+    for(auto& key : keys)
+        m_index.create(key);
 
     while(m_storage)
     {

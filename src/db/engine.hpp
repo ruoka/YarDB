@@ -11,10 +11,9 @@ public:
 
     engine(const std::string file = "./fson.db"s);
 
-    void collection(const std::string& col)
-    {
-        m_collection = col;
-    }
+    void collection(const std::string& col) {m_collection = col;}
+
+    void build_indexes(std::initializer_list<std::string> keys = {});
 
     void create(db::object& document);
 
@@ -27,8 +26,6 @@ public:
     void history(const db::object& selector, std::vector<db::object>& results);
 
 private:
-
-    void rebuild_indexes();
 
     std::string m_collection;
 

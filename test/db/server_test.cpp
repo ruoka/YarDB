@@ -8,21 +8,21 @@
 
 using namespace std;
 using namespace xson;
-using namespace db;
 
 TEST(DbServerTest, Create)
 {
-    auto e = engine{};
-    auto s = server{e, "50888"};
-    s.start();
+    auto engine = db::engine{};
+    engine.build_indexes();
+    auto server = db::server{engine, "50888"};
+    server.start();
 }
 
 TEST(DbServerTest, Connect)
 {
-    auto create = msg::create{};
-    auto read  = msg::read{};
-    auto header = msg::header{};
-    auto reply = msg::reply{};
+    auto create = db::msg::create{};
+    auto read  = db::msg::read{};
+    auto header = db::msg::header{};
+    auto reply = db::msg::reply{};
 
     auto server = net::connect("localhost", "50888");
 

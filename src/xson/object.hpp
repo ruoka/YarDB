@@ -124,9 +124,19 @@ public:
         return m_objects[name];
     }
 
+    const object& operator [] (const std::string& name) const
+    {
+        return m_objects.find(name)->second;
+    }
+
     object& operator [] (std::size_t idx)
     {
         return m_objects[std::to_string(idx)];
+    }
+
+    const object& operator [] (std::size_t idx) const
+    {
+        return m_objects.find(std::to_string(idx))->second;
     }
 
     operator std::string () const
@@ -167,7 +177,7 @@ public:
 
     bool empty () const
     {
-        return m_objects.empty();
+        return m_value.empty() && m_objects.empty();
     }
 
     bool has(const std::string& name) const
@@ -177,6 +187,8 @@ public:
 
     bool has(const object& subset) const
     {
+        if(subset.empty())
+            return true;
         if(subset.type() == type::object || subset.type() == type::array)
         {
             auto lf = m_objects.cbegin();
@@ -188,7 +200,7 @@ public:
                 if(lf->first < rf->first)
                     ++lf;
                 else if(lf->first > rf->first)
-                    return subset.empty();
+                    return false;
                 else if(lf->second.has(rf->second)) {
                     ++lf;
                     ++rf;
@@ -196,7 +208,6 @@ public:
                 else
                     return false;
             }
-
             return rf == rl;
         }
         else

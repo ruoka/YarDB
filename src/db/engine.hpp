@@ -18,11 +18,11 @@ public:
 
     void create(db::object& document);
 
-    void read(db::object& selector, std::vector<db::object>& result);
+    void read(const db::object& selector, std::vector<db::object>& result);
 
-    void update(db::object& selector, db::object& document);
+    void update(const db::object& selector, const db::object& document, bool replace = false);
 
-    void destroy(db::object& selector);
+    void destroy(const db::object& selector);
 
 private:
 
@@ -32,7 +32,7 @@ private:
 
     db::index m_index;
 
-    mutable std::fstream m_storage;
+    std::fstream m_storage;
 };
 
 } // namespace db

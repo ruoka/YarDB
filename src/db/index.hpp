@@ -17,7 +17,7 @@ public:
 
     using iterator = index_implementation_type::iterator;
 
-    index_iterator(object& selector, iterator current, iterator end) :
+    index_iterator(const object& selector, iterator current, iterator end) :
         m_selector{selector},
         m_current{current},
         m_end{end}
@@ -34,9 +34,10 @@ public:
         return m_current->second;
     }
 
-    auto& operator ++ () // FIXME
+    auto& operator ++ ()
     {
-        ++m_current;
+        if(m_current != m_end)
+            ++m_current;
         return *this;
     }
 
@@ -47,11 +48,9 @@ public:
 
 private:
 
-    std::reference_wrapper<object> m_selector;
+    std::reference_wrapper<const object> m_selector;
 
-    iterator m_current;
-
-    iterator m_end;
+    iterator m_current, m_end;
 
     friend class index;
 };
@@ -105,15 +104,30 @@ public:
         return m_impl[id];
     }
 
-    index_range range(object& selector)
+    const auto primary_key(const object& selector)
     {
-        if(selector.has(u8"_id"s)) // We have a primary key
+        return selector.has(u8"_id"s);
+    }
+
+    const auto seek(const object& selector)
+    {
+        return primary_key(selector); // FIXME Not yet implemented
+    }
+
+    const auto scan(const object& selector)
+    {
+        return !primary_key(selector);
+    }
+
+    index_range range(const object& selector)
+    {
+        if(primary_key(selector)) // We have a primary key
         {
             auto begin = index_iterator{selector, m_impl.find(selector[u8"_id"s]), m_impl.end()};
-            auto end = index_iterator{selector, m_impl.end(), m_impl.end()};
-            return {begin, end};
+            auto end = begin;
+            return {begin, ++end};
         }
-        else // Fall back to full table scan
+        else // Fall back to full table scan / seek
         {
             auto begin = index_iterator{selector, m_impl.begin(), m_impl.end()};
             auto end = index_iterator{selector, m_impl.end(), m_impl.end()};

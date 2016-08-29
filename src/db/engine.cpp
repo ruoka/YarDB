@@ -39,13 +39,13 @@ void db::engine::rebuild_indexes(std::initializer_list<std::string> keys)
 void db::engine::create(db::object& document)
 {
     m_storage.clear();
+    m_storage.seekp(0, m_storage.end);
 
     auto metadata = db::metadata{};
     if(document.has(u8"_id"s))
         metadata.id = document[u8"_id"s];
     else
         metadata.id = document[u8"_id"s] = ++m_sequence;
-    m_storage.seekp(0, m_storage.end);
     metadata.position = m_storage.tellp();
     m_storage << metadata << document << std::flush;
     m_index.insert(document[u8"_id"s], metadata.position, document);
@@ -79,18 +79,17 @@ void db::engine::update(const db::object& selector, const db::object& changes)
 
         if(document.match(selector))
         {
-            m_storage.seekp(0, m_storage.end);
-            metadata.position = m_storage.tellp();
-            metadata.previous = position;
-
             auto new_document = changes;
             new_document = new_document + document;
 
+            m_storage.seekp(0, m_storage.end);
+            metadata.position = m_storage.tellp();
+            metadata.previous = position;
             m_storage << metadata << new_document << std::flush;
-            m_index.insert(document[u8"_id"s], metadata.position, new_document);
 
             m_storage.seekp(position, m_storage.beg);
             m_storage << updated;
+            m_index.insert(document[u8"_id"s], metadata.position, new_document);
         }
     }
 }
@@ -110,10 +109,10 @@ void db::engine::destroy(const db::object& selector)
         auto document = db::object{};
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
-        m_index.erase(document[u8"_id"s], document);
 
         m_storage.seekp(position, m_storage.beg);
         m_storage << deleted;
+        m_index.erase(document[u8"_id"s], document);
     }
 }
 

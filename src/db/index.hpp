@@ -93,17 +93,14 @@ class index
 {
 public:
 
-    auto sequence()
+    index() = default;
+
+    void add(const std::string& key)
     {
-        return ++m_sequence;
+        m_secondary_keys[key] = primary_index_type{};
     }
 
     const auto primary_key(const object& selector) const
-    {
-        return selector.has(u8"_id"s);
-    }
-
-    const auto secondary_key(const object& selector) const
     {
         for(auto& key : m_secondary_keys)
             if(selector.has(key.first))
@@ -111,26 +108,11 @@ public:
         return false;
     }
 
-    const auto seek(const object& selector) const
-    {
-        return primary_key(selector) || secondary_key(selector);
-    }
-
-    const auto scan(const object& selector) const
-    {
-        return !seek(selector);
-    }
-
     index_range range(const object& selector)
     {
         index_iterator begin, end;
 
-        if(primary_key(selector)) // Use the primary key
-        {
-            begin = end = index_iterator{m_primary_keys.find(selector[u8"_id"s]), m_primary_keys.end()};
-            ++end;
-        }
-        else if(secondary_key(selector)) // Use a secondary key
+        if(primary_key(selector)) // Use primary key
         {
             for(auto& key : m_secondary_keys)
                 if(selector.has(key.first))
@@ -145,25 +127,19 @@ public:
         return {begin, end};
     }
 
-    void create(const std::string& key)
+    void insert(const std::string& key, position_type position, const object& document)
     {
-        m_secondary_keys[key] = primary_index_type{};
-    }
-
-    void insert(sequence_type id, position_type position, const object& document)
-    {
-        m_sequence = std::max(m_sequence, id);
-        m_primary_keys[std::to_string(id)] = position;
+        m_primary_keys[key] = position;
 
         for(auto& key : m_secondary_keys)
             if(document.has(key.first))
-                key.second.insert(std::pair<std::string, position_type>{document[key.first], position});
+                key.second[document[key.first]] = position;
 
     }
 
-    void erase(sequence_type id, position_type position, const object& document)
+    void erase(const std::string& key, const object& document)
     {
-        m_primary_keys.erase(std::to_string(id));
+        m_primary_keys.erase(key);
 
         for(auto& key : m_secondary_keys)
             if(document.has(key.first))
@@ -171,8 +147,6 @@ public:
     }
 
 private:
-
-    sequence_type  m_sequence{0};
 
     primary_index_type m_primary_keys;
 

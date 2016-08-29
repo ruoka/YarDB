@@ -45,7 +45,23 @@ TEST_F(DbEngineTest, Create1)
     auto documents = vector<object>{};
     engine.read(selector, documents);
     ASSERT_EQ(1, documents.size());
-    EXPECT_TRUE(documents[0].has(document));
+    EXPECT_TRUE(documents[0].match(document));
+}
+
+TEST_F(DbEngineTest, Create9)
+{
+    auto engine = db::engine{test_file};
+    for(auto i = 1; i < 10; ++i)
+    {
+        auto document = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+        engine.create(document);
+        dump(engine);
+        auto selector = object{};
+        auto documents = vector<object>{};
+        engine.read(selector, documents);
+        ASSERT_EQ(i, documents.size());
+        EXPECT_TRUE(documents[i-1].match(document));
+    }
 }
 
 TEST_F(DbEngineTest, ReadEmptyCollection)
@@ -78,12 +94,12 @@ TEST_F(DbEngineTest, Update1ByID)
     dump(engine);
     auto document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
     auto selector = object{u8"_id"s, 1};
-    engine.update(selector, document2, false);
+    engine.update(selector, document2);
     dump(engine);
     auto documents = vector<object>{};
     engine.read(selector, documents);
     ASSERT_EQ(1, documents.size());
-    EXPECT_TRUE(documents[0].has(document2));
+    EXPECT_TRUE(documents[0].match(document2));
 }
 
 TEST_F(DbEngineTest, Update2ByValu)
@@ -107,7 +123,7 @@ TEST_F(DbEngineTest, Update2ByValu)
 
     auto selector4 = object{u8"A"s, 1};
     auto document4 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
-    engine.update(selector4, document4, false);
+    engine.update(selector4, document4);
 
     {
         dump(engine);
@@ -115,17 +131,17 @@ TEST_F(DbEngineTest, Update2ByValu)
         auto documents = vector<object>{};
         engine.read(selector3, documents);
         ASSERT_EQ(3, documents.size());
-        EXPECT_TRUE(documents[0].has(document4));
-        EXPECT_FALSE(documents[0].has(document2));
-        EXPECT_TRUE(documents[1].has(document4));
-        EXPECT_FALSE(documents[1].has(document2));
+        EXPECT_TRUE(documents[0].match(document4));
+        EXPECT_FALSE(documents[0].match(document2));
+        EXPECT_TRUE(documents[1].match(document4));
+        EXPECT_FALSE(documents[1].match(document2));
     }
 }
 
 TEST_F(DbEngineTest, Update1ByKey)
 {
     auto engine = db::engine{test_file};
-    engine.build_indexes({"A"s, "G"s});
+    engine.rebuild_indexes({"A"s, "G"s});
 
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document1);
@@ -144,7 +160,7 @@ TEST_F(DbEngineTest, Update1ByKey)
 
     auto selector4 = object{u8"A"s, 1};
     auto document4 = object{{u8"A"s, 1}, {u8"D"s, 5}, {u8"E"s, 6}};
-    engine.update(selector4, document4, false);
+    engine.update(selector4, document4);
 
     {
         dump(engine);
@@ -152,61 +168,13 @@ TEST_F(DbEngineTest, Update1ByKey)
         auto documents = vector<object>{};
         engine.read(selector3, documents);
         ASSERT_EQ(3, documents.size());
-        EXPECT_TRUE(documents[0].has(document4));
-        EXPECT_TRUE(documents[0].has(document1));
-        EXPECT_FALSE(documents[1].has(document4));
-        EXPECT_TRUE(documents[1].has(document2));
-        EXPECT_FALSE(documents[2].has(document4));
-        EXPECT_TRUE(documents[2].has(document3));
+        EXPECT_TRUE(documents[0].match(document4));
+        EXPECT_TRUE(documents[0].match(document1));
+        EXPECT_FALSE(documents[1].match(document4));
+        EXPECT_TRUE(documents[1].match(document2));
+        EXPECT_FALSE(documents[2].match(document4));
+        EXPECT_TRUE(documents[2].match(document3));
     }
-}
-
-TEST_F(DbEngineTest, Replace1ByID)
-{
-    auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
-    engine.create(document1);
-    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
-    engine.create(document2);
-    auto document3 = object{{u8"A"s, 2}, {u8"B"s, 3}, {u8"C"s, 4}};
-    engine.create(document3);
-    dump(engine);
-    auto selector4 = object{u8"_id"s, 2};
-    auto document4 = object{{u8"X"s, 4}, {u8"Y"s, 5}, {u8"Z"s, 6}};
-    engine.update(selector4, document4, true);
-    dump(engine);
-    auto selector = object{};
-    auto documents = vector<object>{};
-    engine.read(selector, documents);
-    ASSERT_EQ(3, documents.size());
-    EXPECT_TRUE(documents[1].has(document4));
-    EXPECT_FALSE(documents[1].has(document2));
-}
-
-TEST_F(DbEngineTest, Replace2ByValue)
-{
-    auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 2}, {u8"B"s, 2}, {u8"C"s, 3}};
-    engine.create(document1);
-    auto document2 = object{{u8"A"s, 2}, {u8"B"s, 2}, {u8"C"s, 3}};
-    engine.create(document2);
-    auto document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}};
-    engine.create(document3);
-    dump(engine);
-    auto selector4 = object{u8"A"s, 2};
-    auto document4 = object{{u8"A"s, 2}, {u8"X"s, 4}, {u8"Y"s, 5}, {u8"Z"s, 6}};
-    engine.update(selector4, document4, true);
-    dump(engine);
-    auto selector = object{};
-    auto documents = vector<object>{};
-    engine.read(selector, documents);
-    ASSERT_EQ(3, documents.size());
-    EXPECT_TRUE(documents[0].has(document4));
-    EXPECT_FALSE(documents[0].has(document1));
-    EXPECT_TRUE(documents[1].has(document4));
-    EXPECT_FALSE(documents[1].has(document2));
-    EXPECT_FALSE(documents[2].has(document4));
-    EXPECT_TRUE(documents[2].has(document3));
 }
 
 TEST_F(DbEngineTest, DestroyEmptyCollection)

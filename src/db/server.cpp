@@ -14,7 +14,6 @@ void db::server::start() // FIXME Support multiple connections!
     {
         auto header = msg::header{};
         client >> header;
-        m_engine.collection(header.collection);
         switch (header.operaion) {
             case msg::header::create:
             handle_create(client);

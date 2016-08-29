@@ -196,7 +196,7 @@ public:
         return m_objects.count(name) > 0;
     }
 
-    bool has(const object& subset) const
+    bool match(const object& subset) const
     {
         if(subset.empty())
             return true;
@@ -212,7 +212,7 @@ public:
                     ++lf;
                 else if(lf->first > rf->first)
                     return false;
-                else if(lf->second.has(rf->second)) {
+                else if(lf->second.match(rf->second)) {
                     ++lf;
                     ++rf;
                 }

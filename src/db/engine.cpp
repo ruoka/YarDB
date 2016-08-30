@@ -76,10 +76,10 @@ void db::engine::update(const db::object& selector, const db::object& changes)
             new_document = new_document + document;
 
             m_index.insert(new_document, m_storage.tellp());
-            m_storage << metadata << new_document << std::flush;
+            m_storage << metadata << new_document;
 
             m_storage.seekp(position, m_storage.beg);
-            m_storage << updated;
+            m_storage << updated << std::flush;
         }
     }
 }
@@ -98,7 +98,7 @@ void db::engine::destroy(const db::object& selector)
     m_storage >> metadata >> document;
     m_index.erase(document);
     m_storage.seekp(position, m_storage.beg);
-    m_storage << deleted;
+    m_storage << deleted << std::flush;
 }
 
 void db::engine::history(const db::object& selector, std::vector<db::object>& results)
@@ -117,6 +117,5 @@ void db::engine::history(const db::object& selector, std::vector<db::object>& re
         m_storage >> metadata >> document;
         results.emplace_back(document);
         position = metadata.previous;
-        std::clog << position << std::endl;
     }
 }

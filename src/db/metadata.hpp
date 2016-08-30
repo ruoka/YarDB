@@ -25,11 +25,8 @@ static const metadata deleted{metadata::deleted};
 
 inline std::ostream& operator << (std::ostream& os, metadata& data)
 {
-    if(data.valid())
-    {
-        data.previous = data.position;
-        data.position = os.tellp();
-    }
+    data.previous = data.position;
+    data.position = os.tellp();
     auto encoder = xson::fson::encoder{os};
     encoder.encode(data.status);
     if(data.valid())

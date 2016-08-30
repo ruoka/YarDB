@@ -25,8 +25,6 @@ public:
 
 private:
 
-    sequence_type  m_sequence;
-
     db::index m_index;
 
     std::fstream m_storage;

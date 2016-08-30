@@ -5,14 +5,14 @@
 
 using namespace std::string_literals;
 
-db::engine::engine(const std::string file) : m_sequence{0}, m_index{}, m_storage{}
+db::engine::engine(const std::string file) : m_index{}, m_storage{}
 {
     m_storage.open(file, std::ios_base::out | std::ios_base::in | std::ios_base::binary);
 
     if (!m_storage.is_open())
         throw std::invalid_argument("Cannot open file "s + file);
 
-    rebuild_indexes({u8"_id"s});
+    rebuild_indexes();
 }
 
 void db::engine::rebuild_indexes(std::initializer_list<std::string> keys)
@@ -29,10 +29,7 @@ void db::engine::rebuild_indexes(std::initializer_list<std::string> keys)
         auto document = db::object{};
         m_storage >> metadata >> document;
         if(m_storage && metadata.valid())
-        {
-            m_index.insert(document[u8"_id"s], metadata.position, document);
-            m_sequence = std::max(m_sequence, metadata.id);
-        }
+            m_index.insert(document, metadata.position);
     }
 }
 
@@ -40,15 +37,9 @@ void db::engine::create(db::object& document)
 {
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
-
+    m_index.insert(document, m_storage.tellp());
     auto metadata = db::metadata{};
-    if(document.has(u8"_id"s))
-        metadata.id = document[u8"_id"s];
-    else
-        metadata.id = document[u8"_id"s] = ++m_sequence;
-    metadata.position = m_storage.tellp();
     m_storage << metadata << document << std::flush;
-    m_index.insert(document[u8"_id"s], metadata.position, document);
 }
 
 void db::engine::read(const db::object& selector, std::vector<db::object>& results)
@@ -79,17 +70,16 @@ void db::engine::update(const db::object& selector, const db::object& changes)
 
         if(document.match(selector))
         {
+            m_storage.seekp(0, m_storage.end);
+
             auto new_document = changes;
             new_document = new_document + document;
 
-            m_storage.seekp(0, m_storage.end);
-            metadata.position = m_storage.tellp();
-            metadata.previous = position;
+            m_index.insert(new_document, m_storage.tellp());
             m_storage << metadata << new_document << std::flush;
 
             m_storage.seekp(position, m_storage.beg);
             m_storage << updated;
-            m_index.insert(document[u8"_id"s], metadata.position, new_document);
         }
     }
 }
@@ -101,19 +91,14 @@ void db::engine::destroy(const db::object& selector)
 
     m_storage.clear();
 
-    const auto range = m_index.range(selector);
-    if(range.begin() != range.end())
-    {
-        auto position = *range.begin();
-        auto metadata = db::metadata{};
-        auto document = db::object{};
-        m_storage.seekg(position, m_storage.beg);
-        m_storage >> metadata >> document;
-
-        m_storage.seekp(position, m_storage.beg);
-        m_storage << deleted;
-        m_index.erase(document[u8"_id"s], document);
-    }
+    auto position = m_index.position(selector);
+    auto metadata = db::metadata{};
+    auto document = db::object{};
+    m_storage.seekg(position, m_storage.beg);
+    m_storage >> metadata >> document;
+    m_index.erase(document);
+    m_storage.seekp(position, m_storage.beg);
+    m_storage << deleted;
 }
 
 void db::engine::history(const db::object& selector, std::vector<db::object>& results)
@@ -123,18 +108,15 @@ void db::engine::history(const db::object& selector, std::vector<db::object>& re
 
     m_storage.clear();
 
-    const auto range = m_index.range(selector);
-    if(range.begin() != range.end())
+    auto position = m_index.position(selector);
+    while(position >= 0)
     {
-        auto position = *range.begin();
-        while(position >= 0)
-        {
-            auto metadata = db::metadata{};
-            auto document = db::object{};
-            m_storage.seekg(position, m_storage.beg);
-            m_storage >> metadata >> document;
-            results.emplace_back(document);
-            position = metadata.previous;
-        }
+        auto metadata = db::metadata{};
+        auto document = db::object{};
+        m_storage.seekg(position, m_storage.beg);
+        m_storage >> metadata >> document;
+        results.emplace_back(document);
+        position = metadata.previous;
+        std::clog << position << std::endl;
     }
 }

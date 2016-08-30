@@ -17,11 +17,11 @@ db::engine::engine(const std::string file) : m_index{}, m_storage{}
 
 void db::engine::rebuild_indexes(std::initializer_list<std::string> keys)
 {
-    m_storage.clear();
-    m_storage.seekg(0, m_storage.beg);
-
     for(auto& key : keys)
         m_index.add(key);
+
+    m_storage.clear();
+    m_storage.seekg(0, m_storage.beg);
 
     while(m_storage)
     {

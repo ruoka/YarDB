@@ -141,7 +141,6 @@ TEST_F(DbEngineTest, Update2ByValu)
 TEST_F(DbEngineTest, Update1ByKey)
 {
     auto engine = db::engine{test_file};
-    engine.rebuild_indexes({"A"s, "G"s});
 
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document1);
@@ -181,7 +180,7 @@ TEST_F(DbEngineTest, DestroyEmptyCollection)
 {
     auto engine = db::engine{test_file};
     auto selector = object{u8"_id"s, 1};
-    engine.destroy(selector);
+    EXPECT_THROW(engine.destroy(selector), std::out_of_range);
     dump(engine);
     auto documents = vector<object>{};
     engine.read(selector, documents);

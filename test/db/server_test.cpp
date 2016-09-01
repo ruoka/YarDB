@@ -12,7 +12,6 @@ using namespace xson;
 TEST(DbServerTest, Create)
 {
     auto engine = db::engine{};
-    engine.rebuild_indexes();
     auto server = db::server{engine, "50888"};
     server.start();
 }

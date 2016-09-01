@@ -12,6 +12,10 @@ struct metadata
     enum action : char {created = 'C', updated = 'U', deleted = 'D'};
     metadata(action s = created) : status{s}
     {};
+    metadata(const std::string& c) : metadata{created}
+    {
+        collection = c;
+    };
     action status           = created;
     std::string collection  = u8"db"s;
     std::streamoff position = -1;

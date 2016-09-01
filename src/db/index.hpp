@@ -100,15 +100,29 @@ public:
         m_secondary_keys[key] = primary_index_type{};
     }
 
-    const auto primary_key(const object& selector) const
+    void add(const std::initializer_list<std::string> keys)
+    {
+        for(auto& key : keys)
+            add(key);
+    }
+
+    auto keys() const
+    {
+        auto result = std::vector<std::string>{};
+        for (const auto& index : m_secondary_keys)
+            result.push_back(index.first);
+        return result;
+    }
+
+    auto primary_key(const object& selector) const
     {
         return selector.has(u8"_id"s);
     }
 
-    const auto secondary_key(const object& selector) const
+    auto secondary_key(const object& selector) const
     {
-        for(auto& key : m_secondary_keys)
-            if(selector.has(key.first))
+        for(auto& index : m_secondary_keys)
+            if(selector.has(index.first))
                 return true;
         return false;
     }
@@ -137,9 +151,9 @@ public:
         return {begin, end};
     }
 
-    auto position(const object& selector)
+    auto position(const object& selector) const
     {
-        return m_primary_keys[selector[u8"_id"s]];
+        return m_primary_keys.at(selector[u8"_id"s]);
     }
 
     void insert(object& document, position_type position)

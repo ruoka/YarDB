@@ -20,7 +20,6 @@ struct metadata
     std::string collection  = u8"db"s;
     std::streamoff position = -1;
     std::streamoff previous = -1;
-    bool valid() const {return status == created;}
 };
 
 static const metadata updated{metadata::updated};
@@ -33,7 +32,7 @@ inline std::ostream& operator << (std::ostream& os, metadata& data)
     data.position = os.tellp();
     auto encoder = xson::fson::encoder{os};
     encoder.encode(data.status);
-    if(data.valid())
+    if(data.status != metadata::deleted || data.status != metadata::updated)
     {
         encoder.encode(data.collection);
         encoder.encode(data.position);
@@ -57,6 +56,13 @@ inline std::istream& operator >> (std::istream& is, metadata& data)
     decoder.decode(data.position);
     decoder.decode(data.previous);
     return is;
+}
+
+auto to_string(metadata::action a)
+{
+    if(a == metadata::created) return "created"s;
+    if(a == metadata::updated) return "updated"s;
+    return "deleted"s;
 }
 
 } // namespace fdb

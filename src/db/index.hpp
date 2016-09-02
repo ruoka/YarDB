@@ -97,10 +97,11 @@ public:
 
     void add(const std::string& key)
     {
-        m_secondary_keys[key] = primary_index_type{};
+        if(m_secondary_keys.count(key) == 0)
+            m_secondary_keys[key] = primary_index_type{};
     }
 
-    void add(const std::initializer_list<std::string> keys)
+    void add(std::vector<std::string> keys)
     {
         for(auto& key : keys)
             add(key);
@@ -156,13 +157,16 @@ public:
         return m_primary_keys.at(selector[u8"_id"s]);
     }
 
-    void insert(object& document, position_type position)
+    void update(object& document)
     {
         if(document.has(u8"_id"s))
-            m_sequence = std::max(m_sequence, static_cast<sequence_type>(document[u8"_id"s]));
+            m_sequence = std::max<sequence_type>(m_sequence, document[u8"_id"s]);
         else
             document[u8"_id"s] = ++m_sequence;
+    }
 
+    void insert(object& document, position_type position)
+    {
         m_primary_keys[document[u8"_id"s]] = position;
 
         for(auto& key : m_secondary_keys)

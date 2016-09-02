@@ -180,6 +180,14 @@ public:
         return std::stotp(m_value);
     }
 
+    operator std::vector<std::string> () const
+    {
+        auto values = std::vector<std::string>{};
+        for(const auto& obj : m_objects)
+            values.push_back(obj.second);
+        return values;
+    }
+
     object& operator + (const object& obj)
     {
         m_objects.insert(obj.cbegin(), obj.cend());

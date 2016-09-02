@@ -13,19 +13,19 @@ public:
 
     void collection(const std::string& collection);
 
-    void create_index(const std::initializer_list<std::string> keys);
+    void create_index(std::vector<std::string> keys);
 
     void reindex();
 
-    void create(db::object& document);
+    bool create(db::object& document);
 
-    void read(const db::object& selector, std::vector<db::object>& documents);
+    bool read(const db::object& selector, std::vector<db::object>& documents);
 
-    void update(const db::object& selector, const db::object& changes);
+    bool update(const db::object& selector, const db::object& updates, bool upsert = false);
 
-    void destroy(const db::object& selector);
+    bool destroy(const db::object& selector);
 
-    void history(const db::object& selector, std::vector<db::object>& updates);
+    bool history(const db::object& selector, std::vector<db::object>& updates);
 
     void dump();
 

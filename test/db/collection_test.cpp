@@ -79,24 +79,33 @@ TEST_F(DbEngineTest2, Create2Keys)
 {
     auto engine = db::engine{test_file};
     engine.collection("test");
-    engine.create_index({"A", "B"});
+    try
+    {
+        engine.index({"A", "B"});
+    }
+    catch(...){}
 
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 4}, {u8"C"s, 3}};
     auto document2 = object{{u8"A"s, 2}, {u8"B"s, 5}, {u8"C"s, 3}};
     auto document3 = object{{u8"A"s, 3}, {u8"B"s, 6}, {u8"C"s, 3}};
 
-    engine.create(document1);
-    engine.create(document2);
-    engine.create(document3);
+    engine.update(document1, document1, true);
+    engine.update(document2, document2, true);
+    engine.update(document3, document3, true);
     dump(engine);
 
-    engine.destroy(document2);
+    auto selector = object{{u8"_id"s, 1}};
+    engine.destroy(selector);
     dump(engine);
 
     engine.dump();
 
-    engine.create_index({"D"});
-    engine.reindex();
+    try
+    {
+        engine.index({"D"});
+        engine.reindex();
+    }
+    catch(...){}
 
     engine.dump();
 }

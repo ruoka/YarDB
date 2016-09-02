@@ -6,6 +6,8 @@ namespace db {
 
     class engine;
 
+namespace fast {
+
     class server
     {
     public:
@@ -31,4 +33,5 @@ namespace db {
         db::engine& m_engine;
     };
 
+} // namespace fast
 } // namespace db

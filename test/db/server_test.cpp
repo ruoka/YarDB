@@ -2,9 +2,9 @@
 #include <gtest/gtest.h>
 #include "net/connector.hpp"
 #include "xson/json.hpp"
-#include "db/messages.hpp"
-#include "db/server.hpp"
 #include "db/engine.hpp"
+#include "db/fast/messages.hpp"
+#include "db/fast/server.hpp"
 
 using namespace std;
 using namespace xson;
@@ -12,16 +12,16 @@ using namespace xson;
 TEST(DbServerTest, Create)
 {
     auto engine = db::engine{};
-    auto server = db::server{engine, "50888"};
+    auto server = db::fast::server{engine, "50888"};
     server.start();
 }
 
 TEST(DbServerTest, Connect)
 {
-    auto create = db::msg::create{};
-    auto read  = db::msg::read{};
-    auto header = db::msg::header{};
-    auto reply = db::msg::reply{};
+    auto create = db::fast::create{};
+    auto read  = db::fast::read{};
+    auto header = db::fast::header{};
+    auto reply = db::fast::reply{};
 
     auto server = net::connect("localhost", "50888");
 

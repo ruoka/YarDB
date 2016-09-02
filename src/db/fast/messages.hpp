@@ -3,7 +3,7 @@
 #include <string>
 #include "xson/fson.hpp"
 
-namespace db::msg {
+namespace db::fast {
 
 using namespace std::string_literals;
 
@@ -137,4 +137,4 @@ inline std::ostream& operator << (std::ostream& os, const reply& msg)
     return os;
 }
 
-} // namespace db::msg
+} // namespace db::fast

@@ -1,5 +1,5 @@
 #include <gtest/gtest.h>
-#include "db/messages.hpp"
+#include "db/fast/messages.hpp"
 
 TEST(DbMessagesTest, Header)
 {

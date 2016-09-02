@@ -51,7 +51,7 @@ void db::engine::collection(const std::string& collection)
     m_collection = collection;
 };
 
-void db::engine::create_index(std::vector<std::string> keys)
+void db::engine::index(std::vector<std::string> keys)
 {
     auto& index = m_index[m_collection];
     index.add(keys);

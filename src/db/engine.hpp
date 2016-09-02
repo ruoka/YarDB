@@ -13,7 +13,7 @@ public:
 
     void collection(const std::string& collection);
 
-    void create_index(std::vector<std::string> keys);
+    void index(std::vector<std::string> keys);
 
     void reindex();
 

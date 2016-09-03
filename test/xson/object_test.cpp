@@ -290,7 +290,8 @@ TEST(XsonObjectTest,Plus)
     ASSERT_EQ(static_cast<int>(o2["C"s]), 3);
     ASSERT_EQ(static_cast<int>(o2["D"s]), 4);
 
-    auto ob3 = o1 + o2;
+    o1 += std::move(o2);
+    auto ob3 = std::move(o1);
     ASSERT_EQ(static_cast<int>(ob3["A"s]), 1);
     ASSERT_EQ(static_cast<int>(ob3["B"s]), 2);
     ASSERT_EQ(static_cast<int>(ob3["C"s]), 3);

@@ -85,7 +85,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
         m_storage >> metadata >> document;
         if(document.match(selector))
         {
-            documents += document;
+            documents += std::move(document);
             match = true;
         }
     }
@@ -107,7 +107,7 @@ bool db::engine::update(const db::object& selector, const db::object& updates, b
         if(old_document.match(selector))
         {
             new_document = updates;
-            new_document = new_document + old_document;
+            new_document += std::move(old_document);
 
             m_storage.clear();
             m_storage.seekp(position, m_storage.beg);
@@ -173,7 +173,7 @@ bool db::engine::history(const db::object& selector, db::object& documents)
         m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
-        documents += document;
+        documents += std::move(document);
         position = metadata.previous;
         match = true;
     }

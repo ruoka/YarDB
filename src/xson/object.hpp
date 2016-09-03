@@ -189,7 +189,7 @@ public:
         return values;
     }
 
-    object& operator + (const object& obj)
+    object& operator + (object&& obj)
     {
         if(m_type == type::object)
             m_objects.insert(obj.cbegin(), obj.cend());
@@ -198,9 +198,9 @@ public:
         return *this;
     }
 
-    object& operator += (const object& obj)
+    object& operator += (object&& obj)
     {
-        *this = *this + obj;
+        *this = *this + std::move(obj);
         return *this;
     }
 
@@ -241,13 +241,6 @@ public:
         }
         else
             return value() == subset.value();
-    }
-
-    void clear()
-    {
-        m_type = type::null;
-        m_value.clear();
-        m_objects.clear();
     }
 
     std::size_t size() const

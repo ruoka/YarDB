@@ -5,8 +5,8 @@
 
 namespace db::fast {
 
-server::server(db::engine& e, const std::string& service_or_port) :
-m_acceptor{"localhost", service_or_port}, m_engine{e}
+server::server(db::engine& engine, const std::string& service_or_port) :
+m_engine{engine}, m_acceptor{"localhost", service_or_port}
 {}
 
 void server::start() // FIXME Support multiple connections!
@@ -55,7 +55,7 @@ void server::handle_read(net::endpointstream& client)
     auto request = fast::read{};
     client >> request;
     if(client) {
-        auto result = std::vector<db::fast::object>{};
+        auto result = db::object{};
         auto reply = fast::reply{};
         m_engine.read(request.selector, result);
         reply.document = {u8"result"s, result};

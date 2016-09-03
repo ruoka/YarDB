@@ -24,14 +24,11 @@ protected:
 
     const string test_file = "./engine_test.db";
 
-    void dump(db::engine& e)
+    void dump(db::engine& engine)
     {
-        auto selector = object{};
-        auto documents = vector<object>{};
-        e.read(selector, documents);
-        clog << "documents:\n";
-        for(auto document : documents)
-            clog << json::stringify(document) << endl;
+        auto all = object{}, documents = object{};
+        engine.read(all, documents);
+        clog << "Dump " << engine.collection() << ":\n" << json::stringify(documents) << endl;
     }
 };
 
@@ -39,10 +36,10 @@ TEST_F(DbEngineTest, Create1)
 {
     auto engine = db::engine{test_file};
     auto document = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto selector = object{}, documents = object{};
+    engine.collection("Create1"s);
     engine.create(document);
     dump(engine);
-    auto selector = object{};
-    auto documents = vector<object>{};
     engine.read(selector, documents);
     ASSERT_EQ(1, documents.size());
     EXPECT_TRUE(documents[0].match(document));
@@ -51,13 +48,13 @@ TEST_F(DbEngineTest, Create1)
 TEST_F(DbEngineTest, Create9)
 {
     auto engine = db::engine{test_file};
+    engine.collection("Create9"s);
     for(auto i = 1; i < 10; ++i)
     {
         auto document = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+        auto selector = object{}, documents = object{};
         engine.create(document);
         dump(engine);
-        auto selector = object{};
-        auto documents = vector<object>{};
         engine.read(selector, documents);
         ASSERT_EQ(i, documents.size());
         EXPECT_TRUE(documents[i-1].match(document));
@@ -67,8 +64,8 @@ TEST_F(DbEngineTest, Create9)
 TEST_F(DbEngineTest, ReadEmptyCollection)
 {
     auto engine = db::engine{test_file};
-    auto selector = object{};
-    auto documents = vector<object>{};
+    auto selector = object{}, documents = object{};
+    engine.collection("ReadEmptyCollection"s);
     engine.read(selector, documents);
     dump(engine);
     EXPECT_EQ(0, documents.size());
@@ -77,112 +74,95 @@ TEST_F(DbEngineTest, ReadEmptyCollection)
 TEST_F(DbEngineTest, UpdateEmptyCollection)
 {
     auto engine = db::engine{test_file};
-    auto selector = object{};
-    auto document = object{};
+    auto selector = object{}, document = object{}, documents = object{};
+    engine.collection("UpdateEmptyCollection"s);
     engine.update(selector, document);
-    dump(engine);
-    auto documents = vector<object>{};
     engine.read(selector, documents);
+    dump(engine);
     EXPECT_EQ(0, documents.size());
 }
 
 TEST_F(DbEngineTest, Update1ByID)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
+    auto selector = object{u8"_id"s, 1}, documents = object{};
+    engine.collection("Update1ByID"s);
     engine.create(document1);
     dump(engine);
-    auto document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
-    auto selector = object{u8"_id"s, 1};
     engine.update(selector, document2);
     dump(engine);
-    auto documents = vector<object>{};
     engine.read(selector, documents);
     ASSERT_EQ(1, documents.size());
     EXPECT_TRUE(documents[0].match(document2));
 }
 
-TEST_F(DbEngineTest, Update2ByValu)
+TEST_F(DbEngineTest, Update2ByValue)
 {
     auto engine = db::engine{test_file};
-
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}},
+         document4 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
+    auto selector = object{}, documents = object{};
+    engine.collection("Update2ByValue"s);
     engine.create(document1);
-    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document2);
-    auto document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}};
     engine.create(document3);
-
-    {
-        dump(engine);
-        auto selector1 = object{};
-        auto documents1 = vector<object>{};
-        engine.read(selector1, documents1);
-        EXPECT_EQ(3, documents1.size());
-    }
-
-    auto selector4 = object{u8"A"s, 1};
-    auto document4 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
-    engine.update(selector4, document4);
-
-    {
-        dump(engine);
-        auto selector3 = object{};
-        auto documents = vector<object>{};
-        engine.read(selector3, documents);
-        ASSERT_EQ(3, documents.size());
-        EXPECT_TRUE(documents[0].match(document4));
-        EXPECT_FALSE(documents[0].match(document2));
-        EXPECT_TRUE(documents[1].match(document4));
-        EXPECT_FALSE(documents[1].match(document2));
-    }
+    dump(engine);
+    engine.read(selector, documents);
+    EXPECT_EQ(3, documents.size());
+    selector = object{u8"A"s, 1};
+    engine.update(selector, document4);
+    dump(engine);
+    selector = object{};
+    documents = object{};
+    engine.read(selector, documents);
+    ASSERT_EQ(3, documents.size());
+    EXPECT_TRUE(documents[0].match(document4));
+    EXPECT_FALSE(documents[0].match(document2));
+    EXPECT_TRUE(documents[1].match(document4));
+    EXPECT_FALSE(documents[1].match(document2));
 }
 
 TEST_F(DbEngineTest, Update1ByKey)
 {
     auto engine = db::engine{test_file};
-
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document2 = object{{u8"A"s, 2}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}},
+         document4 = object{{u8"A"s, 1}, {u8"D"s, 5}, {u8"E"s, 6}};
+    auto selector = object{}, documents = object{};
+    engine.collection("Update1ByKey"s);
     engine.create(document1);
-    auto document2 = object{{u8"A"s, 2}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document2);
-    auto document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}};
     engine.create(document3);
-
-    {
-        dump(engine);
-        auto selector1 = object{};
-        auto documents1 = vector<object>{};
-        engine.read(selector1, documents1);
-        EXPECT_EQ(3, documents1.size());
-    }
-
-    auto selector4 = object{u8"A"s, 1};
-    auto document4 = object{{u8"A"s, 1}, {u8"D"s, 5}, {u8"E"s, 6}};
-    engine.update(selector4, document4);
-
-    {
-        dump(engine);
-        auto selector3 = object{};
-        auto documents = vector<object>{};
-        engine.read(selector3, documents);
-        ASSERT_EQ(3, documents.size());
-        EXPECT_TRUE(documents[0].match(document4));
-        EXPECT_TRUE(documents[0].match(document1));
-        EXPECT_FALSE(documents[1].match(document4));
-        EXPECT_TRUE(documents[1].match(document2));
-        EXPECT_FALSE(documents[2].match(document4));
-        EXPECT_TRUE(documents[2].match(document3));
-    }
+    dump(engine);
+    engine.read(selector, documents);
+    EXPECT_EQ(3, documents.size());
+    selector = object{u8"A"s, 1};
+    engine.update(selector, document4);
+    dump(engine);
+    selector = object{};
+    documents = object{};
+    engine.read(selector, documents);
+    ASSERT_EQ(3, documents.size());
+    EXPECT_TRUE(documents[0].match(document4));
+    EXPECT_TRUE(documents[0].match(document1));
+    EXPECT_FALSE(documents[1].match(document4));
+    EXPECT_TRUE(documents[1].match(document2));
+    EXPECT_FALSE(documents[2].match(document4));
+    EXPECT_TRUE(documents[2].match(document3));
 }
 
 TEST_F(DbEngineTest, DestroyEmptyCollection)
 {
     auto engine = db::engine{test_file};
-    auto selector = object{u8"_id"s, 1};
+    auto selector = object{u8"_id"s, 1}, documents = object{};
+    engine.collection("DestroyEmptyCollection"s);
     EXPECT_THROW(engine.destroy(selector), std::out_of_range);
     dump(engine);
-    auto documents = vector<object>{};
     engine.read(selector, documents);
     EXPECT_EQ(0, documents.size());
 }
@@ -190,91 +170,71 @@ TEST_F(DbEngineTest, DestroyEmptyCollection)
 TEST_F(DbEngineTest, Destroy1ByID)
 {
     auto engine = db::engine{test_file};
-
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto all = object{}, documents = object{};
+    engine.collection("Destroy1ByID"s);
     engine.create(document1);
-    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document2);
-    auto document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document3);
-
-    {
-        dump(engine);
-        auto selector1 = object{};
-        auto documents1 = vector<object>{};
-        engine.read(selector1, documents1);
-        EXPECT_EQ(3, documents1.size());
-    }
-
-    auto selector2 = object{};
-    auto documents = vector<object>{};
-    engine.read(selector2, documents);
-
+    dump(engine);
+    engine.read(all, documents);
+    EXPECT_EQ(3, documents.size());
     long long id = documents[1][u8"_id"s];
-    selector2 = {u8"_id"s, id};
-    engine.destroy(selector2);
-
-    {
-        dump(engine);
-        auto selector3 = object{};
-        auto documents3 = vector<object>{};
-        engine.read(selector3, documents3);
-        EXPECT_EQ(2, documents3.size());
-    }
+    auto selector = object{u8"_id"s, id};
+    engine.destroy(selector);
+    dump(engine);
+    documents = object{};
+    engine.read(all, documents);
+    EXPECT_EQ(2, documents.size());
 }
 
 TEST_F(DbEngineTest, Destroy2ByValue)
 {
     auto engine = db::engine{test_file};
-
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         document3 = object{{u8"A"s, 2}, {u8"B"s, 3}, {u8"C"s, 4}};
+    auto selector = object{}, documents = object{};
+    engine.collection("Destroy2ByValue"s);
     engine.create(document1);
-    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.create(document2);
-    auto document3 = object{{u8"A"s, 2}, {u8"B"s, 3}, {u8"C"s, 4}};
     engine.create(document3);
-
-    {
-        dump(engine);
-        auto selector1 = object{};
-        auto documents1 = vector<object>{};
-        engine.read(selector1, documents1);
-        EXPECT_EQ(3, documents1.size());
-    }
-
-    auto selector2 = object{u8"A"s, 1};
-    EXPECT_THROW(engine.destroy(selector2), std::invalid_argument);
-
-    {
-        dump(engine);
-        auto selector3 = object{};
-        auto documents3 = vector<object>{};
-        engine.read(selector3, documents3);
-        EXPECT_EQ(3, documents3.size());
-    }
+    dump(engine);
+    engine.read(selector, documents);
+    EXPECT_EQ(3, documents.size());
+    selector = object{u8"A"s, 1};
+    EXPECT_THROW(engine.destroy(selector), std::invalid_argument);
+    dump(engine);
+    selector = object{};
+    documents = object{};
+    engine.read(selector, documents);
+    EXPECT_EQ(3, documents.size());
 }
 
 TEST_F(DbEngineTest, History)
 {
     auto engine = db::engine{test_file};
-    auto selector = object{u8"_id"s, 1};
-
-    auto document1 = object{{u8"A"s, 1}};
+    auto document1 = object{{u8"A"s, 1}},
+         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}},
+         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
+    auto selector = object{u8"_id"s, 1}, all = object{};
+    engine.collection("History"s);
     engine.create(document1);
     dump(engine);
-    auto document2 = object{{u8"A"s, 1}, {u8"B"s, 2}};
     engine.update(selector, document2);
     dump(engine);
-    auto document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
     engine.update(selector, document3);
     dump(engine);
 
-    auto all = object{};
-    auto documents = vector<object>{};
+    auto documents = object{};
     engine.read(all, documents);
     EXPECT_EQ(1, documents.size());
-    auto history = vector<object>{};
+
+    auto history = object{};
     engine.history(selector, history);
     EXPECT_EQ(3, history.size());
-    std::clog << xson::json::stringify({"history"s, history}) << std::endl;
+
+    clog << "Hstory:"s << xson::json::stringify(history) << std::endl;
 }

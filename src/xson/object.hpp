@@ -125,6 +125,7 @@ public:
     template <typename T>
     const T& value(const T& value)
     {
+        static_assert(is_value<T>::value, "Invalid type!");
         m_type = xson::to_type(value);
         m_value = std::to_string(value);
         return value;
@@ -190,7 +191,16 @@ public:
 
     object& operator + (const object& obj)
     {
-        m_objects.insert(obj.cbegin(), obj.cend());
+        if(m_type == type::object)
+            m_objects.insert(obj.cbegin(), obj.cend());
+        else if(m_type == type::array)
+            m_objects[std::to_string(m_objects.size())] = obj;
+        return *this;
+    }
+
+    object& operator += (const object& obj)
+    {
+        *this = *this + obj;
         return *this;
     }
 
@@ -231,6 +241,18 @@ public:
         }
         else
             return value() == subset.value();
+    }
+
+    void clear()
+    {
+        m_type = type::null;
+        m_value.clear();
+        m_objects.clear();
+    }
+
+    std::size_t size() const
+    {
+        return m_objects.size();
     }
 
     const_iterator begin() const

@@ -27,11 +27,9 @@ protected:
     void dump(db::engine& e)
     {
         auto selector = object{};
-        auto documents = vector<object>{};
+        auto documents = object{};
         e.read(selector, documents);
-        clog << "documents:\n";
-        for(auto document : documents)
-            clog << json::stringify(document) << endl;
+        clog << "dump:\n" << json::stringify(documents) << endl;
     }
 };
 
@@ -58,7 +56,7 @@ TEST_F(DbEngineTest2, Create2Collections)
     dump(engine);
 
     auto selector = object{};
-    auto documents = vector<object>{};
+    auto documents = object{};
 
     engine.collection("d1");
     engine.read(selector, documents);

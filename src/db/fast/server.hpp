@@ -12,7 +12,7 @@ namespace fast {
     {
     public:
 
-        explicit server(db::engine& e, const std::string& service_or_port);
+        server(db::engine& engine, const std::string& service_or_port);
 
         void start();
 
@@ -28,9 +28,9 @@ namespace fast {
 
         void handle_error(net::endpointstream& client);
 
-        net::acceptor m_acceptor;
-
         db::engine& m_engine;
+
+        net::acceptor m_acceptor;
     };
 
 } // namespace fast

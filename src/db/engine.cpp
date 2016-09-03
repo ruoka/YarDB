@@ -46,11 +46,6 @@ void db::engine::reindex()
     }
 }
 
-void db::engine::collection(const std::string& collection)
-{
-    m_collection = collection;
-};
-
 void db::engine::index(std::vector<std::string> keys)
 {
     auto& index = m_index[m_collection];
@@ -76,10 +71,11 @@ bool db::engine::create(db::object& document)
     return match;
 }
 
-bool db::engine::read(const db::object& selector, std::vector<db::object>& documents)
+bool db::engine::read(const db::object& selector, db::object& documents)
 {
     auto match = false;
     auto& index = m_index[m_collection];
+    documents.type(xson::type::array);
     for(const auto position : index.range(selector))
     {
         auto metadata = db::metadata{};
@@ -89,7 +85,7 @@ bool db::engine::read(const db::object& selector, std::vector<db::object>& docum
         m_storage >> metadata >> document;
         if(document.match(selector))
         {
-            documents.emplace_back(document);
+            documents += document;
             match = true;
         }
     }
@@ -131,6 +127,16 @@ bool db::engine::update(const db::object& selector, const db::object& updates, b
     return match;
 }
 
+bool db::engine::upsert(const db::object& selector, const db::object& updates)
+{
+    return update(selector, updates, true);
+}
+
+bool db::engine::replace(const db::object& selector, db::object& updates)
+{
+    return destroy(selector) && create(updates);
+}
+
 bool db::engine::destroy(const db::object& selector)
 {
     auto match = false;
@@ -139,7 +145,7 @@ bool db::engine::destroy(const db::object& selector)
     if(!index.primary_key(selector))
         throw std::invalid_argument("Expected primary key got "s + xson::json::stringify(selector, 0));
 
-    auto position = index.position(selector);
+    auto position = index.position(selector); // FIXME If not key not found
     auto metadata = db::metadata{};
     auto document = db::object{};
     m_storage.clear();
@@ -154,10 +160,11 @@ bool db::engine::destroy(const db::object& selector)
     return match;
 }
 
-bool db::engine::history(const db::object& selector, std::vector<db::object>& updates)
+bool db::engine::history(const db::object& selector, db::object& documents)
 {
     auto match = false;
     auto& index = m_index[m_collection];
+    documents.type(xson::type::array);
     for(auto position : index.range(selector))
     while(position >= 0)
     {
@@ -166,7 +173,7 @@ bool db::engine::history(const db::object& selector, std::vector<db::object>& up
         m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
-        updates.emplace_back(document);
+        documents += document;
         position = metadata.previous;
         match = true;
     }

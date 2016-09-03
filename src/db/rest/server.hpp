@@ -74,7 +74,7 @@ private:
 
     string render(const string& method, const string& path, json::object& body)
     {
-        const auto uri = make_tuple(path);
+        const auto uri = parse(path);
         const auto collection = get<0>(uri);
         const auto selector = get<1>(uri);
 
@@ -94,7 +94,7 @@ private:
         return json::stringify(body);
     }
 
-    tuple<string,json::object> make_tuple(const string& path)
+    tuple<string,json::object> parse(const string& path)
     {
         auto ss = stringstream{path};
         auto collection = ""s, selector = ""s;

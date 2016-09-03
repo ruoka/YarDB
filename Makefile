@@ -25,9 +25,9 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BINDIR)/$(TARGET): $(TARGET).o $(OBJECTS)
+$(BINDIR)/$(TARGET): $(OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(TARGET).o $(OBJECTS) -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(TARGET).cpp $(OBJECTS) -o $@
 
 
 

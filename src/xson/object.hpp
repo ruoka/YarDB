@@ -23,11 +23,11 @@ public:
               typename = std::enable_if_t<!is_object<T>::value       &&
                                           !is_value_array<T>::value  &&
                                           !is_object_array<T>::value >>
-    object(const std::string& name, const T& val) :
+    object(const std::string& name, const T& value) :
     object{}
     {
         static_assert(is_value<T>::value, "Invalid type!");
-        m_objects[name].value(val);
+        m_objects[name].value(value);
     }
 
     template <typename T>
@@ -61,9 +61,9 @@ public:
     {
         auto& parent = m_objects[name];
         auto idx = std::size_t{0};
-        for(const auto& ob : array)
+        for(const auto& obj : array)
         {
-            parent.m_objects[std::to_string(idx)] = ob;
+            parent.m_objects[std::to_string(idx)] = obj;
             ++idx;
         }
         parent.type(type::array);
@@ -76,23 +76,23 @@ public:
             m_objects.insert(i.cbegin(), i.cend());
     }
 
-    object(const object& ob) :
-    m_value{ob.m_value}, m_type{ob.m_type}, m_objects{ob.m_objects}
+    object(const object& obj) :
+    m_value{obj.m_value}, m_type{obj.m_type}, m_objects{obj.m_objects}
     {}
 
-    object(object&& ob) :
-    m_value{std::move(ob.m_value)}, m_type{ob.m_type}, m_objects{std::move(ob.m_objects)}
+    object(object&& obj) :
+    m_value{std::move(obj.m_value)}, m_type{obj.m_type}, m_objects{std::move(obj.m_objects)}
     {}
 
-    object& operator = (const object& ob)
+    object& operator = (const object& obj)
     {
-        m_value= ob.m_value; m_type = ob.m_type; m_objects = ob.m_objects;
+        m_value= obj.m_value; m_type = obj.m_type; m_objects = obj.m_objects;
         return *this;
     }
 
-    object& operator = (object&& ob)
+    object& operator = (object&& obj)
     {
-        m_value = std::move(ob.m_value); m_type = ob.m_type; m_objects = std::move(ob.m_objects);
+        m_value = std::move(obj.m_value); m_type = obj.m_type; m_objects = std::move(obj.m_objects);
         return *this;
     }
 
@@ -138,6 +138,8 @@ public:
 
     const object& operator [] (const std::string& name) const
     {
+        if(!m_objects.count(name))
+            throw std::out_of_range("object has no element with name "s + name);
         return m_objects.find(name)->second;
     }
 
@@ -148,7 +150,10 @@ public:
 
     const object& operator [] (std::size_t idx) const
     {
-        return m_objects.find(std::to_string(idx))->second;
+        const auto name = std::to_string(idx);
+        if(!m_objects.count(name))
+            throw std::out_of_range("array has no index "s + name);
+        return m_objects.find(name)->second;
     }
 
     operator std::string () const
@@ -202,6 +207,11 @@ public:
     {
         *this = *this + std::move(obj);
         return *this;
+    }
+
+    bool has_value () const
+    {
+        return !m_value.empty();
     }
 
     bool empty () const

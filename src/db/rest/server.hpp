@@ -82,21 +82,29 @@ private:
 
             if(method == "GET"s || method == "HEAD"s)
             {
+                slog << debug << "Reading " << collection << json::stringify(selector,0) << flush;
                 m_engine.read(selector, body);
+                slog << debug << "Read " << collection << json::stringify(selector,0) << flush;
+            }
+            else if(method == "DELETE")
+            {
+                slog << debug << "Deleting " << collection << json::stringify(selector,0) << flush;
+                m_engine.destroy(selector);
+                slog << debug << "Deleted " << collection << json::stringify(selector,0) << flush;
             }
             else
             {
                 slog << debug << "Reading content" << flush;
                 body = json::parse(connection);
-                slog << debug << "Read content" << flush;
+                slog << debug << "Read content " << json::stringify(body,0) << flush;
+                slog << debug << "Updating " << collection << json::stringify(selector,0) << flush;
                 if(method == "POST"s)
                     m_engine.create(body);
                 else if(method == "PUT"s)
                     m_engine.replace(selector, body);
                 else if(method == "PATCH"s)
                     m_engine.upsert(selector, body);
-                else if(method == "DELETE"s)
-                    m_engine.destroy(selector);
+                slog << debug << "Updated " << collection << json::stringify(selector,0) << flush;
             }
 
             const auto content = json::stringify({"data"s, body});
@@ -125,12 +133,15 @@ private:
     tuple<string,json::object> parse(const string& path)
     {
         auto ss = stringstream{path};
-        auto slash = ""s, collection = ""s, selector = ""s;
+        auto slash = ""s, collection = ""s, id = ""s, query = ""s;
         getline(ss, slash, '/');
         getline(ss, collection, '/');
-        getline(ss, selector);
-//        return std::make_tuple(collection,json::object{u8"_id"s, selector});
-        return std::make_tuple(collection,json::object{});
+        getline(ss, id, '?');
+        getline(ss, query);
+        auto selector = object{};
+        if(!id.empty())
+            selector = {"_id",id};
+        return std::make_tuple(collection,selector);
     }
 
     db::engine& m_engine;

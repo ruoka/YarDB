@@ -67,4 +67,4 @@ dump:
 	@echo $(OBJECTS)
 	@echo $(DEPENDENCIES)
 
--include $(DEPENDENCIES)
+-include $(DEPENDENCIES) $(BINDIR)/$(TARGET).d

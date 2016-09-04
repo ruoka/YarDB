@@ -14,6 +14,7 @@ try
     auto server = db::rest::server{engine};
     slog << notice << "Initialized server" << flush;
     server.start("2112");
+    slog << notice << "Closed server" << flush;
     return 0;
 }
 catch(...)

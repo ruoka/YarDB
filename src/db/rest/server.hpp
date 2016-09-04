@@ -8,8 +8,9 @@
 namespace db::rest {
 
 using namespace std;
-using namespace std::chrono;
 using namespace std::string_literals;
+using namespace std::chrono;
+using namespace std::chrono_literals;
 using namespace xson;
 using namespace net;
 
@@ -33,6 +34,7 @@ public:
             auto connection = endpoint.accept();
             slog << info << "Accepted connection" << flush;
             auto worker = thread{[&](){handle(move(connection));}};
+            this_thread::sleep_for(1s);
             worker.detach();
         }
     }
@@ -44,95 +46,112 @@ private:
         while(connection)
         {
             slog << debug << "Reading HTTP request" << flush;
-            auto method = ""s, path = ""s, protocol = ""s;
-            connection >> method >> path >> protocol >> ws;
-            slog << info << method << ' ' << path << ' ' << protocol << flush;
+            auto method = ""s, uri = ""s, version = ""s;
+            connection >> method >> uri >> version;
+            slog << info << method << ' ' << uri << ' ' << version << flush;
 
-            if(protocol.empty())
-            {
-                slog << debug << "Connection closed" << flush;
+            if(version != "HTTP/1.1")
                 break;
-            }
 
             slog << debug << "Read HTTP request" << flush;
 
             slog << debug << "Reading HTTP headers" << flush;
+
+            connection >> ws;
+
             while(connection && connection.peek() != '\r')
             {
                 auto name = ""s, value = ""s;
-                connection >> name >> ws;
+                getline(connection, name, ':');
+                trim(name);
                 getline(connection, value);
-                slog << info << name << ' ' << value << flush;
+                trim(value);
+                slog << info << name << ": " << value << flush;
             }
+
             slog << debug << "Read HTTP headers" << flush;
 
-            if(path == R"(/)"s || path == R"(/favicon.ico)"s)
+            if(uri == R"(/)"s || uri == R"(/favicon.ico)"s)
             {
-                slog << debug << "Path " << path << " is ignored" << flush;
-                connection << "HTTP/1.1 404 Not Found"s;
+                slog << debug << "URI " << uri << " is ignored" << flush;
+                connection << "HTTP/1.1 204 No Content"                   << crlf
+                           << "Date: " << to_rfc1123(system_clock::now()) << crlf
+                           << "Server: YARESTDB/0.1"                      << crlf
+                           << "Content-Length: 0"                         << crlf
+                           << crlf
+                           << flush;
                 continue;
             }
 
-            const auto uri = parse(path);
-            const auto collection = get<0>(uri);
-            const auto selector = get<1>(uri);
+            const auto tmp = parse(uri);
+            const auto collection = get<0>(tmp);
+            const auto selector = get<1>(tmp);
+            auto found = false;
 
             m_engine.collection(collection);
+
             auto body = json::object{};
 
             if(method == "GET"s || method == "HEAD"s)
             {
-                slog << debug << "Reading " << collection << json::stringify(selector,0) << flush;
-                m_engine.read(selector, body);
-                slog << debug << "Read " << collection << json::stringify(selector,0) << flush;
+                slog << debug << "Reading " << collection << json::stringify(selector,0) << " from DB" << flush;
+                found = m_engine.read(selector, body);
+                slog << debug << "Read "   << collection << json::stringify(selector,0)  << " from DB" << flush;
             }
             else if(method == "DELETE")
             {
-                slog << debug << "Deleting " << collection << json::stringify(selector,0) << flush;
-                m_engine.destroy(selector);
-                slog << debug << "Deleted " << collection << json::stringify(selector,0) << flush;
+                slog << debug << "Deleting " << collection << json::stringify(selector,0) << " in DB"  << flush;
+                found = m_engine.destroy(selector);
+                slog << debug << "Deleted "  << collection << json::stringify(selector,0) << " in DB"  << flush;
             }
             else
             {
                 slog << debug << "Reading content" << flush;
                 body = json::parse(connection);
                 slog << debug << "Read content " << json::stringify(body,0) << flush;
-                slog << debug << "Updating " << collection << json::stringify(selector,0) << flush;
+                slog << debug << "Updating " << collection << json::stringify(selector,0) << " in DB" << flush;
                 if(method == "POST"s)
-                    m_engine.create(body);
+                    found = m_engine.create(body);
                 else if(method == "PUT"s)
-                    m_engine.replace(selector, body);
+                    found = m_engine.replace(selector, body);
                 else if(method == "PATCH"s)
-                    m_engine.upsert(selector, body);
-                slog << debug << "Updated " << collection << json::stringify(selector,0) << flush;
+                    found = m_engine.upsert(selector, body);
+                slog << debug << "Updated "  << collection << json::stringify(selector,0) << " in DB" << flush;
             }
-
-            const auto content = json::stringify({"data"s, body});
 
             slog << debug << "Sending HTTP response" << flush;
 
-            if(content.length() > 0)
-                connection << "HTTP/1.1 200 OK\r\n"
-                       << "Date: " << to_rfc1123(system_clock::now()) << "\r\n"
-                       << "Server: http://localhost:2112" << path << "\r\n" // FIXME
-                       << "Access-Control-Allow-Origin: *\r\n"
-                       << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE\r\n"
-                       << "Content-Type: application/json\r\n"
-                       << "Content-Length: " << content.length() << "\r\n"
-                       << "\r\n"
-                       << (method != "HEAD"s ? content : ""s);
-            else
-                connection << "HTTP/1.1 404 Not Found"s;
+            const auto content = json::stringify({"data"s, body});
 
-            connection << flush;
+            if(found)
+                connection << "HTTP/1.1 200 OK"                                                   << crlf
+                           << "Date: " << to_rfc1123(system_clock::now())                         << crlf
+                           << "Server: YARESTDB/0.1"                                              << crlf
+                           << "Access-Control-Allow-Origin: *"                                    << crlf
+                           << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                           << "Content-Type: application/json"                                    << crlf
+                           << "Content-Length: " << content.length()                              << crlf
+                           << crlf
+                           << (method != "HEAD"s ? content : ""s) << flush;
+            else
+                connection << "HTTP/1.1 404 Not Found"                                            << crlf
+                           << "Date: " << to_rfc1123(system_clock::now())                         << crlf
+                           << "Server: YARESTDB/0.1"                                              << crlf
+                           << "Access-Control-Allow-Origin: *"                                    << crlf
+                           << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                           << "Content-Type: application/json"                                    << crlf
+                           << "Content-Length: " << content.length()                              << crlf
+                           << crlf
+                           << (method != "HEAD"s ? content : ""s) << flush;
 
             slog << debug << "Sent HTTP response" << flush;
         }
+        slog << debug << "Connection closed" << flush;
     }
 
-    tuple<string,json::object> parse(const string& path)
+    tuple<string,json::object> parse(const string& uri)
     {
-        auto ss = stringstream{path};
+        auto ss = stringstream{uri};
         auto slash = ""s, collection = ""s, id = ""s, query = ""s;
         getline(ss, slash, '/');
         getline(ss, collection, '/');

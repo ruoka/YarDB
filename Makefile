@@ -1,6 +1,6 @@
 CXX = clang++
 
-CXXFLAGS = -std=c++1z -stdlib=libc++ -I$(SRCDIR) -MMD# -D DEBUG=1
+CXXFLAGS = -I$(SRCDIR) -std=c++1z -stdlib=libc++ -MMD# -D DEBUG=1
 
 LDFLAGS =  -stdlib=libc++
 
@@ -30,16 +30,15 @@ $(BINDIR)/$(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(TARGET).cpp $(OBJECTS) -o $@
 
 
-
 TEST_TARGET = test
 
 TEST_SOURCES := $(wildcard $(TESTDIR)/*.cpp) $(wildcard $(TESTDIR)/*/*.cpp) $(wildcard $(TESTDIR)/*/*/*.cpp)
 
-TEST_OBJECTS := $(TESTS:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
+TEST_OBJECTS := $(TEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
 
 $(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -I$(GTESTDIR)/include/ -c $< -o $@
+	$(CXX) -I$(GTESTDIR)/include/ $(CXXFLAGS) -c $< -o $@
 
 $(BINDIR)/$(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS)
 	@mkdir -p $(@D)
@@ -63,8 +62,9 @@ test: $(BINDIR)/$(TEST_TARGET)
 .PHONY: dump
 dump:
 	@echo $(SOURCES)
-	@echo $(TESTS)
 	@echo $(OBJECTS)
+	@echo $(TEST_SOURCES)
+	@echo $(TEST_OBJECTS)
 	@echo $(DEPENDENCIES)
 
 -include $(DEPENDENCIES) $(BINDIR)/$(TARGET).d

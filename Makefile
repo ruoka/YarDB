@@ -2,7 +2,7 @@ CXX = clang++
 
 CXXFLAGS = -I$(SRCDIR) -std=c++1z -stdlib=libc++ -MMD# -D DEBUG=1
 
-LDFLAGS =  -stdlib=libc++
+LDFLAGS = -stdlib=libc++
 
 SRCDIR = src
 
@@ -14,41 +14,45 @@ BINDIR = bin
 
 GTESTDIR = ../googletest/googletest
 
+GTESTLIB = $(GTESTDIR)/make/gtest_main.a
 
-TARGET = yarestdb
 
-SOURCES := $(wildcard $(SRCDIR)/*.cpp) $(wildcard $(SRCDIR)/*/*.cpp) $(wildcard $(SRCDIR)/*/*/*.cpp)
+TARGETS = $(addprefix $(BINDIR)/, yarestdb shell)
 
-OBJECTS := $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
+MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
+
+SOURCES = $(filter-out $(MAINS), $(wildcard $(SRCDIR)/*.cpp $(SRCDIR)/*/*.cpp $(SRCDIR)/*/*/*.cpp))
+
+OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(BINDIR)/$(TARGET): $(OBJECTS)
+$(TARGETS): $(OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(TARGET).cpp $(OBJECTS) -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) -o $@
 
 
-TEST_TARGET = test
+GTEST_TARGET = $(BINDIR)/test
 
-TEST_SOURCES := $(wildcard $(TESTDIR)/*.cpp) $(wildcard $(TESTDIR)/*/*.cpp) $(wildcard $(TESTDIR)/*/*/*.cpp)
+GTEST_SOURCES = $(wildcard $(TESTDIR)/*.cpp $(TESTDIR)/*/*.cpp $(TESTDIR)/*/*/*.cpp)
 
-TEST_OBJECTS := $(TEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
+GTEST_OBJECTS = $(GTEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
 
 $(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) -I$(GTESTDIR)/include/ $(CXXFLAGS) -c $< -o $@
 
-$(BINDIR)/$(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS)
+$(GTEST_TARGET): $(OBJECTS) $(GTEST_OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(GTESTDIR)/make/gtest_main.a -o $@
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(GTEST_OBJECTS) $(GTESTLIB) -o $@
 
 
+DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(BINDIR)/%.d) $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(GTEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/%.d)
 
-DEPENDENCIES := $(OBJECTS:$(OBJDIR)/%.o=$(OBJDIR)/%.d) $(TEST_OBJECTS:$(OBJDIR)/%.o=$(OBJDIR)/%.d)
 
-all: $(BINDIR)/$(TARGET) $(BINDIR)/$(TEST_TARGET)
+all: $(TARGETS) $(GTEST_TARGET)
 
 .PHONY: clean
 clean:
@@ -56,15 +60,18 @@ clean:
 	@rm -rf $(BINDIR)
 
 .PHONY: test
-test: $(BINDIR)/$(TEST_TARGET)
-	$(BINDIR)/$(TEST_TARGET) --gtest_filter=-*.CommandLine:DbServerTest.*
+test: $(GTEST_TARGET)
+	$(GTEST_TARGET) --gtest_filter=-*.CommandLine:DbServerTest.*
 
 .PHONY: dump
 dump:
+	@echo $(TARGETS)
+	@echo $(MAINS)
 	@echo $(SOURCES)
 	@echo $(OBJECTS)
-	@echo $(TEST_SOURCES)
-	@echo $(TEST_OBJECTS)
+	@echo $(GTEST_TARGET)
+	@echo $(GTEST_SOURCES)
+	@echo $(GTEST_OBJECTS)
 	@echo $(DEPENDENCIES)
 
--include $(DEPENDENCIES) $(BINDIR)/$(TARGET).d
+-include $(DEPENDENCIES)

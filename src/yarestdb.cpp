@@ -18,6 +18,6 @@ try
 }
 catch(...)
 {
-    slog << error << "Shit hitted the fan!" << flush;
+    slog << error << "Shit hit the fan!" << flush;
     return 1;
 }

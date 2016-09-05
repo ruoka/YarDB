@@ -6,7 +6,7 @@ using namespace net;
 int main(int, char**)
 try
 {
-    slog.rdbuf(clog.rdbuf());
+    slog.redirect(clog);
     slog.tag("YARESTDB");
     slog.level(syslog::severity::debug);
     slog << notice << "Initializing server" << flush;

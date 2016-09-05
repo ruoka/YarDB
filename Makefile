@@ -52,7 +52,7 @@ $(GTEST_TARGET): $(OBJECTS) $(GTEST_OBJECTS)
 DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(GTEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/%.d)
 
 .PHONY: all
-all: $(TARGETS) $(GTEST_TARGET)
+all: $(TARGETS)
 
 .PHONY: clean
 clean:

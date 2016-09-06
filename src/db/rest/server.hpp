@@ -91,6 +91,7 @@ private:
             m_engine.collection(collection);
 
             auto body = json::object{};
+            body.type(xson::type::array);
 
             if(method == "GET"s || method == "HEAD"s)
             {
@@ -129,6 +130,7 @@ private:
                            << "Server: YARESTDB/0.1"                                              << crlf
                            << "Access-Control-Allow-Origin: *"                                    << crlf
                            << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                           << "Accept: application/json"                                          << crlf
                            << "Content-Type: application/json"                                    << crlf
                            << "Content-Length: " << content.length()                              << crlf
                            << crlf
@@ -139,6 +141,7 @@ private:
                            << "Server: YARESTDB/0.1"                                              << crlf
                            << "Access-Control-Allow-Origin: *"                                    << crlf
                            << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                           << "Accept: application/json"                                          << crlf
                            << "Content-Type: application/json"                                    << crlf
                            << "Content-Length: " << content.length()                              << crlf
                            << crlf

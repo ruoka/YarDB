@@ -4,15 +4,16 @@
 
 namespace xson::json {
 
+using namespace std;
 using namespace std::string_literals;
 
-std::istream& operator >> (std::istream& os, object& ob);
+istream& operator >> (istream& os, object& ob);
 
 class decoder
 {
 public:
 
-    decoder(std::istream& is) : m_is{is}
+    decoder(istream& is) : m_is{is}
     {}
 
     void decode(object& ob)
@@ -28,7 +29,7 @@ private:
         auto value = ""s;
         m_is >> next;                 // "
         getline(m_is, value, u8'\"'); // value"
-        obj.value(value);
+        obj = value;
     }
 
     void decode_value(object& obj)
@@ -45,60 +46,51 @@ private:
 
         try
         {
-            if(value.find(u8'.') != std::string::npos)
-                obj.value(std::stod(value));
+            if(value.find(u8'.') != string::npos)
+                obj = stod(value);
             else if(value == "true")
-                obj.value(true);
+                obj = true;
             else if(value == "false")
-                obj.value(false);
+                obj = false;
             else if(value == "null")
-                obj.value(nullptr);
+                obj= nullptr;
             else
-                obj.value(std::stoi(value));
+                obj = stoi(value);
         }
-        catch(const std::out_of_range&)
+        catch(const out_of_range&)
         {
-            obj.value(std::stoll(value));
+            obj = stoll(value);
         }
-        catch(const std::invalid_argument&)
+        catch(const invalid_argument&)
         {
-            obj.value(value);
+            obj = value;
         }
     }
 
     void decode_array(object& parent)
     {
-        auto idx = std::size_t{0};
+        auto idx = size_t{0};
         auto next = u8' ';
-        m_is >> next; // [
-
+        m_is >> next;                         // [
         while(next != u8']' && m_is)
         {
-            const auto name = std::to_string(idx++);
-            auto& child = parent[name];
-            m_is >> std::ws;
-            next = m_is.peek();
-
-            if (next == u8'{')
+            m_is >> ws;
+            next = m_is.peek();               // ], {, [, " or empty
+            if(next != u8']')
             {
-                decode_document(child);
-                m_is >> next; // , or ]
+                object& child = parent[idx++];
+                m_is >> ws;
+                next = m_is.peek();           // {, [, " or empty
+                if (next == u8'{')
+                    decode_document(child);
+                else if (next == u8'[')
+                    decode_array(child);
+                else if (next == u8'\"')
+                    decode_string(child);
+                else
+                    decode_value(child);
             }
-            else if (next == u8'[')
-            {
-                decode_array(child);
-                m_is >> next; // , or ]
-            }
-            else if (next == u8'\"')
-            {
-                decode_string(child);
-                m_is >> next; // , or ]
-            }
-            else
-            {
-                decode_value(child);
-                m_is >> next; // , or ]
-            }
+            m_is >> next;                     // , or ]
         }
         parent.type(type::array);
     }
@@ -106,48 +98,38 @@ private:
     void decode_document(object& parent)
     {
         auto next = u8' ';
-        m_is >> next; // {
-
+        m_is >> next;                         // {
         while(next != u8'}' && m_is)
         {
-            auto name = ""s;
-            m_is >> std::ws >> next;     // "
-            getline(m_is, name, u8'\"'); // name"
-            m_is >> next;                // :
-
-            auto& child = parent[name];
-
-            m_is >> std::ws;
-            next = m_is.peek();
-
-            if(next == u8'{')
+            m_is >> ws;
+            next = m_is.peek();               // } or "
+            if(next != u8'}')
             {
-                decode_document(child);
-                m_is >> next; // , or }
+                auto name = ""s;
+                m_is >> next;                 // "
+                getline(m_is, name, u8'\"');  // name"
+                m_is >> next;                 // :
+                object& child = parent[name];
+                m_is >> ws;
+                next = m_is.peek();           // {, [, " or empty
+                if(next == u8'{')
+                    decode_document(child);
+                else if(next == u8'[')
+                    decode_array(child);
+                else if(next == u8'\"')
+                    decode_string(child);
+                else
+                    decode_value(child);
             }
-            else if(next == u8'[')
-            {
-                decode_array(child);
-                m_is >> next; // , or }
-            }
-            else if(next == u8'\"')
-            {
-                decode_string(child);
-                m_is >> next; // , or }
-            }
-            else
-            {
-                decode_value(child);
-                m_is >> next; // , or }
-            }
+            m_is >> next;                     // , or }
         }
         parent.type(type::object);
     }
 
-    std::istream& m_is;
+    istream& m_is;
 };
 
-inline std::istream& operator >> (std::istream& is, object& obj)
+inline istream& operator >> (istream& is, object& obj)
 {
     decoder{is}.decode(obj);
     return is;

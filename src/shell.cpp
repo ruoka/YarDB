@@ -4,19 +4,33 @@
 using namespace std;
 using namespace net;
 using namespace xson;
+using namespace xson::json;
 
-// Currently supported shell commands are
-// GET /collection/{id}
-// EXIT
+// Currently supported shell commands are:
+//
+// PUSH /collection         aka Create
+// JSON
+//
+// PUT /collection/id       aka Replace
+// JSON
+//
+// PATCH /collection/id     aka Update/Upsert
+// JSON
+//
+// GET /collection/{id}     aka Raad
+//
+// DELETE /collection/id    aka Delete
+//
+// EXIT                     i.e. Exit the shell
 
 int main(int, char**)
 try
 {
-    auto server = net::connect("localhost","2112");
+    auto server = connect("localhost","2112");
 
     while(cin && server)
     {
-        auto method = ""s, uri = ""s, version = "HTTP/1.1"s, reason = ""s;
+        auto method = ""s, uri = ""s, version = "HTTP/1.1"s, content = ""s, reason = ""s;
         auto status = 0;
 
         cin >> method;
@@ -25,20 +39,22 @@ try
 
         cin >> uri;
 
-        if(method == "GET"s)
-            server << method << sp << uri << sp << version << crlf
-                   << "Host: localhost:2112 "              << crlf
-                   << "Accept: application/json"           << crlf
-                   << crlf
-                   << flush;
-        else
-            continue;
+        if(method == "POST"s || method == "PUT"s || method == "PATCH"s)
+            content = stringify(parse(cin));
 
-        server >> version >> status;
-        getline(server, reason);
+        server << method << sp << uri << sp << version   << crlf
+               << "Host: localhost:2112 "                << crlf
+               << "Accept: application/json"             << crlf
+               << "Content-Type: application/json"       << crlf
+               << "Content-Length: " << content.length() << crlf
+               << crlf
+               << content
+               << flush;
+
+        getline(server >> version >> status, reason);
         trim(reason);
 
-        clog << reason << endl;
+        clog << version << sp << status << reason << endl;
 
         server >> ws;
 
@@ -49,10 +65,11 @@ try
             trim(name);
             getline(server, value);
             trim(value);
+            clog << name << ": " << value << endl;
         }
 
         if(status == 200 || status == 404)
-            cout << json::stringify(json::parse(server)) << endl;
+            cout << stringify(parse(server)) << endl;
     }
     clog << "Server closed the connection" << endl;
     return 0;

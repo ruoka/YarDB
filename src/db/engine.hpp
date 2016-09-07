@@ -19,13 +19,13 @@ public:
 
     bool read(const db::object& selector, db::object& documents);
 
-    bool update(const db::object& selector, const db::object& updates, bool upsert = false);
+    bool update(const db::object& selector, db::object& updates, bool upsert = false);
 
-    bool upsert(const db::object& selector, const db::object& updates);
+    bool upsert(const db::object& selector, db::object& updates);
 
     bool replace(const db::object& selector, db::object& updates);
 
-    bool destroy(const db::object& selector);
+    bool destroy(const db::object& selector, db::object& documents);
 
     bool history(const db::object& selector, db::object& documents);
 

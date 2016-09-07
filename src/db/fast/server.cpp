@@ -83,7 +83,7 @@ void server::handle_destroy(net::endpointstream& client)
     client >> request;
     if(client) {
         auto reply = fast::reply{};
-        m_engine.destroy(request.selector);
+        m_engine.destroy(request.selector, reply.document);
         reply.document = {u8"ack"s, true};
         client << reply << net::flush;
     }

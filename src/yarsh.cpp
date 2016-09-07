@@ -3,29 +3,29 @@
 
 using namespace std;
 using namespace net;
+using namespace string_literals;
 using namespace xson;
-using namespace xson::json;
+using namespace json;
 
-// Currently supported shell commands are:
-//
-// PUSH /collection         aka Create
-// JSON
-//
-// PUT /collection/id       aka Replace
-// JSON
-//
-// PATCH /collection/id     aka Update/Upsert
-// JSON
-//
-// GET /collection/{id}     aka Raad
-//
-// DELETE /collection/id    aka Delete
-//
-// EXIT                     i.e. Exit the shell
+const auto usage = R"(
+Currently supported shell commands are:
+POST /collection         aka Create
+JSON
+PUT /collection/id       aka Replace
+JSON
+PATCH /collection/id     aka Update/Upsert
+JSON
+GET /collection/{id}     aka Raad
+DELETE /collection/id    aka Delete
+HELP                     i.e. This text
+EXIT                     i.e. Exit the shell
+)";
 
 int main(int, char**)
 try
 {
+    clog << usage << endl;
+
     auto server = connect("localhost","2112");
 
     while(cin && server)
@@ -34,8 +34,18 @@ try
         auto status = 0;
 
         cin >> method;
+        for (auto & c: method) c = std::toupper(c);
 
-        if (method == "EXIT") break;
+        if (method == "HELP")
+        {
+            clog << usage << endl;
+            continue;
+        }
+
+        if (method == "EXIT")
+        {
+            break;
+        }
 
         cin >> uri;
 
@@ -51,10 +61,11 @@ try
                << content
                << flush;
 
-        getline(server >> version >> status, reason);
+        server >> version >> status;
+        getline(server, reason);
         trim(reason);
 
-        clog << version << sp << status << reason << endl;
+        clog << version << sp << status << sp << reason << endl;
 
         server >> ws;
 

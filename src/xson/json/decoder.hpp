@@ -71,7 +71,7 @@ private:
         auto idx = size_t{0};
         auto next = u8' ';
         m_is >> next;                         // [
-        while(next != u8']' && m_is)
+        while(m_is)
         {
             m_is >> std::ws;
             next = m_is.peek();               // ], {, [, " or empty
@@ -88,8 +88,13 @@ private:
                     decode_string(child);
                 else
                     decode_value(child);
+                m_is >> next;                 // , or ]
             }
-            m_is >> next;                     // , or ]
+            else                              // ]
+            {
+                m_is.ignore();
+                break;
+            }
         }
         parent.type(type::array);
     }
@@ -98,7 +103,7 @@ private:
     {
         auto next = u8' ';
         m_is >> next;                         // {
-        while(next != u8'}' && m_is)
+        while(m_is)
         {
             m_is >> std::ws;
             next = m_is.peek();               // } or "
@@ -119,8 +124,13 @@ private:
                     decode_string(child);
                 else
                     decode_value(child);
+                m_is >> next;                 // , or }
             }
-            m_is >> next;                     // , or }
+            else
+            {
+                m_is.ignore();
+                break;
+            }
         }
         parent.type(type::object);
     }

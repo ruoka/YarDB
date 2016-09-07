@@ -63,7 +63,7 @@ clean:
 	@rm -rf $(BINDIR)
 
 .PHONY: test
-test: $(GTEST_TARGET)
+test: $(TARGETS) $(GTEST_TARGET)
 	$(GTEST_TARGET) --gtest_filter=-*.CommandLine:DbServerTest.*:DbRestServerTest.*
 
 .PHONY: dump

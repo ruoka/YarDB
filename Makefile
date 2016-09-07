@@ -1,6 +1,6 @@
 CXX = clang++
 
-CXXFLAGS = -I$(SRCDIR) -std=c++1z -stdlib=libc++ -MMD# -D DEBUG=1
+CXXFLAGS = -I$(SRCDIR) -std=c++1z -stdlib=libc++ -MMD # -D DEBUG=1
 
 LDFLAGS = -stdlib=libc++
 
@@ -17,7 +17,7 @@ GTESTDIR = ../googletest/googletest
 GTESTLIB = $(GTESTDIR)/make/gtest_main.a
 
 
-TARGETS = $(addprefix $(BINDIR)/, yarestdb shell)
+TARGETS = $(addprefix $(BINDIR)/, yardb yarsh)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 
@@ -51,8 +51,11 @@ $(GTEST_TARGET): $(OBJECTS) $(GTEST_OBJECTS)
 
 DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(GTEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/%.d)
 
+.PHONY: yar
+yar: $(TARGETS)
+
 .PHONY: all
-all: $(TARGETS)
+all: $(TARGETS) $(GTEST_TARGET)
 
 .PHONY: clean
 clean:

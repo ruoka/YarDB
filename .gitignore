@@ -1,6 +1,5 @@
 bin
 obj
-fdb.fson
 test/xson/bson/test1.bson
 engine_test.db
-fson.db
+yar.db

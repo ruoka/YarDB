@@ -9,7 +9,7 @@ class engine
 {
 public:
 
-    engine(const std::string file = "./fson.db"s);
+    engine(const std::string file = "./yar.db"s);
 
     void index(std::vector<std::string> keys);
 

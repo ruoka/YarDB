@@ -1,8 +1,9 @@
-# YARESTDB
-Yet Another RESTFul Database - Under Construction!
+# YarDB - Yet Another RESTFul Database
 
-Implemented with C++17
+Under Construction!
 
-Queries are based on HTTP protocol
+This DB has a Web Services API based the RESTFul principles
 
-Data is transferred as JSON objects and stored as FSON objects (i.e. FAST encoded) with some metadata
+Data is transported as JSON objects over HTTP/1.1 and stored as FSON objects (i.e. FAST encoded) with some metadata
+
+The DB is implemented with C++17

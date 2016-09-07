@@ -106,11 +106,12 @@ private:
 
 inline std::ostream& operator << (std::ostream& os, const object& ob)
 {
-    const auto indent = os.width();
-    auto e = encoder{os, indent};
-    os.width(0);
+//    const auto indent = os.width();
+//    auto e = encoder{os, indent};
+    auto e = encoder{os, 1};
+//    os.width(0);
     e.encode(ob);
-    os.width(indent);
+//    os.width(indent);
     return os;
 }
 

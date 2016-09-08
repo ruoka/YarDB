@@ -1,4 +1,5 @@
 #include <thread>
+#include <set>
 #include "std/extension.hpp"
 #include "xson/json.hpp"
 #include "net/syslogstream.hpp"
@@ -31,9 +32,9 @@ public:
         while(true)
         {
             slog << notice << "Accepting connections" << flush;
-            auto connection = endpoint.accept();
+            auto client = endpoint.accept();
             slog << info << "Accepted connection" << flush;
-            auto worker = thread{[&](){handle(move(connection));}};
+            auto worker = thread{[&](){handle(move(client));}};
             this_thread::sleep_for(1s);
             worker.detach();
         }
@@ -41,13 +42,13 @@ public:
 
 private:
 
-    void handle(endpointstream connection)
+    void handle(endpointstream client)
     {
-        while(connection)
+        while(client)
         {
             slog << debug << "Reading HTTP request" << flush;
             auto method = ""s, uri = ""s, version = ""s;
-            connection >> method >> uri >> version;
+            client >> method >> uri >> version;
             slog << info << method << ' ' << uri << ' ' << version << flush;
 
             if(version != "HTTP/1.1")
@@ -57,29 +58,41 @@ private:
 
             slog << debug << "Reading HTTP headers" << flush;
 
-            connection >> ws;
+            client >> ws;
 
-            while(connection && connection.peek() != '\r')
+            while(client && client.peek() != '\r')
             {
                 auto name = ""s, value = ""s;
-                getline(connection, name, ':');
+                getline(client, name, ':');
                 trim(name);
-                getline(connection, value);
+                getline(client, value);
                 trim(value);
                 slog << info << name << ": " << value << flush;
             }
 
             slog << debug << "Read HTTP headers" << flush;
 
+            if(!methods.count(method))
+            {
+                slog << warning << "Method " << method << " is ignored" << flush;
+                client << "HTTP/1.1 400 Bad Request"                  << crlf
+                       << "Date: " << to_rfc1123(system_clock::now()) << crlf
+                       << "Server: YARESTDB/0.1"                      << crlf
+                       << "Content-Length: 0"                         << crlf
+                       << crlf
+                       << flush;
+                continue;
+            }
+
             if(uri == R"(/)"s || uri == R"(/favicon.ico)"s)
             {
                 slog << debug << "URI " << uri << " is ignored" << flush;
-                connection << "HTTP/1.1 204 No Content"                   << crlf
-                           << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                           << "Server: YARESTDB/0.1"                      << crlf
-                           << "Content-Length: 0"                         << crlf
-                           << crlf
-                           << flush;
+                client << "HTTP/1.1 204 No Content"                   << crlf
+                       << "Date: " << to_rfc1123(system_clock::now()) << crlf
+                       << "Server: YARESTDB/0.1"                      << crlf
+                       << "Content-Length: 0"                         << crlf
+                       << crlf
+                       << flush;
                 continue;
             }
 
@@ -91,7 +104,6 @@ private:
             m_engine.collection(collection);
 
             auto body = json::object{};
-            body.type(xson::type::array);
 
             if(method == "GET"s || method == "HEAD"s)
             {
@@ -102,13 +114,13 @@ private:
             else if(method == "DELETE")
             {
                 slog << debug << "Deleting " << collection << json::stringify(selector,0) << " in DB"  << flush;
-                found = m_engine.destroy(selector);
+                found = m_engine.destroy(selector, body);
                 slog << debug << "Deleted "  << collection << json::stringify(selector,0) << " in DB"  << flush;
             }
-            else
+            else if(method == "POST" || method == "PUT" || method == "PATCH")
             {
                 slog << debug << "Reading content" << flush;
-                body = json::parse(connection);
+                body = json::parse(client);
                 slog << debug << "Read content " << json::stringify(body,0) << flush;
                 slog << debug << "Updating " << collection << json::stringify(selector,0) << " in DB" << flush;
                 if(method == "POST"s)
@@ -122,34 +134,39 @@ private:
 
             slog << debug << "Sending HTTP response" << flush;
 
-            const auto content = json::stringify({"data"s, body});
-
             if(found)
-                connection << "HTTP/1.1 200 OK"                                                   << crlf
-                           << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                           << "Server: YARESTDB/0.1"                                              << crlf
-                           << "Access-Control-Allow-Origin: *"                                    << crlf
-                           << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
-                           << "Accept: application/json"                                          << crlf
-                           << "Content-Type: application/json"                                    << crlf
-                           << "Content-Length: " << content.length()                              << crlf
-                           << crlf
-                           << (method != "HEAD"s ? content : ""s) << flush;
-            else
-                connection << "HTTP/1.1 404 Not Found"                                            << crlf
-                           << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                           << "Server: YARESTDB/0.1"                                              << crlf
-                           << "Access-Control-Allow-Origin: *"                                    << crlf
-                           << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
-                           << "Accept: application/json"                                          << crlf
-                           << "Content-Type: application/json"                                    << crlf
-                           << "Content-Length: " << content.length()                              << crlf
-                           << crlf
-                           << (method != "HEAD"s ? content : ""s) << flush;
+            {
+                const auto content = json::stringify({"success"s, body});
 
+                client << "HTTP/1.1 200 OK"                                                   << crlf
+                       << "Date: " << to_rfc1123(system_clock::now())                         << crlf
+                       << "Server: YARESTDB/0.1"                                              << crlf
+                       << "Access-Control-Allow-Origin: *"                                    << crlf
+                       << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                       << "Accept: application/json"                                          << crlf
+                       << "Content-Type: application/json"                                    << crlf
+                       << "Content-Length: " << content.length()                              << crlf
+                       << crlf
+                       << (method != "HEAD"s ? content : ""s) << flush;
+            }
+            else
+            {
+                const auto content = json::stringify({"error"s, body});
+
+                client << "HTTP/1.1 404 Not Found"                                            << crlf
+                       << "Date: " << to_rfc1123(system_clock::now())                         << crlf
+                       << "Server: YARESTDB/0.1"                                              << crlf
+                       << "Access-Control-Allow-Origin: *"                                    << crlf
+                       << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                       << "Accept: application/json"                                          << crlf
+                       << "Content-Type: application/json"                                    << crlf
+                       << "Content-Length: " << content.length()                              << crlf
+                       << crlf
+                       << (method != "HEAD"s ? content : ""s) << flush;
+            }
             slog << debug << "Sent HTTP response" << flush;
         }
-        slog << debug << "Connection closed" << flush;
+        slog << debug << "client closed" << flush;
     }
 
     tuple<string,json::object> parse(const string& uri)
@@ -165,6 +182,8 @@ private:
             selector = {"_id",id};
         return std::make_tuple(collection,selector);
     }
+
+    const set<string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};
 
     db::engine& m_engine;
 };

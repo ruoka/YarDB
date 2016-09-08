@@ -84,6 +84,11 @@ public:
         return m_end;
     }
 
+    operator bool () const
+    {
+        return m_begin != m_end;
+    }
+
 private:
 
     index_iterator m_begin, m_end;

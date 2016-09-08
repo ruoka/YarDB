@@ -8,7 +8,9 @@ using namespace std::string_literals;
 
 db::engine::engine(const std::string file) : m_collection{u8"db"s}, m_index{}, m_storage{}
 {
-    m_storage.open(file, std::ios_base::out | std::ios_base::in | std::ios_base::binary);
+    m_storage.open(file, std::ios::out | std::ios::in | std::ios::binary);
+    if (!m_storage.is_open())
+        m_storage.open(file, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
     if (!m_storage.is_open())
         throw std::invalid_argument("Cannot open file "s + file);
     reindex();
@@ -60,7 +62,7 @@ void db::engine::index(std::vector<std::string> keys)
 
 bool db::engine::create(db::object& document)
 {
-    auto match = true;
+    auto success = true;
     auto& index = m_index[m_collection];
     auto metadata = db::metadata{m_collection};
     m_storage.clear();
@@ -68,12 +70,12 @@ bool db::engine::create(db::object& document)
     index.update(document);
     index.insert(document, m_storage.tellp());
     m_storage << metadata << document << std::flush;
-    return match;
+    return success;
 }
 
 bool db::engine::read(const db::object& selector, db::object& documents)
 {
-    auto match = false;
+    auto success = false;
     auto& index = m_index[m_collection];
     documents.type(xson::type::array);
     for(const auto position : index.range(selector))
@@ -86,15 +88,15 @@ bool db::engine::read(const db::object& selector, db::object& documents)
         if(document.match(selector))
         {
             documents += std::move(document);
-            match = true;
+            success = true;
         }
     }
-    return match;
+    return success;
 }
 
-bool db::engine::update(const db::object& selector, const db::object& updates, bool upsert)
+bool db::engine::update(const db::object& selector, db::object& updates, bool upsert)
 {
-    auto match = false;
+    auto success = false;
     auto& index = m_index[m_collection];
     auto new_document = updates;
     for(const auto position : index.range(selector))
@@ -119,65 +121,77 @@ bool db::engine::update(const db::object& selector, const db::object& updates, b
             index.insert(new_document, m_storage.tellp());
             m_storage << metadata << new_document << std::flush;
 
-            match = true;
+            success = true;
         }
     }
-    if(!match && upsert)
+    if(!success && upsert)
+    {
         create(new_document);
-    return match;
+        updates = std::move(new_document);
+        success = true;
+    }
+    return success;
 }
 
-bool db::engine::upsert(const db::object& selector, const db::object& updates)
+bool db::engine::upsert(const db::object& selector, db::object& updates)
 {
     return update(selector, updates, true);
 }
 
 bool db::engine::replace(const db::object& selector, db::object& updates)
 {
-    return destroy(selector) && create(updates);
+    auto selector2 = object{},
+         documents = object{};
+    selector2 += selector;
+    selector2 += updates;
+    return destroy(selector2, documents) && create(updates);
 }
 
-bool db::engine::destroy(const db::object& selector)
+bool db::engine::destroy(const db::object& selector, db::object& documents)
 {
-    auto match = false;
+    auto success = false;
     auto& index = m_index[m_collection];
-
-    if(!index.primary_key(selector))
-        throw std::invalid_argument("Expected primary key got "s + xson::json::stringify(selector, 0));
-
-    auto position = index.position(selector); // FIXME If not key not found
-    auto metadata = db::metadata{};
-    auto document = db::object{};
-    m_storage.clear();
-    m_storage.seekp(position, m_storage.beg);
-    m_storage << deleted << std::flush;
-    m_storage.clear();
-    m_storage.seekg(position, m_storage.beg);
-    m_storage >> metadata >> document;
-    index.erase(document);
-    match = true;
-
-    return match;
+    auto range = index.range(selector);
+    if(range)
+    {
+        auto position = *range.begin();
+        auto metadata = db::metadata{};
+        auto document = db::object{};
+        m_storage.clear();
+        m_storage.seekp(position, m_storage.beg);
+        m_storage << deleted << std::flush;
+        m_storage.clear();
+        m_storage.seekg(position, m_storage.beg);
+        m_storage >> metadata >> document;
+        index.erase(document);
+        documents += std::move(document);
+        success = true;
+    }
+    return success;
 }
 
 bool db::engine::history(const db::object& selector, db::object& documents)
 {
-    auto match = false;
+    auto success = false;
     auto& index = m_index[m_collection];
+    auto range = index.range(selector);
     documents.type(xson::type::array);
-    for(auto position : index.range(selector))
-    while(position >= 0)
+    if(range)
     {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
-        m_storage.clear();
-        m_storage.seekg(position, m_storage.beg);
-        m_storage >> metadata >> document;
-        documents += std::move(document);
-        position = metadata.previous;
-        match = true;
+        auto position = *range.begin();
+        while(position >= 0)
+        {
+            auto metadata = db::metadata{};
+            auto document = db::object{};
+            m_storage.clear();
+            m_storage.seekg(position, m_storage.beg);
+            m_storage >> metadata >> document;
+            position = metadata.previous;
+            documents += std::move(document);
+            success = true;
+        }
     }
-    return match;
+    return success;
 }
 
 void db::engine::dump()

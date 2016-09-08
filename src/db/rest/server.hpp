@@ -134,10 +134,11 @@ private:
 
             slog << debug << "Sending HTTP response" << flush;
 
+            const auto content = json::stringify(body);
+
             if(found)
             {
-                const auto content = json::stringify({"success"s, body});
-
+                // const auto content = json::stringify({"success"s, body});
                 client << "HTTP/1.1 200 OK"                                                   << crlf
                        << "Date: " << to_rfc1123(system_clock::now())                         << crlf
                        << "Server: YARESTDB/0.1"                                              << crlf
@@ -151,8 +152,7 @@ private:
             }
             else
             {
-                const auto content = json::stringify({"error"s, body});
-
+                // const auto content = json::stringify({"error"s, body});
                 client << "HTTP/1.1 404 Not Found"                                            << crlf
                        << "Date: " << to_rfc1123(system_clock::now())                         << crlf
                        << "Server: YARESTDB/0.1"                                              << crlf

@@ -15,9 +15,17 @@ public:
     decoder(std::istream& is) : m_is{is}
     {}
 
-    void decode(object& ob)
+    void decode(object& obj)
     {
-        decode_document(ob);
+        auto next = u8' ';
+        m_is >> std::ws;
+        next = m_is.peek();
+        if(next == u8'{')
+            decode_object(obj);
+        else if(next == u8'[')
+            decode_array(obj);
+        else
+            throw std::invalid_argument{"Invalid JSON object "s + next};
     }
 
 private:
@@ -71,7 +79,7 @@ private:
         auto idx = size_t{0};
         auto next = u8' ';
         m_is >> next;                         // [
-        while(m_is)
+        while(next != u8']' && m_is)
         {
             m_is >> std::ws;
             next = m_is.peek();               // ], {, [, " or empty
@@ -81,29 +89,24 @@ private:
                 m_is >> std::ws;
                 next = m_is.peek();           // {, [, " or empty
                 if (next == u8'{')
-                    decode_document(child);
+                    decode_object(child);
                 else if (next == u8'[')
                     decode_array(child);
                 else if (next == u8'\"')
                     decode_string(child);
                 else
                     decode_value(child);
-                m_is >> next;                 // , or ]
             }
-            else                              // ]
-            {
-                m_is.ignore();
-                break;
-            }
+            m_is >> next;                     // , or ]
         }
         parent.type(type::array);
     }
 
-    void decode_document(object& parent)
+    void decode_object(object& parent)
     {
         auto next = u8' ';
         m_is >> next;                         // {
-        while(m_is)
+        while(next != u8'}' && m_is)
         {
             m_is >> std::ws;
             next = m_is.peek();               // } or "
@@ -117,20 +120,15 @@ private:
                 m_is >> std::ws;
                 next = m_is.peek();           // {, [, " or empty
                 if(next == u8'{')
-                    decode_document(child);
+                    decode_object(child);
                 else if(next == u8'[')
                     decode_array(child);
                 else if(next == u8'\"')
                     decode_string(child);
                 else
                     decode_value(child);
-                m_is >> next;                 // , or }
             }
-            else
-            {
-                m_is.ignore();
-                break;
-            }
+            m_is >> next;                     // , or }
         }
         parent.type(type::object);
     }

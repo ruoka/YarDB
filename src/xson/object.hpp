@@ -2,6 +2,8 @@
 
 #include <initializer_list>
 #include <map>
+#include <cmath>
+#include "std/variant.hpp"
 #include "std/extension.hpp"
 #include "xson/type.hpp"
 
@@ -9,6 +11,35 @@ namespace xson {
 
 using namespace std::string_literals;
 using namespace std::chrono_literals;
+using namespace std::experimental;
+
+using  value = variant<std::double_t,  // \x01
+                       std::string_t,  // \x02
+                       std::bool_t,    // \x08
+                       std::datetime_t,    // \x09
+                       std::nullptr_t, // \x0A
+                       std::int32_t,   // \x10
+                       std::int64_t    // \x12
+                       >;
+
+inline auto to_string(const value& val)
+{
+    if(holds_alternative<std::string_t>(val))
+        return get<std::string_t>(val);
+    if(holds_alternative<std::double_t>(val))
+        return std::to_string(get<std::double_t>(val));
+    if(holds_alternative<std::bool_t>(val))
+        return std::to_string(get<std::bool_t>(val));
+    if(holds_alternative<std::datetime_t>(val))
+        return std::to_string(get<std::datetime_t>(val));
+    if(holds_alternative<std::nullptr_t>(val))
+        return std::to_string(get<std::nullptr_t>(val));
+    if(holds_alternative<std::int32_t>(val))
+        return std::to_string(get<std::int32_t>(val));
+    if(holds_alternative<std::int64_t>(val))
+        return std::to_string(get<std::int64_t>(val));
+    throw std::logic_error{"Unknown value?"};
+}
 
 class object
 {
@@ -23,11 +54,11 @@ public:
               typename = std::enable_if_t<!is_object<T>::value       &&
                                           !is_value_array<T>::value  &&
                                           !is_object_array<T>::value >>
-    object(const std::string& name, const T& value) :
+    object(const std::string& name, const T& val) :
     object{}
     {
         static_assert(is_value<T>::value, "Invalid type!");
-        m_objects[name].value(value);
+        m_objects[name] = val;
     }
 
     template <typename T>
@@ -117,18 +148,17 @@ public:
         m_type = t;
     }
 
-    const std::string& value() const
+    const value& value() const
     {
         return m_value;
     }
 
     template <typename T>
-    const T& value(const T& value)
+    void value(const T& val)
     {
         static_assert(is_value<T>::value, "Invalid type!");
-        m_type = xson::to_type(value);
-        m_value = std::to_string(value);
-        return value;
+        m_type = xson::to_type(val);
+        m_value = val;
     }
 
     object& operator [] (const std::string& name)
@@ -145,6 +175,8 @@ public:
 
     object& operator [] (std::size_t idx)
     {
+        if(m_objects.empty())
+            m_type = type::array;
         return m_objects[std::to_string(idx)];
     }
 
@@ -156,44 +188,44 @@ public:
         return m_objects.find(name)->second;
     }
 
-    operator std::string () const
+    operator const xson::value& () const
     {
         return m_value;
     }
 
-    operator int () const
+    operator std::double_t () const
     {
-        if(m_type != type::int32 && m_type != type::number)
-            throw std::logic_error("object type has to be int32");
-        return std::stoi(m_value);
+        return get<double>(m_value);
     }
 
-    operator long long () const
+    operator const std::string_t& () const
     {
-        if(m_type != type::int32 && m_type != type::int64 && m_type != type::number)
-            throw std::logic_error("object type has to be int64");
-        return std::stol(m_value);;
+        return get<std::string_t>(m_value);
     }
 
-    operator double () const
+    operator std::bool_t () const
     {
-        if(m_type != type::number && m_type != type::int32 && m_type != type::int64)
-            throw std::logic_error("object type has to be double");
-        return std::stod(m_value);;
+        return get<std::bool_t>(m_value);
     }
 
-    operator bool () const
+    operator std::datetime_t () const
     {
-        if(m_type != type::boolean)
-            throw std::logic_error("object type has to be an boolean");
-        return std::stob(m_value);
+        return get<std::datetime_t>(m_value);
     }
 
-    operator std::chrono::system_clock::time_point () const
+    operator std::nullptr_t () const
     {
-        if(m_type != type::date)
-            throw std::logic_error("object type has to be date");
-        return std::stotp(m_value);
+        return get<std::nullptr_t>(m_value);
+    }
+
+    operator std::int32_t () const
+    {
+        return get<std::int32_t>(m_value);
+    }
+
+    operator std::int64_t () const
+    {
+        return get<long long>(m_value);
     }
 
     operator std::vector<std::string> () const
@@ -202,7 +234,7 @@ public:
             throw std::logic_error("object type has to be array");
         auto values = std::vector<std::string>{};
         for(const auto& obj : m_objects)
-            values.push_back(obj.second);
+            values.push_back(obj.second); // FIXME We assume string values hare
         return values;
     }
 
@@ -238,12 +270,12 @@ public:
 
     bool has_value () const
     {
-        return !m_value.empty();
+        return m_value.index() != variant_npos;
     }
 
     bool empty () const
     {
-        return m_value.empty() && m_objects.empty();
+        return !has_value() && m_objects.empty();
     }
 
     bool has(const std::string& name) const
@@ -276,8 +308,10 @@ public:
             }
             return rf == rl;
         }
+        else if(m_type == type::int64 && subset.m_type == type::int32)
+            return get<std::int64_t>(m_value) == get<std::int32_t>(subset.m_value);
         else
-            return value() == subset.value();
+            return m_value == subset.m_value;
     }
 
     std::size_t size() const
@@ -309,7 +343,7 @@ private:
 
     xson::type m_type;
 
-    std::string m_value;
+    xson::value m_value;
 
     std::map<std::string,object> m_objects;
 };

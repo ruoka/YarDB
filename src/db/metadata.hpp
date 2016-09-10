@@ -7,6 +7,8 @@ namespace db
 {
 using namespace std::string_literals;
 
+using xson::fson::object;
+
 struct metadata
 {
     enum action : char {created = 'C', updated = 'U', deleted = 'D'};
@@ -26,7 +28,7 @@ static const metadata updated{metadata::updated};
 
 static const metadata deleted{metadata::deleted};
 
-inline std::ostream& operator << (std::ostream& os, metadata& data)
+inline auto& operator << (std::ostream& os, metadata& data)
 {
     data.previous = data.position;
     data.position = os.tellp();
@@ -41,14 +43,14 @@ inline std::ostream& operator << (std::ostream& os, metadata& data)
     return os;
 }
 
-inline std::ostream& operator << (std::ostream& os, const metadata& data)
+inline auto& operator << (std::ostream& os, const metadata& data)
 {
     auto encoder = xson::fson::encoder{os};
     encoder.encode(data.status);
     return os;
 }
 
-inline std::istream& operator >> (std::istream& is, metadata& data)
+inline auto& operator >> (std::istream& is, metadata& data)
 {
     auto decoder = xson::fson::decoder{is};
     decoder.decode(data.status);
@@ -58,7 +60,7 @@ inline std::istream& operator >> (std::istream& is, metadata& data)
     return is;
 }
 
-auto to_string(metadata::action a)
+inline auto to_string(metadata::action a)
 {
     if(a == metadata::created) return "created"s;
     if(a == metadata::updated) return "updated"s;

@@ -10,25 +10,6 @@ namespace xson {
 
 class object;
 
-using double_type = double;                                 // \x01
-using string_type = std::string;                            // \x02
-using document_type = object;                               // \x03
-using array_type = object;                                  // \x04
-//using binary_type = binary;                               // \x05
-//using undefined_type = void;                              // \x06 — Deprecated
-//using objectid_type = objectid;                           // \x07
-using boolean_type = bool;                                  // \x08
-using date_type = std::chrono::system_clock::time_point;    // \x09
-using null_type = std::nullptr_t;                           // \x0A
-//using regular_expression_type = regular_expression;       // \x0B
-//using dbpointer_type = dbpointer;                         // \x0C — Deprecated
-//using javascript_type = javascript;                       // \x0D
-//using deprecated_type = void;                             // \x0E
-//using javascript_with_scope_type = javascript_with_scope; // \x0F
-using int32_type = std::int32_t;                            // \x10
-//using timestamp_type = timestamp;                         // \x11
-using int64_type = std::int64_t;                            // \x12
-
 enum class type : std::uint8_t
 {
     eod                   = '\x00',
@@ -70,17 +51,17 @@ template <typename T> constexpr type to_type(const T&)
     return type::null;
 }
 
-template <> constexpr type to_type(const double&)
+template <> constexpr type to_type(const std::double_t&)
 {
     return type::number;
 }
 
-template <> constexpr type to_type(const std::string&)
+template <> constexpr type to_type(const std::string_t&)
 {
     return type::string;
 }
 
-template <> constexpr type to_type(const bool&)
+template <> constexpr type to_type(const std::bool_t&)
 {
     return type::boolean;
 }
@@ -90,17 +71,17 @@ template <> constexpr type to_type(const std::nullptr_t&)
     return type::null;
 }
 
-template <> constexpr type to_type(const std::chrono::system_clock::time_point&)
+template <> constexpr type to_type(const std::datetime_t&)
 {
     return type::date;
 }
 
-template <> constexpr type to_type(const int&)
+template <> constexpr type to_type(const std::int32_t&)
 {
     return type::int32;
 }
 
-template <> constexpr type to_type(const long long&)
+template <> constexpr type to_type(const std::int64_t&)
 {
     return type::int64;
 }
@@ -116,13 +97,13 @@ template <> struct is_value<std::int32_t> : std::true_type {};
 
 template <> struct is_value<std::int64_t> : std::true_type {};
 
-template <> struct is_value<double> : std::true_type {};
+template <> struct is_value<std::double_t> : std::true_type {};
 
-template <> struct is_value<bool> : std::true_type {};
+template <> struct is_value<std::bool_t> : std::true_type {};
 
-template <> struct is_value<std::string> : std::true_type {};
+template <> struct is_value<std::string_t> : std::true_type {};
 
-template <> struct is_value<std::chrono::system_clock::time_point> : std::true_type {};
+template <> struct is_value<std::datetime_t> : std::true_type {};
 
 template <> struct is_value<std::nullptr_t> : std::true_type {};
 
@@ -146,6 +127,6 @@ template <> struct is_object_array<std::vector<object>> : std::true_type {};
 
 template <std::size_t N> struct is_object_array<std::array<object,N>> : std::true_type {};
 
-template <std::size_t N> struct is_object_array<object[N]> : std::true_type {};;
+template <std::size_t N> struct is_object_array<object[N]> : std::true_type {};
 
 } // namespace xson

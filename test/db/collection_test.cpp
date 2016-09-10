@@ -3,7 +3,6 @@
 #include "xson/json.hpp"
 #include "db/engine.hpp"
 
-using namespace std;
 using namespace xson;
 
 class DbEngineTest2 : public ::testing::Test
@@ -22,13 +21,13 @@ protected:
         std::remove(test_file.c_str());
     }
 
-    const string test_file = "./engine_test.db";
+    const std::string test_file = "./engine_test.db";
 
     void dump(db::engine& engine)
     {
         auto selector = object{}, documents = object{};
         engine.read(selector, documents);
-        clog << "Dump:\n" << json::stringify(documents) << endl;
+        std::clog << "Dump:\n" << json::stringify(documents) << std::endl;
     }
 };
 
@@ -73,23 +72,19 @@ TEST_F(DbEngineTest2, Create2Keys)
          selector = object{{u8"_id"s, 1}},
          documents = object{};
     engine.collection("Create2Keys");
-    try
-    {
-        engine.index({"A", "B"});
-    }
-    catch(...){}
-    engine.update(document1, document1, true);
-    engine.update(document2, document2, true);
-    engine.update(document3, document3, true);
+
+    engine.index({"A", "B", "Z"});
+
+    engine.upsert(document1, document1);
+    engine.upsert(document2, document2);
+    engine.upsert(document3, document3);
     dump(engine);
     engine.destroy(selector, documents);
     dump(engine);
-    engine.dump();
     try
     {
-        engine.index({"D"});
+        engine.index({"D", "1", "2"});
         engine.reindex();
     }
     catch(...){}
-    engine.dump();
 }

@@ -85,8 +85,13 @@ try
     clog << "Server closed the connection" << endl;
     return 0;
 }
+catch(const std::exception& e)
+{
+    cerr << e.what() << flush;
+    return 1;
+}
 catch(...)
 {
-    clog << "Shit hit the fan!" << endl;
+    cerr << "Shit hit the fan!" << endl;
     return 1;
 }

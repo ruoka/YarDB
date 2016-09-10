@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <string>
 #include "xson/fson.hpp"
 
 using namespace std::string_literals;
@@ -10,14 +11,15 @@ namespace db {
 using object = xson::fson::object;
 using sequence_type = std::int64_t;
 using position_type = std::streamoff;
-using primary_index_type = std::map<std::string,position_type>;
+using index_type = std::map<std::string,position_type>;
+using primary_index_type = index_type;
 using secondary_index_type = std::map<std::string,std::map<std::string,position_type>>;
 
 class index_iterator
 {
 public:
 
-    using iterator = primary_index_type::iterator;
+    using iterator = index_type::iterator;
 
     index_iterator() = default;
 
@@ -100,94 +102,25 @@ public:
 
     index() = default;
 
-    void add(const std::string& key)
-    {
-        if(m_secondary_keys.count(key) == 0)
-            m_secondary_keys[key] = primary_index_type{};
-    }
+    void add(const std::string& key);
 
-    void add(std::vector<std::string> keys)
-    {
-        for(auto& key : keys)
-            add(key);
-    }
+    void add(std::vector<std::string> keys);
 
-    auto keys() const
-    {
-        auto result = std::vector<std::string>{};
-        for (const auto& index : m_secondary_keys)
-            result.push_back(index.first);
-        return result;
-    }
+    std::vector<std::string> keys() const;
 
-    auto primary_key(const object& selector) const
-    {
-        return selector.has(u8"_id"s);
-    }
+    bool primary_key(const object& selector) const;
 
-    auto secondary_key(const object& selector) const
-    {
-        for(auto& index : m_secondary_keys)
-            if(selector.has(index.first))
-                return true;
-        return false;
-    }
+    bool secondary_key(const object& selector) const;
 
-    index_range range(const object& selector)
-    {
-        index_iterator begin, end;
+    index_range range(const object& selector);
 
-        if(primary_key(selector))
-        {
-            begin = end = index_iterator{m_primary_keys.find(selector[u8"_id"s]), m_primary_keys.end()};
-            ++end;
-        }
-        else if(secondary_key(selector)) // Use primary key
-        {
-            for(auto& key : m_secondary_keys)
-                if(selector.has(key.first))
-                    begin = end = index_iterator{key.second.find(selector[key.first]), key.second.end()};
-            ++end;
-        }
-        else // Fllback to full scan
-        {
-            begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
-            end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
-        }
-        return {begin, end};
-    }
+    position_type position(const object& selector) const;
 
-    auto position(const object& selector) const
-    {
-        return m_primary_keys.at(selector[u8"_id"s]);
-    }
+    void update(object& document);
 
-    void update(object& document)
-    {
-        if(document.has(u8"_id"s))
-            m_sequence = std::max<sequence_type>(m_sequence, document[u8"_id"s]);
-        else
-            document[u8"_id"s] = ++m_sequence;
-    }
+    void insert(object& document, position_type position);
 
-    void insert(object& document, position_type position)
-    {
-        m_primary_keys[document[u8"_id"s]] = position;
-
-        for(auto& key : m_secondary_keys)
-            if(document.has(key.first))
-                key.second[document[key.first]] = position;
-
-    }
-
-    void erase(const object& document)
-    {
-        m_primary_keys.erase(document[u8"_id"s]);
-
-        for(auto& key : m_secondary_keys)
-            if(document.has(key.first))
-                key.second.erase(document[key.first]);
-    }
+    void erase(const object& document);
 
 private:
 

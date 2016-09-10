@@ -88,8 +88,9 @@ TEST_F(DbEngineTest, Update1ByID)
 {
     auto engine = db::engine{test_file};
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}};
-    auto selector = object{u8"_id"s, 1}, documents = object{};
+         document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}},
+         selector = object{u8"_id"s, 1ll},
+         documents = object{};
     engine.collection("Update1ByID"s);
     EXPECT_TRUE(engine.create(document1));
     dump(engine);
@@ -228,8 +229,9 @@ TEST_F(DbEngineTest, History)
     auto engine = db::engine{test_file};
     auto document1 = object{{u8"A"s, 1}},
          document2 = object{{u8"A"s, 1}, {u8"B"s, 2}},
-         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}};
-    auto selector = object{u8"_id"s, 1}, all = object{};
+         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+         selector = object{u8"_id"s, 1ll},
+         all = object{};
     engine.collection("History"s);
     EXPECT_TRUE(engine.create(document1));
     dump(engine);

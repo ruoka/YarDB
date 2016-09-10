@@ -1,6 +1,6 @@
 CXX = clang++
 
-CXXFLAGS = -I$(SRCDIR) -std=c++1z -stdlib=libc++ -MMD # -D DEBUG=1
+CXXFLAGS = -I$(SRCDIR) -std=c++1z -g -MMD # -D DEBUG=1
 
 LDFLAGS = -stdlib=libc++
 
@@ -17,7 +17,7 @@ GTESTDIR = ../googletest/googletest
 GTESTLIB = $(GTESTDIR)/make/gtest_main.a
 
 
-TARGETS = $(addprefix $(BINDIR)/, yardb yarsh)
+TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 

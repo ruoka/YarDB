@@ -1,4 +1,3 @@
-#include <iostream>
 #include "xson/json.hpp"
 #include "db/metadata.hpp"
 #include "db/engine.hpp"
@@ -43,7 +42,7 @@ void db::engine::reindex()
             continue;
 
         auto collection = document["collection"s];
-        std::vector<std::string> keys = document["keys"s];
+        std::vector<std::string> keys = document["keys"s]; // FIXME We assume string keys hare
         m_index[collection].add(keys);
     }
 }
@@ -56,7 +55,7 @@ void db::engine::index(std::vector<std::string> keys)
     auto document = db::object{selector, {u8"keys"s, index.keys()}};
     auto collection = u8"db"s;
     std::swap(collection, m_collection);
-    update(selector, document, true);
+    upsert(selector, document);
     std::swap(collection, m_collection);
 };
 
@@ -94,11 +93,10 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     return success;
 }
 
-bool db::engine::update(const db::object& selector, db::object& updates, bool upsert)
+bool db::engine::update(const db::object& selector, db::object& updates)
 {
     auto success = false;
     auto& index = m_index[m_collection];
-    auto new_document = updates;
     for(const auto position : index.range(selector))
     {
         auto metadata = db::metadata{};
@@ -108,12 +106,12 @@ bool db::engine::update(const db::object& selector, db::object& updates, bool up
         m_storage >> metadata >> old_document;
         if(old_document.match(selector))
         {
-            new_document = updates;
-            new_document += std::move(old_document);
-
             m_storage.clear();
             m_storage.seekp(position, m_storage.beg);
             m_storage << updated << std::flush;
+
+            auto new_document = updates;
+            new_document += std::move(old_document);
 
             m_storage.clear();
             m_storage.seekp(0, m_storage.end);
@@ -124,18 +122,15 @@ bool db::engine::update(const db::object& selector, db::object& updates, bool up
             success = true;
         }
     }
-    if(!success && upsert)
-    {
-        create(new_document);
-        updates = std::move(new_document);
-        success = true;
-    }
     return success;
 }
 
 bool db::engine::upsert(const db::object& selector, db::object& updates)
 {
-    return update(selector, updates, true);
+    auto success = update(selector, updates);
+    if(!success)
+        success = create(updates);
+    return success;
 }
 
 bool db::engine::replace(const db::object& selector, db::object& updates)
@@ -144,7 +139,7 @@ bool db::engine::replace(const db::object& selector, db::object& updates)
          documents = object{};
     selector2 += selector;
     selector2 += updates;
-    return destroy(selector2, documents) && create(updates);
+    return destroy(selector2, documents) | create(updates);
 }
 
 bool db::engine::destroy(const db::object& selector, db::object& documents)
@@ -192,25 +187,4 @@ bool db::engine::history(const db::object& selector, db::object& documents)
         }
     }
     return success;
-}
-
-void db::engine::dump()
-{
-    m_storage.clear();
-    m_storage.seekg(0, m_storage.beg);
-    std::clog << "dump: " << '\n';
-    while(m_storage)
-    {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
-        m_storage >> metadata >> document;
-        if(m_storage)
-            std::clog << xson::json::stringify(
-                            {{"collection"s, metadata.collection         },
-                             {"action"s,     to_string(metadata.status)  },
-                             {"position"s,   metadata.position           },
-                             {"previous"s,   metadata.previous           },
-                             {"document"s,   document                    }})
-                      << ",\n";
-    }
 }

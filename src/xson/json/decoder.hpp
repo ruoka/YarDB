@@ -60,7 +60,7 @@ private:
             else if(value == "false")
                 obj = false;
             else if(value == "null")
-                obj= nullptr;
+                obj = nullptr;
             else
                 obj = stoi(value);
         }

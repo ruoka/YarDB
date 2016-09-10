@@ -19,7 +19,7 @@ public:
 
     bool read(const db::object& selector, db::object& documents);
 
-    bool update(const db::object& selector, db::object& updates, bool upsert = false);
+    bool update(const db::object& selector, db::object& updates);
 
     bool upsert(const db::object& selector, db::object& updates);
 
@@ -28,8 +28,6 @@ public:
     bool destroy(const db::object& selector, db::object& documents);
 
     bool history(const db::object& selector, db::object& documents);
-
-    void dump();
 
 public:
 

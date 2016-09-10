@@ -179,7 +179,7 @@ private:
         getline(ss, query);
         auto selector = object{};
         if(!id.empty())
-            selector = {"_id",id};
+            selector = {"_id", std::stoll(id)};
         return std::make_tuple(collection,selector);
     }
 

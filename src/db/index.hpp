@@ -11,9 +11,10 @@ namespace db {
 using object = xson::fson::object;
 using sequence_type = std::int64_t;
 using position_type = std::streamoff;
-using index_type = std::map<std::string,position_type>;
+using key_type = std::pair<sequence_type,std::string>;
+using index_type = std::map<key_type,position_type>;
 using primary_index_type = index_type;
-using secondary_index_type = std::map<std::string,std::map<std::string,position_type>>;
+using secondary_index_type = std::map<std::string,index_type>;
 
 class index_iterator
 {

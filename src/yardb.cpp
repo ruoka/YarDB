@@ -11,7 +11,7 @@ int main(int, char**)
 try
 {
     slog.redirect(clog);
-    slog.tag("YARESTDB");
+    slog.tag("YarDB");
     slog.level(syslog::severity::debug);
     slog << notice << "Initializing server" << flush;
     auto engine = db::engine{};

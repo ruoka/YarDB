@@ -362,9 +362,7 @@ TEST(XsonObjectTest,Match1)
     ASSERT_FALSE(ob.match(object{"bool", false}));
     ASSERT_TRUE(ob.match(object{"bool", true}));
     ASSERT_FALSE(ob.match(object{"keitto", "XYZ"s}));
-    auto test = object{"array", {1, 2, 3, 4, 5}};
-    TRACE(test);
-//    ASSERT_TRUE(ob.match(test));
+    ASSERT_TRUE(ob.match(object{"array", {1, 2, 3, 4, 5}}));
     ASSERT_FALSE(ob.match(object{"array", {1, 2, 3, 4, 6}}));
     ASSERT_FALSE(ob.match(object{"name", "asd"s}));
     ASSERT_TRUE(ob.match(object{"object", {{"A"s,1},{"B"s,2},{"C"s,3},{"D"s,4}}}));

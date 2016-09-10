@@ -45,10 +45,16 @@ struct less
 {
     bool operator()(const std::string& lhs, const std::string& rhs) const
     {
-        if(lhs.size() == rhs.size())
-            return lhs < rhs;
-        else
-            return lhs.size() < rhs.size();
+        const auto has_only_digits = lhs.find_first_not_of("0123456789") == std::string::npos &&
+                                     rhs.find_first_not_of("0123456789") == std::string::npos;
+        if(has_only_digits)
+        {
+            if(lhs.size() == rhs.size())
+                return lhs < rhs;
+            else
+                return lhs.size() < rhs.size();
+        }
+        return lhs < rhs;
     }
 };
 
@@ -286,7 +292,7 @@ public:
 
     bool empty () const
     {
-        return !has_value() && m_objects.empty();
+        return m_objects.empty();
     }
 
     bool has(const std::string& name) const
@@ -296,7 +302,7 @@ public:
 
     bool match(const object& subset) const
     {
-        if(subset.empty())
+        if(subset.empty() && !subset.has_value())
             return true;
         if(subset.type() == type::object || subset.type() == type::array)
         {

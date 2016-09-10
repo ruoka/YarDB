@@ -39,7 +39,7 @@ db::index_range db::index::range(const object& selector)
 
     if(primary_key(selector))
     {
-        const auto pk = key_type{(std::int64_t)selector[u8"_id"s], ""s};
+        const auto pk = xson::to_string(selector[u8"_id"s]);
         begin = end = index_iterator{m_primary_keys.find(pk), m_primary_keys.end()};
         ++end;
     }
@@ -48,7 +48,7 @@ db::index_range db::index::range(const object& selector)
         for(auto& key : m_secondary_keys)
             if(selector.has(key.first))
             {
-                const auto sk = key_type{0, xson::to_string(selector[u8"_id"s])};
+                const auto sk = xson::to_string(selector[key.first]);
                 begin = end = index_iterator{key.second.find(sk), key.second.end()};
             }
         ++end;
@@ -63,7 +63,7 @@ db::index_range db::index::range(const object& selector)
 
 db::position_type db::index::position(const object& selector) const
 {
-    const auto pk = key_type{selector[u8"_id"s], ""s};
+    const auto pk = xson::to_string(selector[u8"_id"s]);
     return m_primary_keys.at(pk);
 }
 
@@ -77,26 +77,26 @@ void db::index::update(object& document)
 
 void db::index::insert(object& document, position_type position)
 {
-    const auto pk = key_type{(std::int64_t)document[u8"_id"s], ""s};
+    const auto pk = xson::to_string(document[u8"_id"s]);
     m_primary_keys[pk] = position;
 
     for(auto& key : m_secondary_keys)
         if(document.has(key.first))
         {
-            const auto sk = key_type{0, xson::to_string(document[u8"_id"s])};
+            const auto sk = xson::to_string(document[key.first]);
             key.second[sk] = position;
         }
 }
 
 void db::index::erase(const object& document)
 {
-    const auto pk = key_type{(std::int64_t)document[u8"_id"s], ""s};
+    const auto pk = xson::to_string(document[u8"_id"s]);
     m_primary_keys.erase(pk);
 
     for(auto& key : m_secondary_keys)
         if(document.has(key.first))
         {
-            const auto sk = key_type{0, xson::to_string(document[u8"_id"s])};
+            const auto sk = xson::to_string(document[key.first]);
             key.second.erase(sk);
         }
 }

@@ -41,6 +41,17 @@ inline auto to_string(const value& val)
     throw std::logic_error{"This type is not supported"};
 }
 
+struct less
+{
+    bool operator()(const std::string& lhs, const std::string& rhs) const
+    {
+        if(lhs.size() == rhs.size())
+            return lhs < rhs;
+        else
+            return lhs.size() < rhs.size();
+    }
+};
+
 class object
 {
 public:
@@ -345,7 +356,7 @@ private:
 
     xson::value m_value;
 
-    std::map<std::string,object> m_objects;
+    std::map<std::string,object,less> m_objects;
 };
 
 } // namespace xson

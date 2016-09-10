@@ -11,8 +11,7 @@ namespace db {
 using object = xson::fson::object;
 using sequence_type = std::int64_t;
 using position_type = std::streamoff;
-using key_type = std::pair<sequence_type,std::string>;
-using index_type = std::map<key_type,position_type>;
+using index_type = std::map<std::string,position_type,xson::less>;
 using primary_index_type = index_type;
 using secondary_index_type = std::map<std::string,index_type>;
 

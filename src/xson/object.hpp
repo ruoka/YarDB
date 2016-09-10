@@ -13,13 +13,13 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using namespace std::experimental;
 
-using  value = variant<std::double_t,  // \x01
-                       std::string_t,  // \x02
-                       std::bool_t,    // \x08
-                       std::datetime_t,    // \x09
-                       std::nullptr_t, // \x0A
-                       std::int32_t,   // \x10
-                       std::int64_t    // \x12
+using  value = variant<std::double_t,   // \x01
+                       std::string_t,   // \x02
+                       std::bool_t,     // \x08
+                       std::datetime_t, // \x09
+                       std::nullptr_t,  // \x0A
+                       std::int32_t,    // \x10
+                       std::int64_t     // \x12
                        >;
 
 inline auto to_string(const value& val)
@@ -38,31 +38,31 @@ inline auto to_string(const value& val)
         return std::to_string(get<std::int32_t>(val));
     if(holds_alternative<std::int64_t>(val))
         return std::to_string(get<std::int64_t>(val));
-    throw std::logic_error{"Unknown value?"};
+    throw std::logic_error{"This type is not supported"};
 }
 
 class object
 {
 public:
 
-    using const_iterator = std::map<std::string,object>::const_iterator;
+    using const_iterator = std::map<std::string_t,object>::const_iterator;
 
     object() : m_type{type::object}, m_value{}, m_objects{}
     {}
 
     template <typename T,
-              typename = std::enable_if_t<!is_object<T>::value       &&
-                                          !is_value_array<T>::value  &&
-                                          !is_object_array<T>::value >>
-    object(const std::string& name, const T& val) :
+              typename = std::enable_if_t<!is_object_v<T>      &&
+                                          !is_value_array_v<T> &&
+                                          !is_object_array_v<T>>>
+    object(const std::string_t& name, const T& val) :
     object{}
     {
-        static_assert(is_value<T>::value, "Invalid type!");
-        m_objects[name] = val;
+        static_assert(is_value_v<T>, "This type is not supported");
+        m_objects[name].value(val);
     }
 
     template <typename T>
-    object(const std::enable_if_t<is_value_array<T>::value,std::string>& name, const T& array) :
+    object(const std::enable_if_t<is_value_array_v<T>,std::string_t>& name, const T& array) :
     object{}
     {
         auto& parent = m_objects[name];
@@ -76,7 +76,7 @@ public:
     }
 
     template <typename T>
-    object(const std::enable_if_t<is_value<T>::value,std::string>& name, std::initializer_list<T> array) :
+    object(const std::enable_if_t<is_value_v<T>,std::string_t>& name, std::initializer_list<T> array) :
     object{name, std::vector<T>{array}}
     {}
 
@@ -87,7 +87,7 @@ public:
     }
 
     template <typename T>
-    object(const std::enable_if_t<is_object_array<T>::value,std::string>& name, const T& array) :
+    object(const std::enable_if_t<is_object_array_v<T>,std::string_t>& name, const T& array) :
     object{}
     {
         auto& parent = m_objects[name];
@@ -128,12 +128,12 @@ public:
     }
 
     template <typename T,
-              typename = std::enable_if_t<!is_object<T>::value       &&
-                                          !is_value_array<T>::value  &&
-                                          !is_object_array<T>::value >>
+              typename = std::enable_if_t<!is_object_v<T>      &&
+                                          !is_value_array_v<T> &&
+                                          !is_object_array_v<T>>>
     object& operator = (const T& val)
     {
-        static_assert(is_value<T>::value, "Invalid type!");
+        static_assert(is_value_v<T>, "This type is not supported");
         value(val);
         return *this;
     }
@@ -156,20 +156,20 @@ public:
     template <typename T>
     void value(const T& val)
     {
-        static_assert(is_value<T>::value, "Invalid type!");
+        static_assert(is_value_v<T>, "This type is not supported");
         m_type = xson::to_type(val);
         m_value = val;
     }
 
-    object& operator [] (const std::string& name)
+    object& operator [] (const std::string_t& name)
     {
         return m_objects[name];
     }
 
-    const object& operator [] (const std::string& name) const
+    const object& operator [] (const std::string_t& name) const
     {
         if(!m_objects.count(name))
-            throw std::out_of_range("object has no element with name "s + name);
+            throw std::out_of_range("object has no field with name "s + name);
         return m_objects.find(name)->second;
     }
 
@@ -184,7 +184,7 @@ public:
     {
         const auto name = std::to_string(idx);
         if(!m_objects.count(name))
-            throw std::out_of_range("array has no index "s + name);
+            throw std::out_of_range("array has no index with value "s + name);
         return m_objects.find(name)->second;
     }
 

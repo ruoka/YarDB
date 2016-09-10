@@ -86,9 +86,12 @@ template <> constexpr type to_type(const std::int64_t&)
     return type::int64;
 }
 
+
 template <typename T> struct is_object : std::false_type {};
 
 template <> struct is_object<object> : std::true_type {};
+
+template <typename T> constexpr bool is_object_v = is_object<T>::value;
 
 
 template <typename T> struct is_value : std::false_type {};
@@ -107,6 +110,8 @@ template <> struct is_value<std::datetime_t> : std::true_type {};
 
 template <> struct is_value<std::nullptr_t> : std::true_type {};
 
+template <typename T> constexpr bool is_value_v = is_value<T>::value;
+
 
 template <typename T> struct is_value_array : std::false_type {};
 
@@ -118,6 +123,8 @@ template <typename T, std::size_t N> struct is_value_array<std::array<T,N>> : is
 
 template <typename T, std::size_t N> struct is_value_array<T[N]> : is_value<T> {};
 
+template <typename T> constexpr bool is_value_array_v = is_value_array<T>::value;
+
 
 template <typename T> struct is_object_array : std::false_type {};
 
@@ -128,5 +135,7 @@ template <> struct is_object_array<std::vector<object>> : std::true_type {};
 template <std::size_t N> struct is_object_array<std::array<object,N>> : std::true_type {};
 
 template <std::size_t N> struct is_object_array<object[N]> : std::true_type {};
+
+template <typename T> constexpr bool is_object_array_v = is_object_array<T>::value;
 
 } // namespace xson

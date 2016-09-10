@@ -39,7 +39,7 @@ enum class type : std::uint8_t
 //  max_key               = '\x7F'
 };
 
-inline std::ostream& operator << (std::ostream& os, type t)
+inline auto& operator << (std::ostream& os, type t)
 {
     os << static_cast<int>(t);
     return os;

@@ -1,10 +1,15 @@
 #pragma once
 
 #include <cassert>
+#include <experimental/type_traits>
 #include "xson/fast/encoder.hpp"
 #include "xson/object.hpp"
 
 namespace xson::fson {
+
+using std::enable_if_t;
+
+using std::experimental::is_enum_v;
 
 class encoder : public fast::encoder
 {
@@ -15,8 +20,9 @@ public:
 
     using fast::encoder::encode;
 
-    template<typename T>
-    std::enable_if_t<std::is_enum<T>::value,void> encode(T e)
+    template<typename T,
+             typename = enable_if_t<is_enum_v<T>>>
+    void encode(T e)
     {
         encode(static_cast<std::uint8_t>(e));
     }
@@ -24,7 +30,7 @@ public:
     void encode(std::double_t d)
     {
         union {
-            double d64;
+            std::double_t d64;
             std::uint64_t i64;
         } d2i;
         d2i.d64 = d;
@@ -39,10 +45,10 @@ public:
             encode(std::uint8_t{'\x00'});
     }
 
-    void encode(const std::datetime_t d)
+    void encode(const std::datetime_t dt)
     {
         using namespace std::chrono;
-        const auto us = duration_cast<milliseconds>(d.time_since_epoch());
+        const auto us = duration_cast<milliseconds>(dt.time_since_epoch());
         encode(static_cast<std::uint64_t>(us.count()));
     }
 
@@ -100,10 +106,10 @@ public:
 
 namespace std {
 
-inline std::ostream& operator << (std::ostream& os, const xson::object& ob)
+inline auto& operator << (std::ostream& os, const xson::object& ob)
 {
     xson::fson::encoder{os}.encode(ob);
     return os;
 }
 
-}
+} // namespace std

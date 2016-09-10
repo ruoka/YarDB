@@ -114,7 +114,7 @@ public:
 
     index_range range(const object& selector);
 
-    position_type position(const object& selector) const;
+    // position_type position(const object& selector) const;
 
     void update(object& document);
 

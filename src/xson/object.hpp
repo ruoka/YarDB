@@ -45,9 +45,7 @@ struct less
 {
     bool operator()(const std::string& lhs, const std::string& rhs) const
     {
-        const auto has_only_digits = lhs.find_first_not_of("0123456789") == std::string::npos &&
-                                     rhs.find_first_not_of("0123456789") == std::string::npos;
-        if(has_only_digits)
+        if(std::numeric(lhs) && std::numeric(rhs))
         {
             if(lhs.size() == rhs.size())
                 return lhs < rhs;

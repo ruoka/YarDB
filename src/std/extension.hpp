@@ -192,6 +192,11 @@ inline std::string& trim(std::string& str, const std::string& delimiters = " \f\
       return trim_left(trim_right(str, delimiters ), delimiters);
 }
 
+inline bool numeric(const std::string& str)
+{
+    return str.find_first_not_of("0123456789") == std::string::npos;
+}
+
 using bool_t = bool;
 
 using datetime_t = std::chrono::system_clock::time_point;

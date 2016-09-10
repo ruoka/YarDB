@@ -84,7 +84,7 @@ private:
                 slog << warning << "Method " << method << " is ignored" << flush;
                 client << "HTTP/1.1 400 Bad Request"                  << crlf
                        << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                       << "Server: YARESTDB/0.1"                      << crlf
+                       << "Server: YarDB/0.1"                      << crlf
                        << "Content-Length: 0"                         << crlf
                        << crlf
                        << flush;
@@ -96,7 +96,7 @@ private:
                 slog << debug << "URI " << uri << " is ignored" << flush;
                 client << "HTTP/1.1 204 No Content"                   << crlf
                        << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                       << "Server: YARESTDB/0.1"                      << crlf
+                       << "Server: YarDB/0.1"                      << crlf
                        << "Content-Length: 0"                         << crlf
                        << crlf
                        << flush;
@@ -148,7 +148,7 @@ private:
                 // const auto content = json::stringify({"success"s, body});
                 client << "HTTP/1.1 200 OK"                                                   << crlf
                        << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                       << "Server: YARESTDB/0.1"                                              << crlf
+                       << "Server: YarDB/0.1"                                              << crlf
                        << "Access-Control-Allow-Origin: *"                                    << crlf
                        << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
                        << "Accept: application/json"                                          << crlf
@@ -162,7 +162,7 @@ private:
                 // const auto content = json::stringify({"error"s, body});
                 client << "HTTP/1.1 404 Not Found"                                            << crlf
                        << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                       << "Server: YARESTDB/0.1"                                              << crlf
+                       << "Server: YarDB/0.1"                                              << crlf
                        << "Access-Control-Allow-Origin: *"                                    << crlf
                        << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
                        << "Accept: application/json"                                          << crlf
@@ -176,17 +176,24 @@ private:
         slog << debug << "client closed" << flush;
     }
 
-    tuple<string,json::object> parse(const string& uri)
+    tuple<string,xson::object> parse(const string& uri)
     {
         auto ss = stringstream{uri};
-        auto slash = ""s, collection = ""s, id = ""s, query = ""s;
-        getline(ss, slash, '/');
+        auto slash = ""s, collection = ""s, key = ""s, query = ""s, value = ""s;
+        getline(ss, slash,      '/');
         getline(ss, collection, '/');
-        getline(ss, id, '?');
-        getline(ss, query);
-        auto selector = object{};
-        if(!id.empty())
-            selector = {"_id", std::stoll(id)};
+        getline(ss, key,        '?');
+        getline(ss, query,      '=');
+        getline(ss, value);
+        auto selector = xson::object{};
+        if(!key.empty() && std::numeric(key))
+            selector = {"_id", std::stoll(key)};
+        else if(!value.empty() && std::numeric(value))
+            selector = {key, {query, std::stoll(value)}};
+        else if(!query.empty() && !value.empty())
+            selector = {key, {query, value}};
+        else
+            selector = {"_id", 0ll};
         return std::make_tuple(collection,selector);
     }
 

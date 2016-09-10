@@ -125,10 +125,10 @@ private:
     std::ostream& m_os;
 };
 
-inline std::ostream& operator << (std::ostream& os, const object& obj)
+inline auto& operator << (std::ostream& os, const xson::object& obj)
 {
     const auto indent = os.width();
-    auto e = encoder{os, indent};
+    auto e = xson::json::encoder{os, indent};
     os.width(0);
     e.encode(obj);
     os.width(indent);

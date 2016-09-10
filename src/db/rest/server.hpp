@@ -8,12 +8,19 @@
 
 namespace db::rest {
 
-using namespace std;
 using namespace std::string_literals;
-using namespace std::chrono;
 using namespace std::chrono_literals;
-using namespace xson;
 using namespace net;
+using namespace xson;
+
+using std::string;
+using std::thread;
+using std::stringstream;
+using std::chrono::system_clock;
+using std::set;
+using std::tuple;
+using std::get;
+using std::ws;
 
 class server
 {
@@ -35,7 +42,7 @@ public:
             auto client = endpoint.accept();
             slog << info << "Accepted connection" << flush;
             auto worker = thread{[&](){handle(move(client));}};
-            this_thread::sleep_for(1s);
+            std::this_thread::sleep_for(1s);
             worker.detach();
         }
     }

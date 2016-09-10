@@ -67,4 +67,4 @@ inline auto to_string(metadata::action a)
     return "deleted"s;
 }
 
-} // namespace fdb
+} // namespace db

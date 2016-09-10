@@ -1,8 +1,6 @@
-#include "xson/json.hpp"
 #include "db/metadata.hpp"
 #include "db/engine.hpp"
 
-using namespace std;
 using namespace std::string_literals;
 
 db::engine::engine(const std::string file) : m_collection{u8"db"s}, m_index{}, m_storage{}

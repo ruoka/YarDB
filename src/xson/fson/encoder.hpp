@@ -112,4 +112,4 @@ inline auto& operator << (std::ostream& os, const xson::object& ob)
     return os;
 }
 
-} // namespace std
+}

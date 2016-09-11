@@ -191,9 +191,9 @@ private:
         else if(!key.empty() && std::numeric(key))
             selector = {"id", std::stoll(key)};
         else if(!value.empty() && std::numeric(value))
-            selector = {key, {query, std::stoll(value)}};
+            selector = {key, xson::object{query, std::stoll(value)}};
         else if(!query.empty() && !value.empty())
-            selector = {key, {query, value}};
+            selector = {key, xson::object{query, value}};
         else
             selector = {"id", -1ll};
         return std::make_tuple(collection,selector);

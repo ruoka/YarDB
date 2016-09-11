@@ -15,7 +15,7 @@ struct uri
 
 uri(string_view string)
 {
-    auto position = string_view::npos;
+    auto position = string.npos;
 
     position = string.find_first_of(":@[]/?#");         // gen-delims
 
@@ -33,40 +33,33 @@ uri(string_view string)
         string.remove_prefix(2);                        // //
 
         position = string.find_first_of("/?#");
-        if(position == string_view::npos)
+        if(position == string.npos)
             position = string.length();
-
         auto authority = string.substr(0, position);
         string.remove_prefix(position);                 // authority
 
         position = authority.find_first_of('@');
-
-        if(position != string_view::npos)
+        if(position != string.npos)
         {
             userinfo.assign(authority.data(), position);
-            authority.remove_prefix(position+1);        // userinfo@
+            authority.remove_prefix(position + 1);      // userinfo@
         }
 
         position = authority.find_last_of(':');
+        if(position != string.npos)
+        {
+            auto size = authority.length() - position;
+            port.assign(authority.data() + position + 1, size - 1);
+            authority.remove_suffix(size);              // :port
+        }
 
-        if(position != string_view::npos)
-        {
-            host.assign(authority.data(), position);
-            authority.remove_prefix(position+1);        // host:
-            position = authority.length();
-            port.assign(authority.data(), position);
-            authority.remove_prefix(position);          // port
-        }
-        else
-        {
-            position = authority.length();
-            host.assign(authority.data(), position);
-            authority.remove_prefix(position);          // host
-        }
+        position = authority.length();
+        host.assign(authority.data(), position);
+        authority.remove_prefix(position);              // host
     }
 
     position = string.find_first_of("?#");              // path component
-    if(position == string_view::npos)
+    if(position == string.npos)
         position = string.length();
     path.assign(string.data(), position);
     string.remove_prefix(position);                     // path
@@ -75,7 +68,7 @@ uri(string_view string)
     {
         string.remove_prefix(1);                        // ?
         position = string.find_first_of("#");
-        if(position == string_view::npos)
+        if(position == string.npos)
             position = string.length();
         query.assign(string.data(), position);
         string.remove_prefix(position);                 // query

@@ -11,6 +11,7 @@ TEST(NetURI,Parse1)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -27,6 +28,7 @@ TEST(NetURI,Parse2)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -43,6 +45,7 @@ TEST(NetURI,Parse3)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -59,6 +62,7 @@ TEST(NetURI,Parse4)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -75,6 +79,7 @@ TEST(NetURI,Parse5)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -91,6 +96,7 @@ TEST(NetURI,ParseRelative1)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -107,6 +113,7 @@ TEST(NetURI,ParseRelative2)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;
@@ -123,6 +130,7 @@ TEST(NetURI,ParseInvalid)
 
     auto parsed = net::uri{raw};
 
+    std::cout << "URI:      " << raw             << std::endl;
     std::cout << "Absolute: " << parsed.absolute << std::endl;
     std::cout << "Scheme:   " << parsed.scheme   << std::endl;
     std::cout << "Userinfo: " << parsed.userinfo << std::endl;

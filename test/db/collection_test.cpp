@@ -69,7 +69,7 @@ TEST_F(DbEngineTest2, Create2Keys)
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 4}, {u8"C"s, 3}},
          document2 = object{{u8"A"s, 2}, {u8"B"s, 5}, {u8"C"s, 3}},
          document3 = object{{u8"A"s, 3}, {u8"B"s, 6}, {u8"C"s, 3}},
-         selector = object{{u8"_id"s, 1}},
+         selector = object{{u8"id"s, 1}},
          documents = object{};
     engine.collection("Create2Keys");
 

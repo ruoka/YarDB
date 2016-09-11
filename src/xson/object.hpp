@@ -45,7 +45,9 @@ struct less
 {
     bool operator()(const std::string& lhs, const std::string& rhs) const
     {
-        if(std::numeric(lhs) && std::numeric(rhs))
+        const auto has_only_digits = lhs.find_first_not_of("0123456789") == std::string::npos &&
+                                     rhs.find_first_not_of("0123456789") == std::string::npos;
+        if(has_only_digits)
         {
             if(lhs.size() == rhs.size())
                 return lhs < rhs;
@@ -91,8 +93,8 @@ public:
     }
 
     template <typename T>
-    object(const std::enable_if_t<is_value_v<T>,std::string_t>& name, std::initializer_list<T> array) :
-    object{name, std::vector<T>{array}}
+    object(const std::enable_if_t<is_value_v<T>,std::string_t>& name, std::initializer_list<T> vil) :
+    object{name, std::vector<T>{vil}}
     {}
 
     object(const std::string& name, const object& obj) :
@@ -115,11 +117,11 @@ public:
         parent.type(type::array);
     }
 
-    object(std::initializer_list<object> il) :
+    object(std::initializer_list<object> oil) :
     object{}
     {
-        for(const auto& i : il)
-            m_objects.insert(i.cbegin(), i.cend());
+        for(const auto& o : oil)
+            m_objects.insert(o.cbegin(), o.cend());
     }
 
     object(const object& obj) :

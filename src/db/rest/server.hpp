@@ -186,14 +186,16 @@ private:
         getline(ss, query,      '=');
         getline(ss, value);
         auto selector = xson::object{};
-        if(!key.empty() && std::numeric(key))
-            selector = {"_id", std::stoll(key)};
+        if(key.empty())
+            selector = {};
+        else if(!key.empty() && std::numeric(key))
+            selector = {"id", std::stoll(key)};
         else if(!value.empty() && std::numeric(value))
             selector = {key, {query, std::stoll(value)}};
         else if(!query.empty() && !value.empty())
             selector = {key, {query, value}};
         else
-            selector = {"_id", 0ll};
+            selector = {"id", -1ll};
         return std::make_tuple(collection,selector);
     }
 

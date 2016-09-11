@@ -32,7 +32,7 @@ TEST(DbServerTest, Connect)
     server >> header >> reply;
     clog << "Received:\n" << json::stringify(reply.document) << endl;
 
-    read.selector = {"_id", 2};
+    read.selector = {"id", 2};
     server << read << net::flush;
     clog << "Sent:\n" << json::stringify(read.selector) << endl;
 

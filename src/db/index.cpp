@@ -41,41 +41,41 @@ db::index_range db::index::range(const object& selector)
 
     if(primary_key(selector))
     {
-        if(selector[u8"id"s].has(u8"gt"s))
+        if(selector[u8"id"s].has(u8"$gt"s))
         {
-            const primary_key_type pk = selector[u8"id"s][u8"gt"s];
+            const primary_key_type pk = selector[u8"id"s][u8"$gt"s];
             begin = m_primary_keys.upper_bound(pk);
         }
-        else if(selector[u8"id"s].has(u8"gte"s))
+        else if(selector[u8"id"s].has(u8"$gte"s))
         {
-            const primary_key_type pk = selector[u8"id"s][u8"gte"s];
+            const primary_key_type pk = selector[u8"id"s][u8"$gte"s];
             begin = m_primary_keys.lower_bound(pk);
         }
-        else if(selector[u8"id"s].has(u8"lt"s))
+        else if(selector[u8"id"s].has(u8"$lt"s))
         {
-            const primary_key_type pk = selector[u8"id"s][u8"lt"s];
+            const primary_key_type pk = selector[u8"id"s][u8"$lt"s];
             end = m_primary_keys.lower_bound(pk);
         }
-        else if(selector[u8"id"s].has(u8"lte"s))
+        else if(selector[u8"id"s].has(u8"$lte"s))
         {
-            const primary_key_type pk = selector[u8"id"s][u8"lte"s];
+            const primary_key_type pk = selector[u8"id"s][u8"$lte"s];
             end = m_primary_keys.upper_bound(pk);
         }
-        else if(selector[u8"id"s].has(u8"eq"s))
+        else if(selector[u8"id"s].has(u8"$eq"s))
         {
-            const primary_key_type pk = selector[u8"id"s][u8"eq"s];
+            const primary_key_type pk = selector[u8"id"s][u8"$eq"s];
             std::tie(begin,end) = m_primary_keys.equal_range(pk);
         }
-        else if(selector[u8"id"s].has(u8"head"s))
+        else if(selector[u8"id"s].has(u8"$head"s))
         {
-            const sequence_type n = selector[u8"id"s][u8"head"s];
+            const sequence_type n = selector[u8"id"s][u8"$head"s];
             auto itr = m_primary_keys.begin();
             std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
             end = itr;
         }
-        else if(selector[u8"id"s].has(u8"tail"s))
+        else if(selector[u8"id"s].has(u8"$tail"s))
         {
-            const sequence_type n = selector[u8"id"s][u8"tail"s];
+            const sequence_type n = selector[u8"id"s][u8"$tail"s];
             auto itr = m_primary_keys.rbegin();
             std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
             begin = itr.base();

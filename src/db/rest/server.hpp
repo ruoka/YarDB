@@ -192,7 +192,7 @@ private:
         auto pos = query.find_first_of('=');
         auto name = to_string(query.substr(0,pos));
         auto value = stoll(query.substr(pos+1,query.length()));
-        return {name, value};
+        return {"$"s + name, value};
     }
 
     const set<string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};

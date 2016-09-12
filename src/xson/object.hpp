@@ -327,6 +327,8 @@ public:
         }
         else if(m_type == type::int64 && subset.m_type == type::int32)
             return get<std::int64_t>(m_value) == get<std::int32_t>(subset.m_value);
+        else if(subset.m_type == type::string && '$' == get<std::string>(subset.m_value)[0]) // FIXME
+            return true;
         else
             return m_value == subset.m_value;
     }

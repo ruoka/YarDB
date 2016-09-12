@@ -86,12 +86,6 @@ db::index_range db::index::range(const object& selector)
             begin = index_iterator{itr.base(), m_primary_keys.end()};
             end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
         }
-        else if(selector[u8"id"s].has(u8"eq"s))
-        {
-            const auto pk = xson::to_string(selector[u8"id"s][u8"eq"s]);
-            begin = end = index_iterator{m_primary_keys.find(pk), m_primary_keys.end()};
-            ++end;
-        }
         else
         {
             const auto pk = xson::to_string(selector[u8"id"s]);

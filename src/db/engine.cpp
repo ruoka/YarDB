@@ -82,7 +82,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
         m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
-        // if(document.match(selector))
+        if(document.match(selector))
         {
             documents += std::move(document);
             success = true;

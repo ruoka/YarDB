@@ -285,12 +285,17 @@ public:
         return *this;
     }
 
-    bool has_value () const
+    bool has_value() const
     {
         return m_value.index() != variant_npos;
     }
 
-    bool empty () const
+    bool has_objects() const
+    {
+        return m_objects.empty() != false;
+    }
+
+    bool empty() const
     {
         return m_objects.empty();
     }
@@ -302,7 +307,7 @@ public:
 
     bool match(const object& subset) const
     {
-        if(subset.empty() && !subset.has_value())
+        if(!subset.has_value() && !subset.has_objects())
             return true;
         if(subset.type() == type::object || subset.type() == type::array)
         {
@@ -310,6 +315,10 @@ public:
             auto ll = m_objects.cend();
             auto rf = subset.m_objects.cbegin();
             auto rl = subset.m_objects.cend();
+
+            if(rf->first[0] == '$')                 // FIXME Compare values
+                return true;
+
             while(lf != ll && rf != rl)
             {
                 if(lf->first < rf->first)
@@ -327,8 +336,6 @@ public:
         }
         else if(m_type == type::int64 && subset.m_type == type::int32)
             return get<std::int64_t>(m_value) == get<std::int32_t>(subset.m_value);
-        else if(subset.m_type == type::string && '$' == get<std::string>(subset.m_value)[0]) // FIXME
-            return true;
         else
             return m_value == subset.m_value;
     }

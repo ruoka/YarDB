@@ -140,3 +140,22 @@ TEST(NetURI,ParseInvalid)
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
+
+TEST(NetURI,ParseRelative3)
+{
+    auto raw = "/xxx?tail=10"s;
+
+    auto parsed = net::uri{raw};
+
+    std::cout << "URI:      " << raw             << std::endl;
+    std::cout << "Absolute: " << parsed.absolute << std::endl;
+    std::cout << "Scheme:   " << parsed.scheme   << std::endl;
+    std::cout << "Userinfo: " << parsed.userinfo << std::endl;
+    std::cout << "Host:     " << parsed.host     << std::endl;
+    std::cout << "Port:     " << parsed.port     << std::endl;
+    std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
+    std::cout << "Query:    " << parsed.query    << std::endl;
+    std::cout << "Fragment: " << parsed.fragment << std::endl;
+}

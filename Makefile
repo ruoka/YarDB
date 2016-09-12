@@ -1,6 +1,6 @@
 CXX = clang++
 
-CXXFLAGS = -I$(SRCDIR) -std=c++1z -g -MMD # -D DEBUG=1
+CXXFLAGS = -I$(SRCDIR) -std=c++1z -g -MMD -D DEBUG=1
 
 LDFLAGS = -stdlib=libc++
 
@@ -49,7 +49,8 @@ $(GTEST_TARGET): $(OBJECTS) $(GTEST_OBJECTS)
 	$(CXX) $(LDFLAGS) $(OBJECTS) $(GTEST_OBJECTS) $(GTESTLIB) -o $@
 
 
-DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(GTEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/%.d)
+DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(OBJECTS:%.o=%.d) $(GTEST_OBJECTS:%.o=%.d)
+
 
 .PHONY: yar
 yar: $(TARGETS)

@@ -1,4 +1,4 @@
-    #pragma once
+#pragma once
 
 #include <string>
 #include <experimental/string_view>
@@ -8,12 +8,13 @@
 namespace net
 {
 
+using namespace std::string_literals;
 using std::experimental::string_view;
 
 struct uri
 {
 
-uri(string_view string)
+explicit uri(string_view string)
 {
     auto position = string.npos;
 
@@ -83,21 +84,64 @@ uri(string_view string)
     }
 }
 
-bool absolute = false;
+struct property
+{
+    auto operator [] (std::size_t idx) const
+    {
+        auto tmp = m_data;
+        auto pos = tmp.find_first_of('/');
+        while(idx && pos != tmp.npos && tmp.at(pos) == '/')
+        {
+            tmp.remove_prefix(pos + 1);
+            pos = tmp.find_first_of("/?#");
+            --idx;
+        }
+        if(pos == tmp.npos) pos = tmp.length();
+        if(!idx)
+            return tmp.substr(0, pos);
+        else
+            return string_view{};
+    }
 
-std::string scheme;
+    operator string_view () const
+    {
+        return m_data;
+    }
 
-std::string userinfo;
+private:
 
-std::string host;
+    friend class uri;
 
-std::string port;
+    void assign(const char* s, std::size_t sz)
+    {
+        m_data = {s,sz};
+    }
 
-std::string path;
-
-std::string query;
-
-std::string fragment;
+    string_view m_data;
 };
 
+bool absolute = false;
+
+property scheme;
+
+property userinfo;
+
+property host;
+
+property port;
+
+property path;
+
+property query;
+
+property fragment;
+
+};
+
+inline auto& operator << (std::ostream& os, const uri::property& p)
+{
+    os << static_cast<const string_view>(p);
+    return os;
 }
+
+} // namespace net

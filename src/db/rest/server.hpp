@@ -4,6 +4,7 @@
 #include "xson/json.hpp"
 #include "net/syslogstream.hpp"
 #include "net/acceptor.hpp"
+#include "net/uri.hpp"
 #include "db/engine.hpp"
 
 namespace db::rest {
@@ -84,7 +85,7 @@ private:
                 slog << warning << "Method " << method << " is ignored" << flush;
                 client << "HTTP/1.1 400 Bad Request"                  << crlf
                        << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                       << "Server: YarDB/0.1"                      << crlf
+                       << "Server: YarDB/0.1"                         << crlf
                        << "Content-Length: 0"                         << crlf
                        << crlf
                        << flush;
@@ -96,20 +97,30 @@ private:
                 slog << debug << "URI " << uri << " is ignored" << flush;
                 client << "HTTP/1.1 204 No Content"                   << crlf
                        << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                       << "Server: YarDB/0.1"                      << crlf
+                       << "Server: YarDB/0.1"                         << crlf
                        << "Content-Length: 0"                         << crlf
                        << crlf
                        << flush;
                 continue;
             }
 
-            const auto tmp = parse(uri);
-            const auto collection = get<0>(tmp);
-            const auto selector = get<1>(tmp);
+            slog << debug << "URI " << uri << " is OK" << flush;
+
+            auto uri2 = net::uri{uri};
+            auto collection = uri2.path[1];
+            auto key = uri2.path[2];
+            auto query = uri2.query[0];
+
+            auto selector = xson::object{};
+
+            if(!key.empty() && std::numeric(key))
+                selector = {"id"s, stoll(to_string(key))};
+            else if(!key.empty() && !query.empty())
+                selector = {to_string(key), make_object(uri2.query[0])};
+
+            m_engine.collection(to_string(collection));
+
             auto found = false;
-
-            m_engine.collection(collection);
-
             auto body = json::object{};
 
             if(method == "GET"s || method == "HEAD"s)
@@ -176,27 +187,10 @@ private:
         slog << debug << "client closed" << flush;
     }
 
-    tuple<string,xson::object> parse(const string& uri)
+    xson::object make_object(const string_view query)
     {
-        auto ss = stringstream{uri};
-        auto slash = ""s, collection = ""s, key = ""s, query = ""s, value = ""s;
-        getline(ss, slash,      '/');
-        getline(ss, collection, '/');
-        getline(ss, key,        '?');
-        getline(ss, query,      '=');
-        getline(ss, value);
-        auto selector = xson::object{};
-        if(key.empty())
-            selector = {};
-        else if(!key.empty() && std::numeric(key))
-            selector = {"id", std::stoll(key)};
-        else if(!value.empty() && std::numeric(value))
-            selector = {key, xson::object{query, std::stoll(value)}};
-        else if(!query.empty() && !value.empty())
-            selector = {key, xson::object{query, value}};
-        else
-            selector = {"id", -1ll};
-        return std::make_tuple(collection,selector);
+        auto pos = query.find_first_of('=');
+        return {to_string(query.substr(0,pos)), stoll(to_string(query.substr(pos+1,query.length())))};
     }
 
     const set<string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};

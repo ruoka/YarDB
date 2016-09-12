@@ -114,7 +114,7 @@ private:
             auto selector = xson::object{};
 
             if(!key.empty() && std::numeric(key))
-                selector = {"id"s, stoll(to_string(key))};
+                selector = {"id"s, stoll(key)};
             else if(!key.empty() && !query.empty())
                 selector = {to_string(key), make_object(uri2.query[0])};
 
@@ -190,7 +190,9 @@ private:
     xson::object make_object(const string_view query)
     {
         auto pos = query.find_first_of('=');
-        return {to_string(query.substr(0,pos)), stoll(to_string(query.substr(pos+1,query.length())))};
+        auto name = to_string(query.substr(0,pos));
+        auto value = stoll(query.substr(pos+1,query.length()));
+        return {name, value};
     }
 
     const set<string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};

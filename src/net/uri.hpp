@@ -8,8 +8,9 @@
 namespace net
 {
 
+using string_view = std::experimental::string_view;
+
 using namespace std::string_literals;
-using std::experimental::string_view;
 
 struct uri
 {
@@ -86,6 +87,11 @@ explicit uri(string_view string)
 
 struct property
 {
+    operator string_view () const
+    {
+        return m_data;
+    }
+
     auto operator [] (std::size_t idx) const
     {
         auto tmp = m_data;
@@ -101,11 +107,6 @@ struct property
             return tmp.substr(0, pos);
         else
             return string_view{};
-    }
-
-    operator string_view () const
-    {
-        return m_data;
     }
 
 private:

@@ -70,6 +70,14 @@ db::index_range db::index::range(const object& selector)
             begin = end = index_iterator{m_primary_keys.find(pk), m_primary_keys.end()};
             ++end;
         }
+        else if(selector[u8"id"s].has(u8"head"s))
+        {
+            const std::int64_t n = selector[u8"id"s][u8"head"s];
+            auto itr = m_primary_keys.begin();
+            std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
+            begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
+            end = index_iterator{itr, m_primary_keys.end()};
+        }
         else if(selector[u8"id"s].has(u8"tail"s))
         {
             const std::int64_t n = selector[u8"id"s][u8"tail"s];

@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <stdexcept>
 #include <vector>
+#include <experimental/string_view>
 
 namespace std {
 namespace chrono {
@@ -177,6 +178,12 @@ inline auto to_string(const string& str) noexcept
     return str;
 }
 
+using bool_t = bool;
+
+using datetime_t = std::chrono::system_clock::time_point;
+
+using string_t = std::string;
+
 inline std::string& trim_right(std::string& str, const std::string& delimiters = " \f\n\r\t\v")
 {
     return str.erase(str.find_last_not_of(delimiters) + 1);
@@ -198,10 +205,9 @@ inline bool numeric(const T& str)
     return str.find_first_not_of("0123456789") == str.npos;
 }
 
-using bool_t = bool;
-
-using datetime_t = std::chrono::system_clock::time_point;
-
-using string_t = std::string;
+inline long long stoll (std::experimental::string_view str, std::size_t *idx = 0, int base = 10)
+{
+    return std::stoll(std::string{str}, idx, base);
+}
 
 } // namespace std

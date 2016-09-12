@@ -69,22 +69,16 @@ TEST_F(DbEngineTest2, Create2Keys)
     auto document1 = object{{u8"A"s, 1}, {u8"B"s, 4}, {u8"C"s, 3}},
          document2 = object{{u8"A"s, 2}, {u8"B"s, 5}, {u8"C"s, 3}},
          document3 = object{{u8"A"s, 3}, {u8"B"s, 6}, {u8"C"s, 3}},
-         selector = object{{u8"id"s, 1}},
+         selector = object{{u8"id"s, 1ll}},
          documents = object{};
     engine.collection("Create2Keys");
-
     engine.index({"A", "B", "Z"});
-
     engine.upsert(document1, document1);
     engine.upsert(document2, document2);
     engine.upsert(document3, document3);
     dump(engine);
     engine.destroy(selector, documents);
     dump(engine);
-    try
-    {
-        engine.index({"D", "1", "2"});
-        engine.reindex();
-    }
-    catch(...){}
+    engine.index({"D", "1", "2"});
+    engine.reindex();
 }

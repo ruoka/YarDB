@@ -4,7 +4,7 @@
 void db::index::add(const std::string& key)
 {
     if(m_secondary_keys.count(key) == 0)
-        m_secondary_keys[key] = index_type{};
+        m_secondary_keys[key] = secondary_index_type{};
 }
 
 void db::index::add(std::vector<std::string> keys)
@@ -36,61 +36,54 @@ bool db::index::secondary_key(const object& selector) const
 
 db::index_range db::index::range(const object& selector)
 {
-    index_iterator begin, end;
+    auto begin = index_iterator{m_primary_keys.begin()};
+    auto end = index_iterator{m_primary_keys.end()};
 
     if(primary_key(selector))
     {
         if(selector[u8"id"s].has(u8"gt"s))
         {
-            const auto pk = xson::to_string(selector[u8"id"s][u8"gt"s]);
-            begin = index_iterator{m_primary_keys.upper_bound(pk), m_primary_keys.end()};
-            end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
+            const primary_key_type pk = selector[u8"id"s][u8"gt"s];
+            begin = m_primary_keys.upper_bound(pk);
         }
         else if(selector[u8"id"s].has(u8"gte"s))
         {
-            const auto pk = xson::to_string(selector[u8"id"s][u8"gte"s]);
-            begin = index_iterator{m_primary_keys.lower_bound(pk), m_primary_keys.end()};
-            end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
+            const primary_key_type pk = selector[u8"id"s][u8"gte"s];
+            begin = m_primary_keys.lower_bound(pk);
         }
         else if(selector[u8"id"s].has(u8"lt"s))
         {
-            const auto pk = xson::to_string(selector[u8"id"s][u8"lt"s]);
-            begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
-            end = index_iterator{m_primary_keys.lower_bound(pk), m_primary_keys.end()};
+            const primary_key_type pk = selector[u8"id"s][u8"lt"s];
+            end = m_primary_keys.lower_bound(pk);
         }
         else if(selector[u8"id"s].has(u8"lte"s))
         {
-            const auto pk = xson::to_string(selector[u8"id"s][u8"lte"s]);
-            begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
-            end = index_iterator{m_primary_keys.upper_bound(pk), m_primary_keys.end()};
+            const primary_key_type pk = selector[u8"id"s][u8"lte"s];
+            end = m_primary_keys.upper_bound(pk);
         }
         else if(selector[u8"id"s].has(u8"eq"s))
         {
-            const auto pk = xson::to_string(selector[u8"id"s][u8"eq"s]);
-            begin = end = index_iterator{m_primary_keys.find(pk), m_primary_keys.end()};
-            ++end;
+            const primary_key_type pk = selector[u8"id"s][u8"eq"s];
+            std::tie(begin,end) = m_primary_keys.equal_range(pk);
         }
         else if(selector[u8"id"s].has(u8"head"s))
         {
-            const std::int64_t n = selector[u8"id"s][u8"head"s];
+            const sequence_type n = selector[u8"id"s][u8"head"s];
             auto itr = m_primary_keys.begin();
             std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
-            begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
-            end = index_iterator{itr, m_primary_keys.end()};
+            end = itr;
         }
         else if(selector[u8"id"s].has(u8"tail"s))
         {
-            const std::int64_t n = selector[u8"id"s][u8"tail"s];
+            const sequence_type n = selector[u8"id"s][u8"tail"s];
             auto itr = m_primary_keys.rbegin();
             std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
-            begin = index_iterator{itr.base(), m_primary_keys.end()};
-            end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
+            begin = itr.base();
         }
         else
         {
-            const auto pk = xson::to_string(selector[u8"id"s]);
-            begin = end = index_iterator{m_primary_keys.find(pk), m_primary_keys.end()};
-            ++end;
+            const primary_key_type pk = selector[u8"id"s];
+            std::tie(begin,end) = m_primary_keys.equal_range(pk);
         }
     }
     else if(secondary_key(selector)) // Use primary key
@@ -99,16 +92,11 @@ db::index_range db::index::range(const object& selector)
             if(selector.has(key.first))
             {
                 const auto sk = xson::to_string(selector[key.first]);
-                begin = end = index_iterator{key.second.find(sk), key.second.end()};
+                std::tie(begin,end) = key.second.equal_range(sk);
             }
-        ++end;
     }
-    else // Fllback to full scan
-    {
-        begin = index_iterator{m_primary_keys.begin(), m_primary_keys.end()};
-        end = index_iterator{m_primary_keys.end(), m_primary_keys.end()};
-    }
-    return {begin, end};
+
+    return {begin,end};
 }
 
 // db::position_type db::index::position(const object& selector) const
@@ -127,7 +115,7 @@ void db::index::update(object& document)
 
 void db::index::insert(object& document, position_type position)
 {
-    const auto pk = xson::to_string(document[u8"id"s]);
+    const primary_key_type pk = document[u8"id"s];
     m_primary_keys[pk] = position;
 
     for(auto& key : m_secondary_keys)
@@ -140,7 +128,7 @@ void db::index::insert(object& document, position_type position)
 
 void db::index::erase(const object& document)
 {
-    const auto pk = xson::to_string(document[u8"id"s]);
+    const primary_key_type pk = document[u8"id"s];
     m_primary_keys.erase(pk);
 
     for(auto& key : m_secondary_keys)

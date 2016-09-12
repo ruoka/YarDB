@@ -9,52 +9,89 @@ using namespace std::string_literals;
 namespace db {
 
 using object = xson::fson::object;
+
 using sequence_type = std::int64_t;
+
+using primary_key_type = sequence_type;
+
+using secondary_index_name = std::string;
+
+using secondary_key_type = std::string;
+
 using position_type = std::streamoff;
-using index_type = std::map<std::string,position_type,xson::less>;
-using primary_index_type = index_type;
-using secondary_index_type = std::map<std::string,index_type>;
+
+using primary_index_type = std::map<primary_key_type,
+                                    position_type>;
+
+using secondary_index_type = std::map<secondary_key_type,
+                                      position_type,
+                                      xson::less>;
+
+using secondary_index_map = std::map<secondary_index_name,
+                                     secondary_index_type>;
 
 class index_iterator
 {
 public:
 
-    using iterator = index_type::iterator;
+    enum index_type {primary, secondary};
+
+    using primary_iterator = primary_index_type::iterator;
+
+    using secondary_iterator = secondary_index_type::iterator;
 
     index_iterator() = default;
 
-    index_iterator(iterator current, iterator end) :
-        m_current{current},
-        m_end{end}
+    index_iterator(primary_iterator current) :
+        m_primary_current{current},
+        m_secondary_current{},
+        m_index_type{primary}
+    {}
+
+    index_iterator(secondary_iterator current) :
+        m_primary_current{},
+        m_secondary_current{current},
+        m_index_type{primary}
     {}
 
     index_iterator(const index_iterator& itr) :
-        m_current{itr.m_current},
-        m_end{itr.m_end}
+        m_primary_current{itr.m_primary_current},
+        m_secondary_current{itr.m_secondary_current},
+        m_index_type{itr.m_index_type}
     {}
 
     auto operator * ()
     {
-        return m_current->second;
+        if(m_index_type == primary)
+            return std::get<position_type>(*m_primary_current);
+        else
+            return std::get<position_type>(*m_secondary_current);
     }
 
     auto& operator ++ ()
     {
-        if(m_current != m_end)
-            ++m_current;
+        if(m_index_type == primary)
+            ++m_primary_current;
+        else
+            ++m_secondary_current;
         return *this;
     }
 
     auto operator != (const index_iterator& itr) const
     {
-        return m_current != itr.m_current;
+        if(m_index_type == primary)
+            return m_primary_current != itr.m_primary_current;
+        else
+            return m_secondary_current != itr.m_secondary_current;
     }
 
 private:
 
-    iterator m_current, m_end;
+    primary_iterator m_primary_current;
 
-    friend class index;
+    secondary_iterator m_secondary_current;
+
+    index_type m_index_type;
 };
 
 class index_range
@@ -128,7 +165,7 @@ private:
 
     primary_index_type m_primary_keys;
 
-    secondary_index_type m_secondary_keys;
+    secondary_index_map m_secondary_keys;
 };
 
 } // namespace db

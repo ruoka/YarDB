@@ -70,14 +70,14 @@ db::index_range db::index::range(const object& selector)
         {
             const sequence_type n = selector[u8"id"s][u8"$head"s];
             auto itr = m_primary_keys.begin();
-            std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
+            std::advance(itr, std::min<sequence_type>(n, m_primary_keys.size()));
             end = itr;
         }
         else if(selector[u8"id"s].has(u8"$tail"s))
         {
             const sequence_type n = selector[u8"id"s][u8"$tail"s];
             auto itr = m_primary_keys.rbegin();
-            std::advance(itr, std::min<std::size_t>(n, m_primary_keys.size()));
+            std::advance(itr, std::min<sequence_type>(n, m_primary_keys.size()));
             begin = itr.base();
         }
         else
@@ -85,6 +85,14 @@ db::index_range db::index::range(const object& selector)
             const primary_key_type pk = selector[u8"id"s];
             std::tie(begin,end) = m_primary_keys.equal_range(pk);
         }
+
+        // if(selector.has(u8"$top"s))
+        // {
+        //     const sequence_type n = selector[u8"top"s];
+        //     end = begin;
+        //     std::advance(end, std::min<sequence_type>(n, m_primary_keys.size()));
+        // }
+
     }
     else if(secondary_key(selector)) // Use primary key
     {

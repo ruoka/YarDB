@@ -75,6 +75,11 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     auto success = false;
     auto& index = m_index[m_collection];
     documents.type(xson::type::array);
+
+    auto top = std::numeric_limits<sequence_type>::max();
+    if(selector.has(u8"$top"s))
+        top = selector[u8"$top"s];
+
     for(const auto position : index.range(selector))
     {
         auto metadata = db::metadata{};
@@ -86,6 +91,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
         {
             documents += std::move(document);
             success = true;
+            if(--top == 0) break;
         }
     }
     return success;

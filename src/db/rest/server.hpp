@@ -107,23 +107,39 @@ private:
             slog << debug << "URI " << uri << " is OK" << flush;
 
             auto uri2 = net::uri{uri};
+            auto root       = uri2.path[0];
             auto collection = uri2.path[1];
-            auto key = uri2.path[2];
-            auto query = uri2.query[0];
+            auto key        = uri2.path[2];
+            auto value      = uri2.path[3];
+            auto query1     = uri2.query[0];
+            auto query2     = uri2.query[1];
 
             auto selector = xson::object{};
 
-            if(!key.empty() && std::numeric(key))
+            if(!key.empty() && std::numeric(key))                               //collection/123
                 selector = {"id"s, stoll(key)};
-            else if(!key.empty() && !query.empty())
-                selector = {to_string(key), make_object(uri2.query[0])};
+
+            else if(key == "id"s && !value.empty() && std::numeric(value))      //collection/id/123
+                selector = {"id"s, stoll(value)};
+
+            else if(!key.empty() && !value.empty())                             //collection/field/value
+                selector = {to_string(key), to_string(value)};
+
+            else if(!key.empty() && !query1.empty())                            //collection/field?eq=value
+                selector = {to_string(key), make_object(query1)};
+
+            else if(!query1.empty())                                            //collection?top=10
+                selector = {make_object(query1)};
+
+            if(!query2.empty())                                                 //collection/field?gt=value?top=10
+                selector += make_object(query2);
 
             m_engine.collection(to_string(collection));
 
             auto found = false;
             auto body = json::object{};
 
-            if(method == "GET"s || method == "HEAD"s)
+            if(method == "GET" || method == "HEAD")
             {
                 slog << debug << "Reading " << collection << json::stringify(selector,0) << " from DB" << flush;
                 found = m_engine.read(selector, body);
@@ -191,8 +207,11 @@ private:
     {
         auto pos = query.find_first_of('=');
         auto name = to_string(query.substr(0,pos));
-        auto value = stoll(query.substr(pos+1,query.length()));
-        return {"$"s + name, value};
+        auto value = query.substr(pos+1,query.length());
+        if(numeric(value))
+            return {"$"s + name, stoll(value)};
+        else
+            return {"$"s + name, to_string(value)};
     }
 
     const set<string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};

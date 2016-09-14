@@ -85,6 +85,7 @@ explicit uri(string_view string)
     }
 }
 
+template <char delim = '/'>
 struct property
 {
     operator string_view () const
@@ -95,11 +96,11 @@ struct property
     auto operator [] (std::size_t idx) const
     {
         auto tmp = m_data;
-        auto pos = tmp.find_first_of('/');
-        while(idx && pos != tmp.npos && tmp.at(pos) == '/')
+        auto pos = tmp.find_first_of(delim);
+        while(idx && pos != tmp.npos && tmp.at(pos) == delim)
         {
             tmp.remove_prefix(pos + 1);
-            pos = tmp.find_first_of("/?#");
+            pos = tmp.find_first_of(delim);
             --idx;
         }
         if(pos == tmp.npos) pos = tmp.length();
@@ -123,23 +124,24 @@ private:
 
 bool absolute = false;
 
-property scheme;
+property<':'> scheme;
 
-property userinfo;
+property<'@'> userinfo;
 
-property host;
+property<'/'> host;
 
-property port;
+property<'/'> port;
 
-property path;
+property<'/'> path;
 
-property query;
+property<'?'> query;
 
-property fragment;
+property<'#'> fragment;
 
 };
 
-inline auto& operator << (std::ostream& os, const uri::property& p)
+template<char T>
+inline auto& operator << (std::ostream& os, const uri::property<T>& p)
 {
     os << static_cast<const string_view>(p);
     return os;

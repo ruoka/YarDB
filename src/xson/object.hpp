@@ -316,7 +316,7 @@ public:
             auto rf = subset.m_objects.cbegin();
             auto rl = subset.m_objects.cend();
 
-            if(rf->first[0] == '$')                 // FIXME Compare values
+            if(rf != rl && rf->first[0] == '$')         // FIXME Compare values
                 return true;
 
             while(lf != ll && rf != rl)

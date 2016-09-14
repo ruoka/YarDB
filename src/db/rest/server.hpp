@@ -190,7 +190,7 @@ private:
                 // const auto content = json::stringify({"success"s, body});
                 client << "HTTP/1.1 200 OK"                                                   << crlf
                        << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                       << "Server: YarDB/0.1"                                              << crlf
+                       << "Server: YarDB/0.1"                                                 << crlf
                        << "Access-Control-Allow-Origin: *"                                    << crlf
                        << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
                        << "Accept: application/json"                                          << crlf
@@ -204,7 +204,7 @@ private:
                 // const auto content = json::stringify({"error"s, body});
                 client << "HTTP/1.1 404 Not Found"                                            << crlf
                        << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                       << "Server: YarDB/0.1"                                              << crlf
+                       << "Server: YarDB/0.1"                                                 << crlf
                        << "Access-Control-Allow-Origin: *"                                    << crlf
                        << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
                        << "Accept: application/json"                                          << crlf

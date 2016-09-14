@@ -87,7 +87,7 @@ try
 }
 catch(const std::exception& e)
 {
-    cerr << e.what() << flush;
+    cerr << "Error: " << e.what() << endl;
     return 1;
 }
 catch(...)

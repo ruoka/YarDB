@@ -17,6 +17,9 @@ try
 {
     ifstream storage{"./yar.db"};
 
+    if(!storage.is_open())
+        throw runtime_error{"file "s + "./yar.db" + " not found"s};
+
     while(storage)
     {
         auto metadata = db::metadata{};
@@ -25,7 +28,7 @@ try
         if(storage)
             std::clog << json::stringify(
                             {{"collection"s, metadata.collection         },
-                             {"action"s,     to_string(metadata.status)  },
+                             {"status"s,     to_string(metadata.status)  },
                              {"position"s,   metadata.position           },
                              {"previous"s,   metadata.previous           },
                              {"document"s,   document                    }})
@@ -34,7 +37,7 @@ try
 }
 catch(const std::exception& e)
 {
-    cerr << e.what() << flush;
+    cerr << "Error: " << e.what() << endl;
     return 1;
 }
 catch(...)

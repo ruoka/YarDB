@@ -19,12 +19,14 @@ explicit uri(string_view string)
 {
     auto position = string.npos;
 
+    absolute = false;
+
     position = string.find_first_of(":@[]/?#");         // gen-delims
 
     if(position > 0 && string.at(position) == ':')      // scheme name
     {
         absolute = true;
-        scheme.assign(string.data(), position);
+        scheme = string.substr(0, position);
         string.remove_prefix(position+1);               // scheme:
     }
 
@@ -43,7 +45,7 @@ explicit uri(string_view string)
         position = authority.find_first_of('@');
         if(position != string.npos)
         {
-            userinfo.assign(authority.data(), position);
+            userinfo = authority.substr(0, position);
             authority.remove_prefix(position + 1);      // userinfo@
         }
 
@@ -51,19 +53,19 @@ explicit uri(string_view string)
         if(position != string.npos)
         {
             auto size = authority.length() - position;
-            port.assign(authority.data() + position + 1, size - 1);
+            port = authority.substr(position + 1, size - 1);
             authority.remove_suffix(size);              // :port
         }
 
         position = authority.length();
-        host.assign(authority.data(), position);
+        host = authority.substr(0, position);
         authority.remove_prefix(position);              // host
     }
 
     position = string.find_first_of("?#");              // path component
     if(position == string.npos)
         position = string.length();
-    path.assign(string.data(), position);
+    path = string.substr(0, position);
     string.remove_prefix(position);                     // path
 
     if(string.front() == '?')                           // query component
@@ -72,7 +74,7 @@ explicit uri(string_view string)
         position = string.find_first_of("#");
         if(position == string.npos)
             position = string.length();
-        query.assign(string.data(), position);
+        query = string.substr(0, position);
         string.remove_prefix(position);                 // query
     }
 
@@ -80,22 +82,34 @@ explicit uri(string_view string)
     {
         string.remove_prefix(1);                        // #
         position = string.length();
-        fragment.assign(string.data(), position);
+        fragment = string.substr(0, position);
         string.remove_prefix(position);                 // fragment
     }
 }
 
-template <char delim = '/'>
+template<typename T>
 struct property
 {
-    operator string_view () const
+    operator T () const
     {
-        return m_data;
+        return m_value;
     }
+private:
+    friend class uri;
+    property<T>& operator = (T&& value)
+    {
+        m_value = value;
+        return *this;
+    }
+    T m_value;
+};
 
+template <char delim = '/'>
+struct indexed_property : public property<string_view>
+{
     auto operator [] (std::size_t idx) const
     {
-        auto tmp = m_data;
+        auto tmp = static_cast<string_view>(*this);
         auto pos = tmp.find_first_of(delim);
         while(idx && pos != tmp.npos && tmp.at(pos) == delim)
         {
@@ -109,41 +123,33 @@ struct property
         else
             return string_view{};
     }
-
 private:
-
     friend class uri;
-
-    void assign(const char* s, std::size_t sz)
-    {
-        m_data = {s,sz};
-    }
-
-    string_view m_data;
+    using property<string_view>::operator = ;
 };
 
-bool absolute = false;
+property<bool> absolute;
 
-property<':'> scheme;
+property<string_view> scheme;
 
-property<'@'> userinfo;
+property<string_view> userinfo;
 
-property<'/'> host;
+property<string_view> host;
 
-property<'/'> port;
+property<string_view> port;
 
-property<'/'> path;
+indexed_property<'/'> path;
 
-property<'?'> query;
+indexed_property<'?'> query;
 
-property<'#'> fragment;
+property<string_view> fragment;
 
 };
 
-template<char T>
+template<typename T>
 inline auto& operator << (std::ostream& os, const uri::property<T>& p)
 {
-    os << static_cast<const string_view>(p);
+    os << static_cast<const T&>(p);
     return os;
 }
 

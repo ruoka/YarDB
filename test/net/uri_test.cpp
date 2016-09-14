@@ -154,6 +154,7 @@ TEST(NetURI,ParseRelative3)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
     std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
     std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;

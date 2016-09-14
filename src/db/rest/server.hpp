@@ -54,65 +54,81 @@ private:
     {
         while(client)
         {
-            slog << debug << "Reading HTTP request" << flush;
-            auto method = ""s, uri = ""s, version = ""s;
-            client >> method >> uri >> version;
-            slog << info << method << ' ' << uri << ' ' << version << flush;
+            slog << debug << "Reading HTTP request message" << flush;
 
-            if(version != "HTTP/1.1")
-                break;
+            slog << debug << "Reading HTTP request line" << flush;
 
-            slog << debug << "Read HTTP request" << flush;
+            auto method = ""s, request_uri = ""s, http_version = ""s;
+            client >> method >> request_uri >> http_version;
+            slog << info << "Received request " << method << ' ' << request_uri << ' ' << http_version << flush;
 
-            slog << debug << "Reading HTTP headers" << flush;
+            slog << debug << "Read HTTP request line" << flush;
+
+            slog << debug << "Reading HTTP request headers" << flush;
 
             client >> ws;
 
             while(client && client.peek() != '\r')
             {
-                auto name = ""s, value = ""s;
-                getline(client, name, ':');
-                trim(name);
+                auto request_header = ""s, value = ""s;
+                getline(client, request_header, ':');
+                trim(request_header);
                 getline(client, value);
                 trim(value);
-                slog << info << name << ": " << value << flush;
+                slog << info << "With request header " << request_header << ": " << value << flush;
             }
 
-            slog << debug << "Read HTTP headers" << flush;
+            slog << debug << "Read HTTP request headers" << flush;
+
+            slog << debug << "Read HTTP request message" << flush;
 
             if(!methods.count(method))
             {
-                slog << warning << "Method " << method << " is ignored" << flush;
+                slog << notice << "HTTP requests message with method " << method << " was ignored" << flush;
                 client << "HTTP/1.1 400 Bad Request"                  << crlf
                        << "Date: " << to_rfc1123(system_clock::now()) << crlf
                        << "Server: YarDB/0.1"                         << crlf
                        << "Content-Length: 0"                         << crlf
                        << crlf
                        << flush;
-                continue;
+                continue; // ignore with continue
             }
 
-            if(uri == R"(/)"s || uri == R"(/favicon.ico)"s)
+            if(request_uri == "/" || request_uri == "/favicon.ico")
             {
-                slog << debug << "URI " << uri << " is ignored" << flush;
-                client << "HTTP/1.1 204 No Content"                   << crlf
+                slog << info << "HTTP requests message with request URI " << request_uri << " was ignored" << flush;
+                client << "HTTP/1.1 404 Not Found"                    << crlf
                        << "Date: " << to_rfc1123(system_clock::now()) << crlf
                        << "Server: YarDB/0.1"                         << crlf
                        << "Content-Length: 0"                         << crlf
                        << crlf
                        << flush;
-                continue;
+                continue; // ignore with continue
             }
 
-            slog << debug << "URI " << uri << " is OK" << flush;
+            if(http_version != "HTTP/1.1")
+            {
+                slog << warning << "HTTP requests message with HTTP version " << http_version << " was rejected" << flush;
+                client << "HTTP/1.1 505 HTTP Version Not Supported"   << crlf
+                       << "Date: " << to_rfc1123(system_clock::now()) << crlf
+                       << "Server: YarDB/0.1"                         << crlf
+                       << "Content-Length: 0"                         << crlf
+                       << crlf
+                       << flush;
+                break; // reject with break
+            }
 
-            auto uri2 = net::uri{uri};
-            auto root       = uri2.path[0];
-            auto collection = uri2.path[1];
-            auto key        = uri2.path[2];
-            auto value      = uri2.path[3];
-            auto query1     = uri2.query[0];
-            auto query2     = uri2.query[1];
+            slog << debug << "HTTP request with request URI " << request_uri << " was OK" << flush;
+
+            auto components = net::uri{request_uri};
+            auto root       = components.path[0];
+            auto collection = components.path[1];
+            auto key        = components.path[2];
+            auto value      = components.path[3];
+            auto query1     = components.query[0];
+            auto query2     = components.query[1];
+
+            m_engine.collection(to_string(collection));
 
             auto selector = xson::object{};
 
@@ -134,39 +150,38 @@ private:
             if(!query2.empty())                                                 //collection/field?gt=value?top=10
                 selector += make_object(query2);
 
-            m_engine.collection(to_string(collection));
-
             auto found = false;
+
             auto body = json::object{};
 
             if(method == "GET" || method == "HEAD")
             {
-                slog << debug << "Reading " << collection << json::stringify(selector,0) << " from DB" << flush;
+                slog << debug << "Reading from collection " << collection << " with selector "<< json::stringify(selector,0) << flush;
                 found = m_engine.read(selector, body);
-                slog << debug << "Read "   << collection << json::stringify(selector,0)  << " from DB" << flush;
+                slog << info << "Read from collection " << collection << " with selector " << json::stringify(selector,0) << flush;
             }
             else if(method == "DELETE")
             {
-                slog << debug << "Deleting " << collection << json::stringify(selector,0) << " in DB"  << flush;
+                slog << debug << "Deleting from collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
                 found = m_engine.destroy(selector, body);
-                slog << debug << "Deleted "  << collection << json::stringify(selector,0) << " in DB"  << flush;
+                slog << info << "Deleted from collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
             }
             else if(method == "POST" || method == "PUT" || method == "PATCH")
             {
-                slog << debug << "Reading content" << flush;
+                slog << debug << "Reading HTTP request body" << flush;
                 body = json::parse(client);
-                slog << debug << "Read content " << json::stringify(body,0) << flush;
-                slog << debug << "Updating " << collection << json::stringify(selector,0) << " in DB" << flush;
+                slog << debug << "Read  HTTP request body " << json::stringify(body,0) << flush;
+                slog << debug << "Updating in collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
                 if(method == "POST"s)
                     found = m_engine.create(body);
                 else if(method == "PUT"s)
                     found = m_engine.replace(selector, body);
                 else if(method == "PATCH"s)
                     found = m_engine.upsert(selector, body);
-                slog << debug << "Updated "  << collection << json::stringify(selector,0) << " in DB" << flush;
+                slog << info << "Updated in collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
             }
 
-            slog << debug << "Sending HTTP response" << flush;
+            slog << debug << "Sending HTTP response message" << flush;
 
             const auto content = json::stringify(body);
 
@@ -198,9 +213,10 @@ private:
                        << crlf
                        << (method != "HEAD"s ? content : ""s) << flush;
             }
-            slog << debug << "Sent HTTP response" << flush;
+            slog << debug << "Sent HTTP response message" << flush;
         }
-        slog << debug << "client closed" << flush;
+
+        slog << debug << "Client closed connection" << flush;
     }
 
     xson::object make_object(const string_view query)

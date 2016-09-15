@@ -11,13 +11,14 @@ db::engine::engine(const std::string file) : m_collection{u8"db"s}, m_index{}, m
     if (!m_storage.is_open())
         throw std::invalid_argument("Cannot open file "s + file);
     reindex();
-    reindex();
+    reindex(); // Intentional double
 }
 
 void db::engine::reindex()
 {
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
+
     while(m_storage)
     {
         auto metadata = db::metadata{};
@@ -40,7 +41,7 @@ void db::engine::reindex()
             continue;
 
         auto collection = document["collection"s];
-        std::vector<std::string> keys = document["keys"s]; // FIXME We assume string keys hare
+        std::vector<std::string> keys = document["keys"s];
         m_index[collection].add(keys);
     }
 }
@@ -59,26 +60,26 @@ void db::engine::index(std::vector<std::string> keys)
 
 bool db::engine::create(db::object& document)
 {
-    auto success = true;
     auto& index = m_index[m_collection];
     auto metadata = db::metadata{m_collection};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     index.update(document);
     index.insert(document, m_storage.tellp());
-    m_storage << metadata << document << std::flush;
-    return success;
+    m_storage << metadata << document;
+    return true;
 }
 
 bool db::engine::read(const db::object& selector, db::object& documents)
 {
-    auto success = false;
-    auto& index = m_index[m_collection];
     documents.type(xson::type::array);
 
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has(u8"$top"s))
         top = selector[u8"$top"s];
+
+    auto success = false;
+    auto& index = m_index[m_collection];
 
     for(const auto position : index.range(selector))
     {
@@ -94,6 +95,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
             if(--top == 0) break;
         }
     }
+
     return success;
 }
 
@@ -101,6 +103,7 @@ bool db::engine::update(const db::object& selector, db::object& updates)
 {
     auto success = false;
     auto& index = m_index[m_collection];
+
     for(const auto position : index.range(selector))
     {
         auto metadata = db::metadata{};
@@ -112,7 +115,7 @@ bool db::engine::update(const db::object& selector, db::object& updates)
         {
             m_storage.clear();
             m_storage.seekp(position, m_storage.beg);
-            m_storage << updated << std::flush;
+            m_storage << updated;
 
             auto new_document = updates;
             new_document += std::move(old_document);
@@ -121,63 +124,53 @@ bool db::engine::update(const db::object& selector, db::object& updates)
             m_storage.seekp(0, m_storage.end);
             index.update(new_document);
             index.insert(new_document, m_storage.tellp());
-            m_storage << metadata << new_document << std::flush;
+            m_storage << metadata << new_document;
 
             success = true;
         }
     }
-    return success;
-}
 
-bool db::engine::upsert(const db::object& selector, db::object& updates)
-{
-    auto success = update(selector, updates);
-    if(!success)
-        success = create(updates);
     return success;
-}
-
-bool db::engine::replace(const db::object& selector, db::object& updates)
-{
-    auto selector2 = object{},
-         documents = object{};
-    selector2 += selector;
-    selector2 += updates;
-    return destroy(selector2, documents) && create(updates);
 }
 
 bool db::engine::destroy(const db::object& selector, db::object& documents)
 {
+    documents.type(xson::type::array);
+
     auto success = false;
     auto& index = m_index[m_collection];
-    auto range = index.range(selector);
-    if(!success && range)
+
+    for(const auto position : index.range(selector))
     {
-        auto position = *range.begin();
         auto metadata = db::metadata{};
         auto document = db::object{};
         m_storage.clear();
-        m_storage.seekp(position, m_storage.beg);
-        m_storage << deleted << std::flush;
-        m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
-        index.erase(document);
-        documents += std::move(document);
-        success = true;
+        if(document.match(selector))
+        {
+            m_storage.clear();
+            m_storage.seekp(position, m_storage.beg);
+            m_storage << deleted;
+            documents += std::move(document);
+            success = true;
+        }
     }
+
+    for(const auto document : documents)
+        index.erase(document.second);
+
     return success;
 }
 
 bool db::engine::history(const db::object& selector, db::object& documents)
 {
+    documents.type(xson::type::array);
+
     auto success = false;
     auto& index = m_index[m_collection];
-    auto range = index.range(selector);
-    documents.type(xson::type::array);
-    if(range)
-    {
-        auto position = *range.begin();
+
+    for(auto position : index.range(selector))
         while(position >= 0)
         {
             auto metadata = db::metadata{};
@@ -189,6 +182,6 @@ bool db::engine::history(const db::object& selector, db::object& documents)
             documents += std::move(document);
             success = true;
         }
-    }
+
     return success;
 }

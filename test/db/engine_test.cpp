@@ -222,9 +222,8 @@ TEST_F(DbEngineTest, Destroy2ByValue)
     selector = {};
     documents = {};
     engine.read(selector, documents);
-    EXPECT_EQ(2, documents.size());
-    EXPECT_TRUE(documents[0].match(document2));
-    EXPECT_TRUE(documents[1].match(document3));
+    EXPECT_EQ(1, documents.size());
+    EXPECT_TRUE(documents[0].match(document3));
 }
 
 TEST_F(DbEngineTest, History)

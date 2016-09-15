@@ -11,9 +11,13 @@ public:
 
     engine(const std::string file = "./yar.db"s);
 
+//  Indexing
+
     void index(std::vector<std::string> keys);
 
     void reindex();
+
+//  CRUD
 
     bool create(db::object& document);
 
@@ -21,19 +25,41 @@ public:
 
     bool update(const db::object& selector, db::object& updates);
 
-    bool upsert(const db::object& selector, db::object& updates);
-
-    bool replace(const db::object& selector, db::object& updates);
-
     bool destroy(const db::object& selector, db::object& documents);
+
+//  Chain of updates
 
     bool history(const db::object& selector, db::object& documents);
 
-public:
+//  For convenience
 
-    const auto& collection() const {return m_collection;};
+    bool upsert(const db::object& selector, db::object& updates)
+    {
+        return update(selector, updates) || create(updates);
+    }
 
-    void collection(const std::string& in_use) {m_collection = in_use;}
+    bool replace(const db::object& selector, db::object& updates)
+    {
+        return destroy(selector) && create(updates);
+    }
+
+    bool destroy(const db::object& selector)
+    {
+        auto documents = db::object{};
+        return destroy(selector, documents);
+    }
+
+//  Getters & setters
+
+    const auto& collection() const
+    {
+        return m_collection;
+    };
+
+    void collection(const std::string& in_use)
+    {
+        m_collection = in_use;
+    }
 
 private:
 

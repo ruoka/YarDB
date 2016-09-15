@@ -18,6 +18,9 @@ TEST(NetURI,Parse1)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -35,6 +38,9 @@ TEST(NetURI,Parse2)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -52,6 +58,9 @@ TEST(NetURI,Parse3)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    // std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    // std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -69,6 +78,9 @@ TEST(NetURI,Parse4)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -86,6 +98,9 @@ TEST(NetURI,Parse5)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    // std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    // std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    // std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -103,6 +118,9 @@ TEST(NetURI,ParseRelative1)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -120,6 +138,9 @@ TEST(NetURI,ParseRelative2)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }
@@ -137,6 +158,9 @@ TEST(NetURI,ParseInvalid)
     std::cout << "Host:     " << parsed.host     << std::endl;
     std::cout << "Port:     " << parsed.port     << std::endl;
     std::cout << "Path:     " << parsed.path     << std::endl;
+    std::cout << "Path[0]:  " << parsed.path[0]  << std::endl;
+    std::cout << "Path[1]:  " << parsed.path[1]  << std::endl;
+    std::cout << "Path[2]:  " << parsed.path[2]  << std::endl;
     std::cout << "Query:    " << parsed.query    << std::endl;
     std::cout << "Fragment: " << parsed.fragment << std::endl;
 }

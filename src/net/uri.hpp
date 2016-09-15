@@ -111,17 +111,18 @@ struct indexed_property : public property<string_view>
     {
         auto tmp = static_cast<string_view>(*this);
         auto pos = tmp.find_first_of(delim);
-        while(idx && pos != tmp.npos && tmp.at(pos) == delim)
+        if(idx == 0 && pos == 0)
+            return tmp.substr(0, 1);
+        while(idx > 0 && pos != tmp.npos)
         {
             tmp.remove_prefix(pos + 1);
             pos = tmp.find_first_of(delim);
             --idx;
         }
-        if(pos == tmp.npos) pos = tmp.length();
-        if(!idx)
-            return tmp.substr(0, pos);
-        else
+        if(idx)
             return string_view{};
+        if(pos == tmp.npos) pos = tmp.length();
+        return tmp.substr(0, pos);
     }
 private:
     friend class uri;

@@ -36,9 +36,9 @@ public:
 
     enum index_type {primary, secondary};
 
-    using primary_iterator = primary_index_type::iterator;
+    using primary_iterator = primary_index_type::const_iterator;
 
-    using secondary_iterator = secondary_index_type::iterator;
+    using secondary_iterator = secondary_index_type::const_iterator;
 
     index_iterator() = default;
 
@@ -103,16 +103,6 @@ public:
         m_end{end}
     {}
 
-    auto begin()
-    {
-        return m_begin;
-    }
-
-    auto end()
-    {
-        return m_end;
-    }
-
     auto begin() const
     {
         return m_begin;
@@ -149,7 +139,7 @@ public:
 
     bool secondary_key(const object& selector) const;
 
-    index_range range(const object& selector);
+    index_range range(const object& selector) const;
 
     // position_type position(const object& selector) const;
 

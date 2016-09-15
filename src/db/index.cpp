@@ -34,7 +34,7 @@ bool db::index::secondary_key(const object& selector) const
     return false;
 }
 
-db::index_range db::index::range(const object& selector)
+db::index_range db::index::range(const object& selector) const
 {
     auto begin = index_iterator{m_primary_keys.begin()};
     auto end = index_iterator{m_primary_keys.end()};

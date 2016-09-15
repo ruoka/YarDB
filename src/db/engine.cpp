@@ -143,7 +143,7 @@ bool db::engine::replace(const db::object& selector, db::object& updates)
          documents = object{};
     selector2 += selector;
     selector2 += updates;
-    return destroy(selector2, documents) | create(updates);
+    return destroy(selector2, documents) && create(updates);
 }
 
 bool db::engine::destroy(const db::object& selector, db::object& documents)
@@ -151,7 +151,7 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
     auto success = false;
     auto& index = m_index[m_collection];
     auto range = index.range(selector);
-    if(range)
+    if(range && !success)
     {
         auto position = *range.begin();
         auto metadata = db::metadata{};

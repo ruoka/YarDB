@@ -151,7 +151,7 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
     auto success = false;
     auto& index = m_index[m_collection];
     auto range = index.range(selector);
-    if(range && !success)
+    if(!success && range)
     {
         auto position = *range.begin();
         auto metadata = db::metadata{};

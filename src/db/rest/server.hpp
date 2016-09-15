@@ -1,10 +1,10 @@
 #include <thread>
 #include <set>
 #include "std/extension.hpp"
-#include "xson/json.hpp"
 #include "net/syslogstream.hpp"
 #include "net/acceptor.hpp"
 #include "net/uri.hpp"
+#include "xson/json.hpp"
 #include "db/engine.hpp"
 
 namespace db::rest {
@@ -154,36 +154,43 @@ private:
 
             auto body = json::object{};
 
-            if(method == "GET" || method == "HEAD")
+            try
             {
-                slog << debug << "Reading from collection " << collection << " with selector "<< json::stringify(selector,0) << flush;
-                found = m_engine.read(selector, body);
-                slog << info << "Read from collection " << collection << " with selector " << json::stringify(selector,0) << flush;
+                if(method == "GET" || method == "HEAD")
+                {
+                    slog << debug << "Reading from collection " << collection << " with selector "<< json::stringify(selector,0) << flush;
+                    found = m_engine.read(selector, body);
+                    slog << info << "Read from collection " << collection << " with selector " << json::stringify(selector,0) << flush;
+                }
+                else if(method == "DELETE")
+                {
+                    slog << debug << "Deleting from collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                    found = m_engine.destroy(selector, body);
+                    slog << info << "Deleted from collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                }
+                else if(method == "POST" || method == "PUT" || method == "PATCH")
+                {
+                    slog << debug << "Reading HTTP request body" << flush;
+                    body = json::parse(client);
+                    slog << debug << "Read  HTTP request body " << json::stringify(body,0) << flush;
+                    slog << debug << "Updating in collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                    if(method == "POST"s)
+                        found = m_engine.create(body);
+                    else if(method == "PUT"s)
+                        found = m_engine.replace(selector, body);
+                    else if(method == "PATCH"s)
+                        found = m_engine.upsert(selector, body);
+                    slog << info << "Updated in collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                }
             }
-            else if(method == "DELETE")
+            catch(const std::exception& e)
             {
-                slog << debug << "Deleting from collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
-                found = m_engine.destroy(selector, body);
-                slog << info << "Deleted from collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                slog << warning << "Exception from the DB " << e.what() << flush;
             }
-            else if(method == "POST" || method == "PUT" || method == "PATCH")
-            {
-                slog << debug << "Reading HTTP request body" << flush;
-                body = json::parse(client);
-                slog << debug << "Read  HTTP request body " << json::stringify(body,0) << flush;
-                slog << debug << "Updating in collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
-                if(method == "POST"s)
-                    found = m_engine.create(body);
-                else if(method == "PUT"s)
-                    found = m_engine.replace(selector, body);
-                else if(method == "PATCH"s)
-                    found = m_engine.upsert(selector, body);
-                slog << info << "Updated in collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
-            }
-
-            slog << debug << "Sending HTTP response message" << flush;
 
             const auto content = json::stringify(body);
+
+            slog << debug << "Sending HTTP response message" << flush;
 
             if(found)
             {
@@ -215,7 +222,6 @@ private:
             }
             slog << debug << "Sent HTTP response message" << flush;
         }
-
         slog << debug << "Client closed connection" << flush;
     }
 

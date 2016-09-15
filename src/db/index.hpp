@@ -51,7 +51,7 @@ public:
     index_iterator(secondary_iterator current) :
         m_primary_current{},
         m_secondary_current{current},
-        m_index_type{primary}
+        m_index_type{secondary}
     {}
 
     index_iterator(const index_iterator& itr) :
@@ -140,8 +140,6 @@ public:
     bool secondary_key(const object& selector) const;
 
     index_range range(const object& selector) const;
-
-    // position_type position(const object& selector) const;
 
     void update(object& document);
 

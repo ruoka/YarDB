@@ -99,8 +99,10 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     return success;
 }
 
-bool db::engine::update(const db::object& selector, db::object& updates)
+bool db::engine::update(const db::object& selector, db::object& updates, db::object& documents)
 {
+    documents.type(xson::type::array);
+    
     auto success = false;
     auto& index = m_index[m_collection];
 
@@ -126,6 +128,7 @@ bool db::engine::update(const db::object& selector, db::object& updates)
             index.insert(new_document, m_storage.tellp());
             m_storage << metadata << new_document;
 
+            documents += std::move(new_document);
             success = true;
         }
     }

@@ -120,67 +120,67 @@ private:
 
             slog << debug << "HTTP request with request URI " << request_uri << " was OK" << flush;
 
-            auto components = net::uri{request_uri};
-            auto root       = components.path[0];
-            auto collection = components.path[1];
-            auto key        = components.path[2];
-            auto value      = components.path[3];
-            auto query1     = components.query[0];
-            auto query2     = components.query[1];
-
-            m_engine.collection(to_string(collection));
-
-            auto selector = xson::object{};
-
-            if(!key.empty() && std::numeric(key))                               //collection/123
-                selector = {"id"s, stoll(key)};
-
-            else if(key == "id"s && !value.empty() && std::numeric(value))      //collection/id/123
-                selector = {"id"s, stoll(value)};
-
-            else if(!key.empty() && !value.empty())                             //collection/field/value
-                selector = {to_string(key), to_string(value)};
-
-            else if(!key.empty() && !query1.empty())                            //collection/field?eq=value
-                selector = {to_string(key), make_object(query1)};
-
-            else if(!query1.empty())                                            //collection?top=10
-                selector = {make_object(query1)};
-
-            if(!query2.empty())                                                 //collection/field?gt=value?top=10
-                selector += make_object(query2);
-
             auto found = false;
-
-            auto body = json::object{};
+            auto request_body  = json::object{},
+                 response_body = json::object{};
 
             try
             {
+                auto components = net::uri{request_uri};
+                auto root       = components.path[0];
+                auto collection = components.path[1];
+                auto key        = components.path[2];
+                auto value      = components.path[3];
+                auto query1     = components.query[0];
+                auto query2     = components.query[1];
+
+                m_engine.collection(to_string(collection));
+
+                auto selector = xson::object{};
+
+                if(!key.empty() && std::numeric(key))                               //collection/123
+                    selector = {"id"s, stoll(key)};
+
+                else if(key == "id"s && !value.empty() && std::numeric(value))      //collection/id/123
+                    selector = {"id"s, stoll(value)};
+
+                else if(!key.empty() && !value.empty())                             //collection/field/value
+                    selector = {to_string(key), to_string(value)};
+
+                else if(!key.empty() && !query1.empty())                            //collection/field?eq=value
+                    selector = {to_string(key), make_object(query1)};
+
+                else if(!query1.empty())                                            //collection?top=10
+                    selector = {make_object(query1)};
+
+                if(!query2.empty())                                                 //collection/field?gt=value?top=10
+                    selector += make_object(query2);
+
                 if(method == "GET" || method == "HEAD")
                 {
                     slog << debug << "Reading from collection " << collection << " with selector "<< json::stringify(selector,0) << flush;
-                    found = m_engine.read(selector, body);
+                    found = m_engine.read(selector, response_body);
                     slog << info << "Read from collection " << collection << " with selector " << json::stringify(selector,0) << flush;
                 }
                 else if(method == "DELETE")
                 {
                     slog << debug << "Deleting from collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
-                    found = m_engine.destroy(selector, body);
+                    found = m_engine.destroy(selector, response_body);
                     slog << info << "Deleted from collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
                 }
                 else if(method == "POST" || method == "PUT" || method == "PATCH")
                 {
                     slog << debug << "Reading HTTP request body" << flush;
-                    body = json::parse(client);
-                    slog << debug << "Read  HTTP request body " << json::stringify(body,0) << flush;
-                    slog << debug << "Updating in collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                    request_body = json::parse(client);
+                    slog << debug << "Read  HTTP request body " << json::stringify(request_body,0) << flush;
+                    slog << debug << "Updating collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
                     if(method == "POST"s)
-                        found = m_engine.create(body);
+                        found = m_engine.create(request_body);
                     else if(method == "PUT"s)
-                        found = m_engine.replace(selector, body);
+                        found = m_engine.replace(selector, request_body);
                     else if(method == "PATCH"s)
-                        found = m_engine.upsert(selector, body);
-                    slog << info << "Updated in collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                        found = m_engine.upsert(selector, request_body, response_body);
+                    slog << info << "Updated collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
                 }
             }
             catch(const std::exception& e)
@@ -188,7 +188,11 @@ private:
                 slog << warning << "Exception from the DB " << e.what() << flush;
             }
 
-            const auto content = json::stringify(body);
+            auto content = ""s;
+            if(method == "POST" || method == "PUT")
+                content = json::stringify(request_body);
+            else
+                content = json::stringify(response_body);
 
             slog << debug << "Sending HTTP response message" << flush;
 

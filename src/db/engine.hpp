@@ -23,7 +23,7 @@ public:
 
     bool read(const db::object& selector, db::object& documents);
 
-    bool update(const db::object& selector, db::object& updates);
+    bool update(const db::object& selector, db::object& updates, db::object& documents);
 
     bool destroy(const db::object& selector, db::object& documents);
 
@@ -33,14 +33,25 @@ public:
 
 //  For convenience
 
+    bool upsert(const db::object& selector, db::object& updates, db::object& documents)
+    {
+        return update(selector, updates, documents) || create(updates);
+    }
+
     bool upsert(const db::object& selector, db::object& updates)
     {
         return update(selector, updates) || create(updates);
     }
 
-    bool replace(const db::object& selector, db::object& updates)
+    bool replace(const db::object& selector, db::object& document)
     {
-        return destroy(selector) && create(updates);
+        return destroy(selector) && create(document);
+    }
+
+    bool update(const db::object& selector, db::object& updates)
+    {
+        auto documents = db::object{};
+        return update(selector, updates, documents);
     }
 
     bool destroy(const db::object& selector)

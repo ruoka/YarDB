@@ -52,7 +52,8 @@ public:
         m_facility{syslog::facility::user},
         m_severity{syslog::severity::debug},
         m_level{syslog::severity::debug},
-        m_tag{"syslogstream"}
+        m_tag{"syslogstream"},
+        m_mutex{}
     {}
 
     void redirect(std::ostream& os)
@@ -194,6 +195,12 @@ inline auto& flush(syslogstream& sl)
     return sl;
 }
 
-static syslogstream slog{distribute("localhost","syslog")};
+inline auto& initialize_global_syslogstream()
+{
+    static syslogstream log{distribute("localhost","syslog")};
+    return log;
+}
+
+static syslogstream& slog = initialize_global_syslogstream();
 
 } // namespace net

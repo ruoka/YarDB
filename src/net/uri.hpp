@@ -1,6 +1,5 @@
 #pragma once
 
-#include <string>
 #include <experimental/string_view>
 
 // scheme:[//[username:password@]host[:port]][/]path[?query][#fragment]
@@ -10,10 +9,84 @@ namespace net
 
 using string_view = std::experimental::string_view;
 
-using namespace std::string_literals;
-
-struct uri
+class uri
 {
+public:
+
+template<typename T>
+class property
+{
+public:
+
+    operator T () const
+    {
+        return m_value;
+    }
+
+protected:
+
+    T m_value;
+
+private:
+
+    friend class uri;
+
+    auto& operator = (T&& value)
+    {
+        m_value = value;
+        return *this;
+    }
+};
+
+template <char delim>
+class indexed_property : public property<string_view>
+{
+public:
+
+    auto operator [] (std::size_t idx) const
+    {
+        if(idx < m_index.size())
+            return m_index[idx];
+        else
+            return string_view{};
+    }
+
+    auto begin() const
+    {
+        return m_index.begin();
+    }
+
+    auto end() const
+    {
+        return m_index.end();
+    }
+
+private:
+
+    friend class uri;
+
+    auto& operator = (string_view&& value)
+    {
+        m_value = value;
+
+        auto pos = value.find_first_of(delim);
+
+        while(pos != value.npos)
+        {
+            m_index.push_back(value.substr(0, pos));
+            value.remove_prefix(pos + 1);
+            pos = value.find_first_of(delim);
+        }
+
+        if(pos == value.npos) pos = value.length();
+
+        m_index.push_back(value.substr(0, pos));
+
+        return *this;
+    }
+
+    std::vector<string_view> m_index;
+};
 
 explicit uri(string_view string)
 {
@@ -86,48 +159,6 @@ explicit uri(string_view string)
         string.remove_prefix(position);                 // fragment
     }
 }
-
-template<typename T>
-struct property
-{
-    operator T () const
-    {
-        return m_value;
-    }
-private:
-    friend class uri;
-    property<T>& operator = (T&& value)
-    {
-        m_value = value;
-        return *this;
-    }
-    T m_value;
-};
-
-template <char delim = '/'>
-struct indexed_property : public property<string_view>
-{
-    auto operator [] (std::size_t idx) const
-    {
-        auto tmp = static_cast<string_view>(*this);
-        auto pos = tmp.find_first_of(delim);
-        if(idx == 0 && pos == 0)
-            return tmp.substr(0, 1);
-        while(idx > 0 && pos != tmp.npos)
-        {
-            tmp.remove_prefix(pos + 1);
-            pos = tmp.find_first_of(delim);
-            --idx;
-        }
-        if(idx)
-            return string_view{};
-        if(pos == tmp.npos) pos = tmp.length();
-        return tmp.substr(0, pos);
-    }
-private:
-    friend class uri;
-    using property<string_view>::operator = ;
-};
 
 property<bool> absolute;
 

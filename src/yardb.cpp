@@ -1,4 +1,5 @@
 #include "db/rest/server.hpp"
+#include "net/syslogstream.hpp"
 
 using namespace std;
 using namespace net;
@@ -21,7 +22,7 @@ try
     slog << notice << "Closed server" << flush;
     return 0;
 }
-catch(const std::exception& e)
+catch(const exception& e)
 {
     slog << error << e.what() << flush;
     return 1;

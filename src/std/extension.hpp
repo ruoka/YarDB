@@ -4,18 +4,42 @@
 #include <tuple>
 #include <sstream>
 #include <iomanip>
-#include <stdexcept>
-#include <vector>
 #include <experimental/string_view>
 
-namespace std {
-namespace chrono {
+namespace ext {
+
+using namespace std;
+using namespace std::chrono;
 
 using days = duration<int, ratio_multiply<hours::period, ratio<24>>::type>;
 
 using years = duration<int, ratio_multiply<days::period, ratio<365>>::type>;
 
 using months = duration<int, ratio_divide<years::period, ratio<12>>::type>;
+
+template<typename T, typename R>
+auto& operator << (std::ostream& os, const duration<T,R>& d) noexcept
+{
+    os << d.count();
+    return os;
+}
+
+static const std::string number2month[] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+static const std::string number2weekday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+constexpr auto& to_string(const months& m) noexcept
+{
+    const auto n = m.count();
+    return ext::number2month[n];
+}
+
+constexpr auto& to_string(const days& d) noexcept
+{
+    const auto z = d.count();
+    const auto n = ( z >= -4 ? (z+4) % 7 : (z+5) % 7 + 6);
+    return ext::number2weekday[n];
+}
 
 // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
 
@@ -72,37 +96,10 @@ constexpr auto convert(const time_point<T>& tp) noexcept
     return tuple_cat( convert(ds), make_tuple(hs, ms, ss, fs) );
 }
 
-template<typename T, typename R>
-inline auto& operator << (std::ostream& os, const duration<T,R>& d) noexcept
-{
-    os << d.count();
-    return os;
-}
-
-} // namespace chrono
-
-static const std::string number2month[] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-
-constexpr auto& to_string(const chrono::months& m)
-{
-    const auto n = m.count();
-    return number2month[n];
-}
-
-static const std::string number2weekday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-
-constexpr auto& to_string(const chrono::days& d)
-{
-    const auto z = d.count();
-    const auto n = ( z >= -4 ? (z+4) % 7 : (z+5) % 7 + 6);
-    return number2weekday[n];
-}
-
 template<typename T>
-inline auto to_rfc1123(const chrono::time_point<T>& tp) noexcept
+auto to_rfc1123(const time_point<T>& tp) noexcept
 {
     // Sun, 06 Nov 1994 08:49:37 GMT
-    using namespace chrono;
     const auto timestamp = convert(tp);
     auto os = ostringstream{};
     os << to_string(duration_cast<days>(tp.time_since_epoch())) << ',' << ' '
@@ -117,10 +114,9 @@ inline auto to_rfc1123(const chrono::time_point<T>& tp) noexcept
 }
 
 template<typename T>
-inline auto to_iso8601(const chrono::time_point<T>& tp) noexcept
+auto to_iso8601(const chrono::time_point<T>& tp) noexcept
 {
     // YYYY-MM-DDThh:mm:ss.fffZ
-    using namespace chrono;
     const auto timestamp = convert(tp);
     auto os = ostringstream{};
     os << setw(4) << setfill('0') << get<years>(timestamp)        << '-'
@@ -131,12 +127,6 @@ inline auto to_iso8601(const chrono::time_point<T>& tp) noexcept
        << setw(2) << setfill('0') << get<seconds>(timestamp)      << '.'
        << setw(3) << setfill('0') << get<milliseconds>(timestamp) << 'Z';
     return os.str();
-}
-
-template<typename T>
-inline auto to_string(const chrono::time_point<T>& tp) noexcept
-{
-    return to_iso8601(tp);
 }
 
 inline auto stotp(const string& str)
@@ -150,15 +140,9 @@ inline auto stotp(const string& str)
     const auto mm = minutes{stoi(str.substr(14,2))};
     const auto ss = seconds {stoi(str.substr(17,2))};
     const auto ff = milliseconds{stoi(str.substr(20,3))};
-    auto tp = convert(YY,MM,DD);
+    auto tp = ext::convert(YY,MM,DD);
     tp += hh; tp += mm; tp += ss; tp += ff;
     return tp;
-}
-
-inline auto to_string(bool b) noexcept
-{
-    if(b) return "true"s;
-    else  return "false"s;
 }
 
 inline auto stob(const string& str) noexcept
@@ -167,22 +151,6 @@ inline auto stob(const string& str) noexcept
     if(str == "false"s || str == "0"s) return false;
     throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};
 }
-
-inline auto to_string(std::nullptr_t) noexcept
-{
-    return "null"s;
-}
-
-inline auto to_string(const string& str) noexcept
-{
-    return str;
-}
-
-using bool_t = bool;
-
-using datetime_t = std::chrono::system_clock::time_point;
-
-using string_t = std::string;
 
 inline std::string& trim_right(std::string& str, const std::string& delimiters = " \f\n\r\t\v")
 {
@@ -200,14 +168,46 @@ inline std::string& trim(std::string& str, const std::string& delimiters = " \f\
 }
 
 template<typename T>
-inline bool numeric(const T& str)
+bool numeric(const T& str)
 {
     return str.find_first_not_of("0123456789") == str.npos;
 }
 
-inline long long stoll (std::experimental::string_view str, std::size_t *idx = 0, int base = 10)
+static const std::string bool2string[] = {"false", "true"};
+
+static const std::string null2string = {"null"};
+
+} // namespace ext
+
+namespace std {
+
+template<typename T>
+auto to_string(const chrono::time_point<T>& tp) noexcept
 {
-    return std::stoll(std::string{str}, idx, base);
+    return ext::to_iso8601(tp);
+}
+
+constexpr auto& to_string(bool b) noexcept
+{
+    return ext::bool2string[b];
+}
+
+constexpr auto& to_string(nullptr_t) noexcept
+{
+    return ext::null2string;
+}
+
+constexpr auto& to_string(const string& str) noexcept
+{
+    return str;
+}
+
+inline long long stoll(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
+{
+    char* end;
+    auto ll = std::strtoll(sv.data(), &end, base);
+    if(pos) *pos = end - sv.data();
+    return ll;
 }
 
 } // namespace std

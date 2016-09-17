@@ -2,6 +2,7 @@
 #include "xson/json.hpp"
 
 using namespace std;
+using namespace ext;
 using namespace net;
 using namespace string_literals;
 using namespace xson;

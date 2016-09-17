@@ -79,7 +79,7 @@ TEST(XsonJsonTest,Null)
     TRACE(ob);
 
     ASSERT_EQ(type::null, ob["Null"s].type());
-    std::nullptr_t n = ob["Null"s];
+    xson::null_type n = ob["Null"s];
     ASSERT_EQ(nullptr, n);
 }
 
@@ -123,15 +123,15 @@ TEST(XsonJsonTest,Int64)
     TRACE(ob);
 
     ASSERT_EQ(type::int32, ob["Zero"s].type());
-    std::int32_t zero = ob["Zero"s];
+    xson::int32_type zero = ob["Zero"s];
     ASSERT_EQ(0, zero);
 
     ASSERT_EQ(type::int64, ob["Min"s].type());
-    std::int64_t min = ob["Min"s];
+    xson::int64_type min = ob["Min"s];
     ASSERT_EQ(std::numeric_limits<long long>::min(), min);
 
     ASSERT_EQ(type::int64, ob["Max"s].type());
-    std::int64_t max = ob["Max"s];
+    xson::int64_type max = ob["Max"s];
     ASSERT_EQ(std::numeric_limits<long long>::max(), max);
 }
 
@@ -237,7 +237,7 @@ TEST(XsonJsonTest,ParseFile2)
     EXPECT_EQ(true, alive);
     ASSERT_EQ(type::boolean, ob["isAlive"s].type());
 
-    std::nullptr_t spouce = ob["spouse"s];
+    xson::null_type spouce = ob["spouse"s];
     EXPECT_EQ(nullptr, spouce);
     ASSERT_EQ(type::null, ob["spouse"s].type());
 }

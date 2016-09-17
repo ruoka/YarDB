@@ -10,7 +10,7 @@ namespace db {
 
 using object = xson::fson::object;
 
-using sequence_type = std::int64_t;
+using sequence_type = xson::int64_type;
 
 using primary_key_type = sequence_type;
 

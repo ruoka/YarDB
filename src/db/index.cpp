@@ -2,7 +2,7 @@
 
 namespace {
 
-auto make_primary_key   = [](const xson::value& v){return xson::get<std::int64_t>(v);};
+auto make_primary_key   = [](const xson::value& v){return xson::get<xson::int64_type>(v);};
 
 auto make_secondary_key = [](const xson::value& v){return xson::to_string(v);};
 
@@ -39,16 +39,16 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
     }
     else if(selector.has(u8"$head"s))
     {
-        std::int64_t n = selector[u8"$head"s];
+        xson::int64_type n = selector[u8"$head"s];
         auto itr = keys.begin();
-        std::advance(itr, std::min<std::int64_t>(n, keys.size()));
+        std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         end = itr;
     }
     else if(selector.has(u8"$tail"s))
     {
-        std::int64_t n = selector[u8"$tail"s];
+        xson::int64_type n = selector[u8"$tail"s];
         auto itr = keys.rbegin();
-        std::advance(itr, std::min<std::int64_t>(n, keys.size()));
+        std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         begin = itr.base();
     }
     else if(xson::holds_alternative<typename T::mapped_type>(selector.value())) // FIXME

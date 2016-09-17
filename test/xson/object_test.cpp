@@ -158,7 +158,7 @@ TEST(XsonObjectTest,Null)
     ASSERT_FALSE(ob.empty());
     ASSERT_TRUE(ob.has("Null"s));
     ASSERT_EQ(type::null, ob["Null"s].type());
-    std::nullptr_t n = ob["Null"s];
+    xson::null_type n = ob["Null"s];
     ASSERT_EQ(nullptr, n);
 }
 

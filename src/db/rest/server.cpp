@@ -7,6 +7,7 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using namespace net;
 using namespace xson;
+using namespace ext;
 
 using std::chrono::system_clock;
 using std::thread;
@@ -238,13 +239,13 @@ std::tuple<string_view,json::object> db::rest::server::convert(string_view reque
     if(key.empty())                                      // collection?lte=4?desc
         selector = {"_id"s, to_filter(query)};
 
-    else if(std::numeric(key))                           // collection/123
+    else if(numeric(key))                           // collection/123
         selector = {"_id"s, stoll(key)};
 
     else if(value.empty())                               // collection/field?eq=value?desc
         selector = {to_string(key), to_filter(query)};
 
-    else if(key == "id"s && std::numeric(value))         // collection/id/123
+    else if(key == "id"s && numeric(value))         // collection/id/123
         selector = {"_id"s, stoll(value)};
 
     else                                                 // collection/field/value

@@ -1,5 +1,5 @@
 #pragma once
-
+#include <vector>
 #include <experimental/string_view>
 
 // scheme:[//[username:password@]host[:port]][/]path[?query][#fragment]

@@ -9,8 +9,8 @@ auto make_secondary_key = [](const xson::value& v){return xson::to_string(v);};
 template <typename T, typename F>
 db::index_range query_analysis(const db::object& selector, const T& keys, F make_key)
 {
-    auto begin = keys.cbegin();
-    auto end = keys.cend();
+    auto begin = keys.cbegin(),
+         end   = keys.cend();
 
     if(selector.has(u8"$gt"s))
     {
@@ -108,9 +108,15 @@ db::index_range db::index::range(const object& selector) const
             if(selector.has(key.first))
                 return query_analysis(selector[key.first], key.second, make_secondary_key);
 
-    auto begin = index_iterator{m_primary_keys.begin()},
-         end   = index_iterator{m_primary_keys.end()};
-    return {begin,end};
+    // else
+
+    auto begin = m_primary_keys.cbegin(),
+         end   = m_primary_keys.cend();
+
+    if(!selector.has(u8"$desc"s))
+        return {begin, end};
+    else
+        return {std::make_reverse_iterator(end), std::make_reverse_iterator(begin)};
 }
 
 void db::index::update(object& document)

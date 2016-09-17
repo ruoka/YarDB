@@ -25,7 +25,7 @@ using primary_index_type = std::map<primary_key_type,
 
 using secondary_index_type = std::map<secondary_key_type,
                                       position_type,
-                                      xson::less>;
+                                      xson::less<secondary_key_type>>;
 
 using secondary_index_map = std::map<secondary_index_name,
                                      secondary_index_type>;

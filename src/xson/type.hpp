@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ostream>
+#include <cmath>
 #include <string>
 #include <chrono>
 #include <array>

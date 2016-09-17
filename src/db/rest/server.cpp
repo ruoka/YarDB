@@ -237,19 +237,22 @@ std::tuple<string_view,json::object> db::rest::server::convert(string_view reque
     auto selector   = xson::object{};
 
     if(key.empty())                                      // collection?lte=4?desc
-        selector = {"_id"s, to_filter(query)};
+        selector += {"_id"s, to_filter(query)};
 
-    else if(numeric(key))                           // collection/123
-        selector = {"_id"s, stoll(key)};
+    else if(numeric(key))                                // collection/123
+        selector += {"_id"s, stoll(key)};
+
+    else if(key == "id"s && value.empty())              // collection/id?$head=10
+        selector += {"_id"s, to_filter(query)};
+
+    else if(key == "id"s && numeric(value))              // collection/id/123
+        selector += {"_id"s, stoll(value)};
 
     else if(value.empty())                               // collection/field?eq=value?desc
-        selector = {to_string(key), to_filter(query)};
-
-    else if(key == "id"s && numeric(value))         // collection/id/123
-        selector = {"_id"s, stoll(value)};
+        selector += {to_string(key), to_filter(query)};
 
     else                                                 // collection/field/value
-        selector = {to_string(key), to_string(value)};
+        selector += json::object{to_string(key), to_string(value)} += to_filter(query);
 
     selector += to_top(query);
 

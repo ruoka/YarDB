@@ -9,8 +9,8 @@ auto make_secondary_key = [](const xson::value& v){return xson::to_string(v);};
 template <typename T, typename F>
 db::index_range query_analysis(const db::object& selector, const T& keys, F make_key)
 {
-    auto begin = db::index_iterator{keys.begin()};
-    auto end = db::index_iterator{keys.end()};
+    auto begin = keys.cbegin();
+    auto end = keys.cend();
 
     if(selector.has(u8"$gt"s))
     {
@@ -51,13 +51,16 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
         std::advance(itr, std::min<std::int64_t>(n, keys.size()));
         begin = itr.base();
     }
-    else
+    else if(xson::holds_alternative<typename T::mapped_type>(selector.value())) // FIXME
     {
         auto key = make_key(selector);
         std::tie(begin,end) = keys.equal_range(key);
     }
 
-    return {begin,end};
+    if(!selector.has(u8"$desc"s))
+        return {begin, end};
+    else
+        return {std::make_reverse_iterator(end), std::make_reverse_iterator(begin)};
 }
 
 } // namespace
@@ -84,7 +87,7 @@ std::vector<std::string> db::index::keys() const
 
 bool db::index::primary_key(const object& selector) const
 {
-    return selector.has(u8"id"s);
+    return selector.has(u8"_id"s);
 }
 
 bool db::index::secondary_key(const object& selector) const
@@ -98,7 +101,7 @@ bool db::index::secondary_key(const object& selector) const
 db::index_range db::index::range(const object& selector) const
 {
     if(primary_key(selector))
-        return query_analysis(selector[u8"id"s], m_primary_keys, make_primary_key);
+        return query_analysis(selector[u8"_id"s], m_primary_keys, make_primary_key);
 
     else if(secondary_key(selector))
         for(const auto& key : m_secondary_keys)
@@ -112,15 +115,15 @@ db::index_range db::index::range(const object& selector) const
 
 void db::index::update(object& document)
 {
-    if(document.has(u8"id"s))
-        m_sequence = std::max<sequence_type>(m_sequence, document[u8"id"s]);
+    if(document.has(u8"_id"s))
+        m_sequence = std::max<sequence_type>(m_sequence, document[u8"_id"s]);
     else
-        document[u8"id"s] = ++m_sequence;
+        document[u8"_id"s] = ++m_sequence;
 }
 
 void db::index::insert(object& document, position_type position)
 {
-    const auto pk = make_primary_key(document[u8"id"s]);
+    const auto pk = make_primary_key(document[u8"_id"s]);
     m_primary_keys[pk] = position;
 
     for(auto& key : m_secondary_keys)
@@ -133,7 +136,7 @@ void db::index::insert(object& document, position_type position)
 
 void db::index::erase(const object& document)
 {
-    const auto pk = make_primary_key(document[u8"id"s]);
+    const auto pk = make_primary_key(document[u8"_id"s]);
     m_primary_keys.erase(pk);
 
     for(auto& key : m_secondary_keys)

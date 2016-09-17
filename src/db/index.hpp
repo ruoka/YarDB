@@ -34,55 +34,102 @@ class index_iterator : public std::iterator<std::forward_iterator_tag,position_t
 {
 public:
 
-    enum index_type {primary, secondary};
+    enum index_type {primary, secondary, reverse_primary, reverse_secondary};
 
     using primary_iterator = primary_index_type::const_iterator;
 
     using secondary_iterator = secondary_index_type::const_iterator;
 
-    index_iterator() = default;
+    using reverse_primary_iterator = std::reverse_iterator<primary_iterator>;
+
+    using reverse_secondary_iterator = std::reverse_iterator<secondary_iterator>;
+
+    index_iterator() = delete;
+
+    index_iterator(const index_iterator&) = default;
+
+    index_iterator& operator = (const index_iterator&) = delete;
 
     index_iterator(primary_iterator current) :
         m_primary_current{current},
         m_secondary_current{},
-        m_index_type{primary}
+        m_reverse_primary_current{},
+        m_reverse_secondary_current{},
+        c_index_type{primary}
     {}
 
     index_iterator(secondary_iterator current) :
         m_primary_current{},
         m_secondary_current{current},
-        m_index_type{secondary}
+        m_reverse_primary_current{},
+        m_reverse_secondary_current{},
+        c_index_type{secondary}
     {}
 
-    index_iterator(const index_iterator& itr) :
-        m_primary_current{itr.m_primary_current},
-        m_secondary_current{itr.m_secondary_current},
-        m_index_type{itr.m_index_type}
+    index_iterator(reverse_primary_iterator current) :
+        m_primary_current{},
+        m_secondary_current{},
+        m_reverse_primary_current{current},
+        m_reverse_secondary_current{},
+        c_index_type{reverse_primary}
+    {}
+
+    index_iterator(reverse_secondary_iterator current) :
+        m_primary_current{},
+        m_secondary_current{},
+        m_reverse_primary_current{},
+        m_reverse_secondary_current{current},
+        c_index_type{reverse_secondary}
     {}
 
     auto operator * ()
     {
-        if(m_index_type == primary)
+        switch(c_index_type)
+        {
+        case primary:
             return std::get<position_type>(*m_primary_current);
-        else
+        case secondary:
             return std::get<position_type>(*m_secondary_current);
+        case reverse_primary:
+            return std::get<position_type>(*m_reverse_primary_current);
+        case reverse_secondary:
+            return std::get<position_type>(*m_reverse_secondary_current);
+        }
     }
 
     auto& operator ++ ()
     {
-        if(m_index_type == primary)
+        switch(c_index_type)
+        {
+        case primary:
             ++m_primary_current;
-        else
+            break;
+        case secondary:
             ++m_secondary_current;
+            break;
+        case reverse_primary:
+            ++m_reverse_primary_current;
+            break;
+        case reverse_secondary:
+            ++m_reverse_secondary_current;
+            break;
+        }
         return *this;
     }
 
     auto operator != (const index_iterator& itr) const
     {
-        if(m_index_type == primary)
+        switch(c_index_type)
+        {
+        case primary:
             return m_primary_current != itr.m_primary_current;
-        else
+        case secondary:
             return m_secondary_current != itr.m_secondary_current;
+        case reverse_primary:
+            return m_reverse_primary_current != itr.m_reverse_primary_current;
+        case reverse_secondary:
+            return m_reverse_secondary_current != itr.m_reverse_secondary_current;
+        }
     }
 
 private:
@@ -91,14 +138,19 @@ private:
 
     secondary_iterator m_secondary_current;
 
-    index_type m_index_type;
+    reverse_primary_iterator m_reverse_primary_current;
+
+    reverse_secondary_iterator m_reverse_secondary_current;
+
+    const index_type c_index_type;
 };
 
 class index_range
 {
 public:
 
-    index_range(index_iterator& begin, index_iterator& end) :
+    template<typename T>
+    index_range(T begin, T end) :
         m_begin{begin},
         m_end{end}
     {}
@@ -111,11 +163,6 @@ public:
     auto end() const
     {
         return m_end;
-    }
-
-    operator bool () const
-    {
-        return m_begin != m_end;
     }
 
 private:

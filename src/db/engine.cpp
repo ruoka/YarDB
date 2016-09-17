@@ -3,7 +3,7 @@
 
 using namespace std::string_literals;
 
-db::engine::engine(const std::string file) : m_collection{u8"db"s}, m_index{}, m_storage{}
+db::engine::engine(const std::string file) : m_collection{u8"_db"s}, m_index{}, m_storage{}
 {
     m_storage.open(file, std::ios::out | std::ios::in | std::ios::binary);
     if (!m_storage.is_open())
@@ -37,7 +37,7 @@ void db::engine::reindex()
 
         index.insert(document, metadata.position);
 
-        if(metadata.collection != "db"s)
+        if(metadata.collection != "_db"s)
             continue;
 
         auto collection = document["collection"s];
@@ -52,7 +52,7 @@ void db::engine::index(std::vector<std::string> keys)
     index.add(keys);
     auto selector = db::object{u8"collection"s, m_collection};
     auto document = db::object{selector, {u8"keys"s, index.keys()}};
-    auto collection = u8"db"s;
+    auto collection = u8"_db"s;
     std::swap(collection, m_collection);
     upsert(selector, document);
     std::swap(collection, m_collection);
@@ -102,7 +102,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
 bool db::engine::update(const db::object& selector, db::object& updates, db::object& documents)
 {
     documents.type(xson::type::array);
-    
+
     auto success = false;
     auto& index = m_index[m_collection];
 

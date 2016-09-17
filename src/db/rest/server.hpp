@@ -126,35 +126,12 @@ private:
 
             try
             {
-                auto components = net::uri{request_uri};
-                auto root       = components.path[0];
-                auto collection = components.path[1];
-                auto key        = components.path[2];
-                auto value      = components.path[3];
-                auto query1     = components.query[0];
-                auto query2     = components.query[1];
+                auto collection = ""s;
+                auto selector = json::object{};
+
+                std::tie(collection,selector) = convert(request_uri);
 
                 m_engine.collection(to_string(collection));
-
-                auto selector = xson::object{};
-
-                if(!key.empty() && std::numeric(key))                               //collection/123
-                    selector = {"id"s, stoll(key)};
-
-                else if(key == "id"s && !value.empty() && std::numeric(value))      //collection/id/123
-                    selector = {"id"s, stoll(value)};
-
-                else if(!key.empty() && !value.empty())                             //collection/field/value
-                    selector = {to_string(key), to_string(value)};
-
-                else if(!key.empty() && !query1.empty())                            //collection/field?eq=value
-                    selector = {to_string(key), make_object(query1)};
-
-                else if(!query1.empty())                                            //collection?top=10
-                    selector = {make_object(query1)};
-
-                if(!query2.empty())                                                 //collection/field?gt=value?top=10
-                    selector += make_object(query2);
 
                 if(method == "GET" || method == "HEAD")
                 {
@@ -227,6 +204,55 @@ private:
             slog << debug << "Sent HTTP response message" << flush;
         }
         slog << debug << "Client closed connection" << flush;
+    }
+
+    virtual std::tuple<std::string,json::object> convert(string_view request_uri) // FIXME
+    {
+        auto components = net::uri{request_uri};
+
+        auto collection = std::string{components.path[1]};
+
+        auto root       = components.path[0];
+        auto key        = components.path[2];
+        auto value      = components.path[3];
+        auto query1     = components.query[0];
+        auto query2     = components.query[1];
+        auto query3     = components.query[2];
+        auto selector   = xson::object{};
+
+        if(!key.empty() && std::numeric(key))                               //collection/123
+            selector = {"_id"s, stoll(key)};
+
+        else if(key == "id"s && !value.empty() && std::numeric(value))      //collection/id/123
+            selector = {"_id"s, stoll(value)};
+
+        else if(!key.empty() && !value.empty())                             //collection/field/value
+            selector = {to_string(key), to_string(value)};
+
+        else if(key.empty() && !query1.empty())                             //collection?lte=4?desc
+            selector = {"_id"s, make_object(query1)};
+
+        else if(!key.empty() && !query1.empty())                            //collection/field?eq=value?desc
+            selector = {to_string(key), make_object(query1)};
+
+
+        if(key.empty() && !query1.empty() && !query2.empty())          //collection?lte=4?desc
+            selector = {"_id"s, {make_object(query1), make_object(query2)}};
+
+        else if(!key.empty() && !query1.empty() && !query2.empty())         //collection/field?eq=value?desc
+            selector = {to_string(key), {make_object(query1), make_object(query2)}};
+
+
+        if(query1.rfind("top"s) == 0)                                       //collection?top=10
+            selector += {make_object(query1)};
+
+        if(query2.rfind("top"s) == 0)                                       //collection/field?gt=value?top=10
+            selector += make_object(query2);
+
+        if(query3.rfind("top"s) == 0)                                       //collection/field?gt=value?top=10
+            selector += make_object(query3);
+
+        return std::make_tuple(collection,selector);
     }
 
     xson::object make_object(const string_view query)

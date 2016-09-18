@@ -14,13 +14,6 @@ using years = std::chrono::duration<int, std::ratio_multiply<days::period, std::
 
 using months = std::chrono::duration<int, std::ratio_divide<years::period, std::ratio<12>>::type>;
 
-template<typename T, typename R>
-auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexcept
-{
-    os << d.count();
-    return os;
-}
-
 static const std::string number2month[] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
 static const std::string number2weekday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -185,6 +178,13 @@ static const std::string null2string = {"null"};
 } // namespace ext
 
 namespace std {
+
+template<typename T, typename R>
+auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexcept
+{
+    os << d.count();
+    return os;
+}
 
 template<typename T>
 auto to_string(const chrono::time_point<T>& tp) noexcept

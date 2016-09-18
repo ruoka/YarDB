@@ -8,7 +8,8 @@ using namespace string_literals;
 using namespace xson;
 using namespace json;
 
-const auto usage = R"(
+const auto usage = R"(usage: yarsh [URL]
+
 Currently supported shell commands are:
 POST /collection         aka Create
 JSON
@@ -22,12 +23,17 @@ HELP                     i.e. This text
 EXIT                     i.e. Exit the shell
 )";
 
-int main(int, char**)
+int main(int argc, char *argv[])
 try
 {
     clog << usage << endl;
 
-    auto server = connect("localhost","2112");
+    auto url = "http://localhost:2112"s;
+
+    if(argc > 1)
+        url = argv[1];
+
+    auto server = connect(url);
 
     while(cin && server)
     {

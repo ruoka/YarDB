@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YarDB Example</title>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.2/jquery.min.js"></script>
+    <script type="text/javascript">
+    $(document).ready(function() {
+        $("button").click( function() {
+            $.ajax({
+                url : $(this).attr("data-url") + $("#query").val(),
+                method : $(this).attr("data-method"),
+                dataType: "json"
+            })
+            .done  (function(data) {alert("done"); $("#article").html(JSON.stringify(data))})
+            .fail  (function (jqXHR, textStatus, errorThrown) {alert(textStatus + " " + jqXHR.status)})
+            .always(function () { alert(this.method + " " + this.url) })
+        })
+    })
+    </script>
+
+<head>
+<body>
+
+    <aside>
+        <button type="button" data-url="http://localhost:2112/tests/" data-method="GET">GET</button>
+    </aside>
+
+    <form>
+        <input type="text" id="query"/>
+    </form>
+
+    <article id = "article"></article>
+
+</body>
+</html>

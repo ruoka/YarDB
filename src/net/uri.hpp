@@ -23,6 +23,16 @@ public:
         return m_value;
     }
 
+    operator std::string () const
+    {
+        return std::string{m_value};
+    }
+
+    auto operator == (const T& value) const
+    {
+        return m_value == value;
+    }
+
 protected:
 
     T m_value;
@@ -159,6 +169,9 @@ explicit uri(string_view string)
         string.remove_prefix(position);                 // fragment
     }
 }
+
+uri(const std::string& str) : uri(string_view{str})
+{}
 
 property<bool> absolute;
 

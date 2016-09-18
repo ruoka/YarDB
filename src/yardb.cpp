@@ -1,5 +1,6 @@
-#include "db/rest/server.hpp"
+#include <csignal>
 #include "net/syslogstream.hpp"
+#include "db/rest/server.hpp"
 
 using namespace std;
 using namespace net;
@@ -9,10 +10,12 @@ const auto usage = R"(yardb [service_or_port])";
 int main(int argc, char *argv[])
 try
 {
+    std::signal(SIGTERM, std::exit); // kill
+    std::signal(SIGINT,  std::exit); // ctrl-c
+
     clog << usage << endl;
 
     auto service_or_port = "2112"s;
-
     if(argc > 1)
         service_or_port = argv[1];
 

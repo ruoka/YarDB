@@ -1,3 +1,4 @@
+#include <thread>
 #include "net/acceptor.hpp"
 #include "net/syslogstream.hpp"
 #include "net/uri.hpp"
@@ -51,6 +52,10 @@ json::object to_top(const T& query)
 
 db::rest::server::server(db::engine& engine) :
 m_engine{engine}
+{}
+
+db::rest::server::server(server&& srv) :
+m_engine{srv.m_engine}
 {}
 
 void db::rest::server::start(const std::string& serice_or_port)
@@ -148,9 +153,9 @@ void db::rest::server::handle(net::endpointstream client)
         {
             auto collection = string_view{};
             auto selector = json::object{};
-
             std::tie(collection,selector) = convert(request_uri);
 
+            auto lock = std::unique_lock<std::mutex>{m_mutex};
             m_engine.collection(to_string(collection));
 
             if(method == "GET" || method == "HEAD")

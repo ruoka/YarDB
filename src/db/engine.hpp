@@ -9,7 +9,13 @@ class engine
 {
 public:
 
-    engine(const std::string file = "./yar.db"s);
+    engine(const std::string& db = "./yar.db"s);
+
+    engine(const engine&) = delete;
+
+    engine(engine&&) = default;
+
+    ~engine();
 
 //  Indexing
 
@@ -73,6 +79,8 @@ public:
     }
 
 private:
+
+    std::string m_db;
 
     std::string m_collection;
 

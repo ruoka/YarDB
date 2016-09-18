@@ -29,7 +29,6 @@ try
     clog << usage << endl;
 
     auto url = "http://localhost:2112"s;
-
     if(argc > 1)
         url = argv[1];
 

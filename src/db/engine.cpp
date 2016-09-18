@@ -1,17 +1,62 @@
+#include <set>
 #include "db/metadata.hpp"
 #include "db/engine.hpp"
 
 using namespace std::string_literals;
 
-db::engine::engine(const std::string file) : m_collection{u8"_db"s}, m_index{}, m_storage{}
+namespace {
+
+auto locks = std::set<std::string>{};
+
+inline void unlock()
 {
-    m_storage.open(file, std::ios::out | std::ios::in | std::ios::binary);
-    if (!m_storage.is_open())
-        m_storage.open(file, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
-    if (!m_storage.is_open())
-        throw std::invalid_argument("Cannot open file "s + file);
+    for(auto lock : locks)
+        std::remove(lock.c_str());
+    locks.clear();
+}
+
+inline void unlock(const std::string& db)
+{
+    auto lock = db + ".pid"s;
+    std::remove(lock.c_str());
+    locks.erase(lock);
+}
+
+inline void lock(const std::string& db)
+{
+    auto lock = db + ".pid"s;
+    auto file = std::fstream{lock, std::ios::in};
+    if(file.is_open())
+    {
+        auto pid = ""s;
+        file >> pid;
+        throw std::runtime_error{"DB "s + db + " is already in use by PID "s + pid};
+    }
+    file.open(lock, std::ios::out | std::ios::trunc);
+    if(!file.is_open())
+        throw std::runtime_error{"Failed to create DB lock "s + lock};
+    file << ::getpid() << std::endl;
+    locks.emplace(lock);
+    std::atexit(unlock);
+}
+
+} // namespace
+
+db::engine::engine(const std::string& db) : m_db{db}, m_collection{u8"_db"s}, m_index{}, m_storage{}
+{
+    lock(m_db);
+    m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary);
+    if(!m_storage.is_open())
+        m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
+    if(!m_storage.is_open())
+        throw std::runtime_error{"Failed to open/create DB "s + db};
     reindex();
     reindex(); // Intentional double
+}
+
+db::engine::~engine()
+{
+    unlock(m_db);
 }
 
 void db::engine::reindex()

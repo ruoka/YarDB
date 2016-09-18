@@ -10,21 +10,21 @@ auto locks = std::set<std::string>{};
 
 inline void unlock()
 {
-    for(auto lock : locks)
+    for(const auto& lock : locks)
         std::remove(lock.c_str());
     locks.clear();
 }
 
 inline void unlock(const std::string& db)
 {
-    auto lock = db + ".pid"s;
+    const auto lock = db + ".pid"s;
     std::remove(lock.c_str());
     locks.erase(lock);
 }
 
 inline void lock(const std::string& db)
 {
-    auto lock = db + ".pid"s;
+    const auto lock = db + ".pid"s;
     auto file = std::fstream{lock, std::ios::in};
     if(file.is_open())
     {
@@ -137,7 +137,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
         top = selector[u8"$top"s];
 
     auto success = false;
-    auto& index = m_index[m_collection];
+    const auto& index = m_index[m_collection];
 
     for(const auto position : index.range(selector))
     {
@@ -229,7 +229,7 @@ bool db::engine::history(const db::object& selector, db::object& documents)
     documents.type(xson::type::array);
 
     auto success = false;
-    auto& index = m_index[m_collection];
+    const auto& index = m_index[m_collection];
 
     for(auto position : index.range(selector))
         while(position >= 0)

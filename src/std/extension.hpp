@@ -8,17 +8,14 @@
 
 namespace ext {
 
-using namespace std;
-using namespace std::chrono;
+using days = std::chrono::duration<int, std::ratio_multiply<std::chrono::hours::period, std::ratio<24>>::type>;
 
-using days = duration<int, ratio_multiply<hours::period, ratio<24>>::type>;
+using years = std::chrono::duration<int, std::ratio_multiply<days::period, std::ratio<365>>::type>;
 
-using years = duration<int, ratio_multiply<days::period, ratio<365>>::type>;
-
-using months = duration<int, ratio_divide<years::period, ratio<12>>::type>;
+using months = std::chrono::duration<int, std::ratio_divide<years::period, std::ratio<12>>::type>;
 
 template<typename T, typename R>
-auto& operator << (std::ostream& os, const duration<T,R>& d) noexcept
+auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexcept
 {
     os << d.count();
     return os;
@@ -45,6 +42,7 @@ constexpr auto& to_string(const days& d) noexcept
 
 constexpr auto convert(const years& ys, const months& ms, const days& ds)
 {
+    using namespace std::chrono;
     static_assert(std::numeric_limits<unsigned>::digits >= 18,
              "This algorithm has not been ported to a 16 bit unsigned integer");
     static_assert(std::numeric_limits<int>::digits >= 20,
@@ -81,8 +79,10 @@ constexpr auto convert(const days& ds)
 }
 
 template<typename T>
-constexpr auto convert(const time_point<T>& tp) noexcept
+constexpr auto convert(const std::chrono::time_point<T>& tp) noexcept
 {
+    using namespace std;
+    using namespace std::chrono;
     auto tmp = tp;
     const auto ds = duration_cast<days>(tmp.time_since_epoch());
     tmp -= ds;
@@ -97,8 +97,10 @@ constexpr auto convert(const time_point<T>& tp) noexcept
 }
 
 template<typename T>
-auto to_rfc1123(const time_point<T>& tp) noexcept
+auto to_rfc1123(const std::chrono::time_point<T>& tp) noexcept
 {
+    using namespace std;
+    using namespace std::chrono;
     // Sun, 06 Nov 1994 08:49:37 GMT
     const auto timestamp = convert(tp);
     auto os = ostringstream{};
@@ -114,8 +116,10 @@ auto to_rfc1123(const time_point<T>& tp) noexcept
 }
 
 template<typename T>
-auto to_iso8601(const chrono::time_point<T>& tp) noexcept
+auto to_iso8601(const std::chrono::time_point<T>& tp) noexcept
 {
+    using namespace std;
+    using namespace std::chrono;
     // YYYY-MM-DDThh:mm:ss.fffZ
     const auto timestamp = convert(tp);
     auto os = ostringstream{};
@@ -129,10 +133,10 @@ auto to_iso8601(const chrono::time_point<T>& tp) noexcept
     return os.str();
 }
 
-inline auto stotp(const string& str)
+inline auto stotp(const std::string& str)
 {
     // YYYY-MM-DDThh:mm:ss.fffZ
-    using namespace chrono;
+    using namespace std::chrono;
     const auto YY = years{stoi(str.substr(0,4))};
     const auto MM = months{stoi(str.substr(5,2))};
     const auto DD = days{stoi(str.substr(8,2))};
@@ -145,8 +149,9 @@ inline auto stotp(const string& str)
     return tp;
 }
 
-inline auto stob(const string& str) noexcept
+inline auto stob(const std::string& str) noexcept
 {
+    using namespace std::string_literals;
     if(str == "true"s  || str == "1"s) return true;
     if(str == "false"s || str == "0"s) return false;
     throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};

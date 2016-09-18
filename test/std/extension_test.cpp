@@ -2,8 +2,9 @@
 #include "std/extension.hpp"
 
 using namespace std;
-using namespace chrono_literals;
-using namespace string_literals;
+using namespace std::chrono;
+using namespace std::chrono_literals;
+using namespace std::string_literals;
 using namespace ext;
 
 TEST(StdExtension,Durations)

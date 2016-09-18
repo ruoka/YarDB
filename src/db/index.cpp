@@ -22,7 +22,8 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
         auto key = make_key(selector[u8"$gte"s]);
         begin = keys.lower_bound(key);
     }
-    else if(selector.has(u8"$lt"s))
+
+    if(selector.has(u8"$lt"s))
     {
         auto key = make_key(selector[u8"$lt"s]);
         end = keys.lower_bound(key);
@@ -32,7 +33,8 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
         auto key = make_key(selector[u8"$lte"s]);
         end = keys.upper_bound(key);
     }
-    else if(selector.has(u8"$eq"s))
+
+    if(selector.has(u8"$eq"s))
     {
         auto key = make_key(selector[u8"$eq"s]);
         std::tie(begin,end) = keys.equal_range(key);

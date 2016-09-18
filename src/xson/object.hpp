@@ -353,7 +353,7 @@ public:
         return m_objects.count(name) > 0;
     }
 
-    bool match(const object& subset) const // FIXME too complicated!
+    bool match(const object& subset) const // FIXME This function is too complicated!
     {
         if(!subset.has_value() && !subset.has_objects())
             return true;
@@ -364,10 +364,19 @@ public:
             auto rf = subset.m_objects.cbegin();
             auto rl = subset.m_objects.cend();
 
-            if(lf == ll && rf != rl && operators.count(rf->first))
-                return operators.at(rf->first)(to_string(m_value),to_string(rf->second));
+            while(lf == ll && rf != rl)
+            {
+                if(operators.count(rf->first))
+                    if(!operators.at(rf->first)(to_string(m_value),to_string(rf->second)))
+                        return false;
 
-            if(rf->first[0] == '$')
+                if(rf->first[0] != '$')
+                    break;
+
+                ++rf;
+            }
+
+            if(rf != rl && rf->first[0] == '$')
                 ++rf;
 
             while(lf != ll && rf != rl)

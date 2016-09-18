@@ -172,7 +172,7 @@ property<string_view> port;
 
 indexed_property<'/'> path;
 
-indexed_property<'?'> query;
+indexed_property<'&'> query;
 
 property<string_view> fragment;
 

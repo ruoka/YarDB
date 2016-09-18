@@ -28,7 +28,7 @@ public:
 
     bool read(const db::object& selector, db::object& documents);
 
-    bool update(const db::object& selector, db::object& updates, db::object& documents);
+    bool update(const db::object& selector, const db::object& updates, db::object& documents);
 
     bool destroy(const db::object& selector, db::object& documents);
 
@@ -53,7 +53,7 @@ public:
         return destroy(selector) && create(document);
     }
 
-    bool update(const db::object& selector, db::object& updates)
+    bool update(const db::object& selector, const db::object& updates)
     {
         auto documents = db::object{};
         return update(selector, updates, documents);

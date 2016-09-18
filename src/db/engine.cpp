@@ -157,7 +157,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     return success;
 }
 
-bool db::engine::update(const db::object& selector, db::object& updates, db::object& documents)
+bool db::engine::update(const db::object& selector, const db::object& updates, db::object& documents)
 {
     documents.type(xson::type::array);
 

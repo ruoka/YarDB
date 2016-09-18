@@ -1,4 +1,5 @@
-#include <mutex>
+#pragma once
+
 #include <set>
 #include "xson/json.hpp"
 #include "net/endpointstream.hpp"
@@ -16,8 +17,6 @@ public:
 
     server(db::engine& engine);
 
-    server(server&&);
-
     void start(const std::string& serice_or_port = "http"s);
 
 protected:
@@ -29,8 +28,6 @@ private:
     void handle(net::endpointstream client);
 
     db::engine& m_engine;
-
-    std::mutex m_mutex;
 };
 
 } // namespace db::rest

@@ -54,10 +54,6 @@ db::rest::server::server(db::engine& engine) :
 m_engine{engine}
 {}
 
-db::rest::server::server(server&& srv) :
-m_engine{srv.m_engine}
-{}
-
 void db::rest::server::start(const std::string& serice_or_port)
 {
     slog << notice << "Starting server" << flush;
@@ -155,7 +151,7 @@ void db::rest::server::handle(net::endpointstream client)
             auto selector = json::object{};
             std::tie(collection,selector) = convert(request_uri);
 
-            auto lock = std::unique_lock<std::mutex>{m_mutex};
+            const auto lock = std::unique_lock<db::engine>{m_engine};
             m_engine.collection(to_string(collection));
 
             if(method == "GET" || method == "HEAD")

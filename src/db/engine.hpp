@@ -1,5 +1,6 @@
 #pragma once
 
+#include <mutex>
 #include <fstream>
 #include "db/index.hpp"
 
@@ -11,9 +12,7 @@ public:
 
     engine(const std::string& db = "./yar.db"s);
 
-    engine(const engine&) = delete;
-
-    engine(engine&&) = default;
+    engine(engine&&);
 
     ~engine();
 
@@ -78,6 +77,23 @@ public:
         m_collection = in_use;
     }
 
+//  The lockable concept
+
+    void lock()
+    {
+        m_mutex.lock();
+    }
+
+    bool try_lock()
+    {
+        return m_mutex.try_lock();
+    }
+
+    void unlock()
+    {
+        m_mutex.unlock();
+    }
+
 private:
 
     std::string m_db;
@@ -87,6 +103,8 @@ private:
     std::map<std::string,db::index> m_index;
 
     std::fstream m_storage;
+
+    std::mutex m_mutex;
 };
 
 } // namespace db

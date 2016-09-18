@@ -42,9 +42,14 @@ inline void lock(const std::string& db)
 
 } // namespace
 
-db::engine::engine(const std::string& db) : m_db{db}, m_collection{u8"_db"s}, m_index{}, m_storage{}
+db::engine::engine(const std::string& db) :
+    m_db{db},
+    m_collection{u8"_db"s},
+    m_index{},
+    m_storage{},
+    m_mutex{}
 {
-    lock(m_db);
+    ::lock(m_db);
     m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary);
     if(!m_storage.is_open())
         m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
@@ -54,9 +59,17 @@ db::engine::engine(const std::string& db) : m_db{db}, m_collection{u8"_db"s}, m_
     reindex(); // Intentional double
 }
 
+db::engine::engine(db::engine&& e) :
+    m_db{std::move(e.m_db)},
+    m_collection{std::move(e.m_collection)},
+    m_index{std::move(e.m_index)},
+    m_storage{std::move(e.m_storage)},
+    m_mutex{}
+{}
+
 db::engine::~engine()
 {
-    unlock(m_db);
+    ::unlock(m_db);
 }
 
 void db::engine::reindex()

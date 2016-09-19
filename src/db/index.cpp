@@ -14,48 +14,48 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
 
     if(selector.has(u8"$gt"s))
     {
-        auto key = make_key(selector[u8"$gt"s]);
+        const auto key = make_key(selector[u8"$gt"s]);
         begin = keys.upper_bound(key);
     }
     else if(selector.has(u8"$gte"s))
     {
-        auto key = make_key(selector[u8"$gte"s]);
+        const auto key = make_key(selector[u8"$gte"s]);
         begin = keys.lower_bound(key);
     }
 
     if(selector.has(u8"$lt"s))
     {
-        auto key = make_key(selector[u8"$lt"s]);
+        const auto key = make_key(selector[u8"$lt"s]);
         end = keys.lower_bound(key);
     }
     else if(selector.has(u8"$lte"s))
     {
-        auto key = make_key(selector[u8"$lte"s]);
+        const auto key = make_key(selector[u8"$lte"s]);
         end = keys.upper_bound(key);
     }
 
     if(selector.has(u8"$eq"s))
     {
-        auto key = make_key(selector[u8"$eq"s]);
+        const auto key = make_key(selector[u8"$eq"s]);
         std::tie(begin,end) = keys.equal_range(key);
     }
     else if(selector.has(u8"$head"s))
     {
-        xson::int64_type n = selector[u8"$head"s];
+        const xson::int64_type n = selector[u8"$head"s];
         auto itr = keys.begin();
         std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         end = itr;
     }
     else if(selector.has(u8"$tail"s))
     {
-        xson::int64_type n = selector[u8"$tail"s];
+        const xson::int64_type n = selector[u8"$tail"s];
         auto itr = keys.rbegin();
         std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         begin = itr.base();
     }
     else if(xson::holds_alternative<typename T::mapped_type>(selector.value())) // FIXME
     {
-        auto key = make_key(selector);
+        const auto key = make_key(selector);
         std::tie(begin,end) = keys.equal_range(key);
     }
 

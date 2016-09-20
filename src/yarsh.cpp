@@ -1,15 +1,17 @@
+#include <experimental/string_view>
+#include "std/span.hpp"
 #include "net/connector.hpp"
 #include "xson/json.hpp"
 
 using namespace std;
+using namespace string_literals;
 using namespace ext;
 using namespace net;
-using namespace string_literals;
 using namespace xson;
-using namespace json;
 
-const auto usage = R"(usage: yarsh [URL]
+const auto usage = R"(usage: yarsh [--help] [URL])";
 
+const auto help = R"(
 Currently supported shell commands are:
 POST /collection         aka Create
 JSON
@@ -23,16 +25,33 @@ HELP                     i.e. This text
 EXIT                     i.e. Exit the shell
 )";
 
-int main(int argc, char *argv[])
+int main(int argc, char** argv)
 try
 {
-    clog << usage << endl;
-
+    const auto arguments = span<char*>{argv,argc}.subspan(1);
     auto url = "http://localhost:2112"s;
-    if(argc > 1)
-        url = argv[1];
+
+    for(const string_view option : arguments)
+    {
+        if(option.find("--help") == 0)
+        {
+            clog << usage << endl;
+            return 0;
+        }
+        else if(option.find("-") == 0)
+        {
+            clog << usage << endl;
+            return 1;
+        }
+        else
+        {
+            url = option.to_string();
+        }
+    }
 
     auto server = connect(url);
+
+    clog << help << endl;
 
     while(cin && server)
     {
@@ -44,19 +63,20 @@ try
 
         if (method == "HELP")
         {
-            clog << usage << endl;
+            clog << help << endl;
             continue;
         }
 
         if (method == "EXIT")
         {
+            clog << "Closing connection..." << endl;
             break;
         }
 
         cin >> uri;
 
         if(method == "POST"s || method == "PUT"s || method == "PATCH"s)
-            content = stringify(parse(cin));
+            content = json::stringify(json::parse(cin));
 
         server << method << sp << uri << sp << version   << crlf
                << "Host: localhost:2112 "                << crlf
@@ -86,14 +106,19 @@ try
         }
 
         if(status == 200 || status == 404)
-            cout << stringify(parse(server)) << endl;
+            cout << json::stringify(json::parse(server)) << endl;
     }
-    clog << "Server closed the connection" << endl;
+    clog << "See you latter - bye!" << endl;
     return 0;
+}
+catch(const system_error& e)
+{
+    cerr << "System error with code " << e.code() << " " << e.what() << endl;
+    return 1;
 }
 catch(const std::exception& e)
 {
-    cerr << "Error: " << e.what() << endl;
+    cerr << "Exception " << e.what() << endl;
     return 1;
 }
 catch(...)

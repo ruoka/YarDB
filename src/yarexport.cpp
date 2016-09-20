@@ -26,7 +26,7 @@ try
         auto document = db::object{};
         storage >> metadata >> document;
         if(storage)
-            std::clog << json::stringify(
+            clog << json::stringify(
                             {{"collection"s, metadata.collection         },
                              {"status"s,     to_string(metadata.status)  },
                              {"position"s,   metadata.position           },
@@ -35,9 +35,14 @@ try
                       << ",\n";
     }
 }
-catch(const std::exception& e)
+catch(const system_error& e)
 {
-    cerr << "Error: " << e.what() << endl;
+    cerr << "System error with code " << e.code() << " " << e.what() << endl;
+    return 1;
+}
+catch(const exception& e)
+{
+    cerr << "Exception " << e.what() << endl;
     return 1;
 }
 catch(...)

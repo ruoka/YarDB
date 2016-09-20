@@ -4,6 +4,7 @@
 #include <tuple>
 #include <sstream>
 #include <iomanip>
+#include <iterator>
 #include <experimental/string_view>
 
 namespace ext {
@@ -207,11 +208,19 @@ constexpr auto& to_string(const string& str) noexcept
     return str;
 }
 
-inline long long stoll(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
+inline auto stol(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
+{
+    char* end;
+    auto i = std::strtol(sv.data(), &end, base);
+    if(pos) *pos = std::distance<const char*>(sv.data(), end);
+    return i;
+}
+
+inline auto stoll(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
 {
     char* end;
     auto ll = std::strtoll(sv.data(), &end, base);
-    if(pos) *pos = end - sv.data();
+    if(pos) *pos = std::distance<const char*>(sv.data(), end);
     return ll;
 }
 

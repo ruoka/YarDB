@@ -394,7 +394,7 @@ private:
 
     xson::value m_value;
 
-    std::map<xson::string_type,xson::object_type,xson::less> m_objects;
+    std::map<string_type,object_type,less> m_objects;
 };
 
 } // namespace xson

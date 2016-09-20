@@ -136,7 +136,6 @@ explicit uri(string_view string)
             authority.remove_suffix(size);                    // :port
         }
 
-        position = authority.length();
         host = authority.substr();                            // host
     }
 

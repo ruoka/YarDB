@@ -42,10 +42,9 @@ inline auto to_string(const value& val)
     throw std::logic_error{"This type is not supported"};
 }
 
-template <typename T>
 struct less
 {
-    bool operator()(const T& lhs, const T& rhs) const
+    bool operator()(const string_type& lhs, const string_type& rhs) const
     {
         if(ext::numeric(lhs) && ext::numeric(rhs))
         {
@@ -55,54 +54,6 @@ struct less
                 return lhs.size() < rhs.size();
         }
         return lhs < rhs;
-    }
-};
-
-template <typename T>
-struct less_equal
-{
-    bool operator()(const T& lhs, const T& rhs) const
-    {
-        if(ext::numeric(lhs) && ext::numeric(rhs))
-        {
-            if(lhs.size() == rhs.size())
-                return lhs <= rhs;
-            else
-                return lhs.size() < rhs.size();
-        }
-        return lhs <= rhs;
-    }
-};
-
-template <typename T>
-struct greater
-{
-    bool operator()(const T& lhs, const T& rhs) const
-    {
-        if(ext::numeric(lhs) && ext::numeric(rhs))
-        {
-            if(lhs.size() == rhs.size())
-                return lhs > rhs;
-            else
-                return lhs.size() > rhs.size();
-        }
-        return lhs > rhs;
-    }
-};
-
-template <typename T>
-struct greater_equal
-{
-    bool operator()(const T& lhs, const T& rhs) const
-    {
-        if(ext::numeric(lhs) && ext::numeric(rhs))
-        {
-            if(lhs.size() == rhs.size())
-                return lhs >= rhs;
-            else
-                return lhs.size() > rhs.size();
-        }
-        return lhs >= rhs;
     }
 };
 
@@ -359,15 +310,15 @@ public:
             return true;
         if(subset.type() == type::object || subset.type() == type::array)
         {
-            auto lf = m_objects.cbegin();
-            auto ll = m_objects.cend();
-            auto rf = subset.m_objects.cbegin();
-            auto rl = subset.m_objects.cend();
+            auto lf = std::cbegin(m_objects),
+                 rf = std::cbegin(subset.m_objects);
+            const auto ll = std::cend(m_objects),
+                       rl = std::cend(subset.m_objects);
 
             while(lf == ll && rf != rl)
             {
                 if(operators.count(rf->first))
-                    if(!operators.at(rf->first)(to_string(m_value),to_string(rf->second)))
+                    if(!operators.at(rf->first)(m_value,rf->second))
                         return false;
 
                 if(rf->first[0] != '$')
@@ -428,22 +379,22 @@ public:
 
 private:
 
-    using operator_type = std::function<bool(const string_type&,const string_type&)>;
+    using operator_type = std::function<bool(const xson::value&,const xson::value&)>;
 
     const std::map<string_type,operator_type> operators = std::map<string_type,operator_type>{
-        { "$eq"s,  std::equal_to<string_type>{}       },
-        { "$ne"s,  std::not_equal_to<string_type>{}   },
-        { "$lt"s,  xson::less<string_type>{}          },
-        { "$lte"s, xson::less_equal<string_type>{}    },
-        { "$gt"s,  xson::greater<string_type>{}       },
-        { "$gte"s, xson::greater_equal<string_type>{} }
+        { "$eq"s,  std::equal_to<xson::value>{}       },
+        { "$ne"s,  std::not_equal_to<xson::value>{}   },
+        { "$lt"s,  std::less<xson::value>{}          },
+        { "$lte"s, std::less_equal<xson::value>{}    },
+        { "$gt"s,  std::greater<xson::value>{}       },
+        { "$gte"s, std::greater_equal<xson::value>{} }
     };
 
     xson::type m_type;
 
     xson::value m_value;
 
-    std::map<string_type,object_type,less<string_type>> m_objects;
+    std::map<xson::string_type,xson::object_type,xson::less> m_objects;
 };
 
 } // namespace xson

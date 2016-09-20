@@ -63,12 +63,12 @@ public:
 
     auto begin() const
     {
-        return std::cbegin(m_index);
+        return m_index.cbegin();
     }
 
     auto end() const
     {
-        return std::cend(m_index);
+        return m_index.cend();
     }
 
 private:

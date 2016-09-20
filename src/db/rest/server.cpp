@@ -17,13 +17,33 @@ using std::ws;
 namespace
 {
 
-inline json::object to_object(string_view query)
+inline json::object to_object(string_view name, string_view value)
+{
+    if(numeric(value))
+        return {to_string(name), stoi(value)};
+    else if(value == "true")
+        return {to_string(name), true};
+    else if(value == "false")
+        return {to_string(name), false};
+    else if(value == "null")
+        return {to_string(name), nullptr};
+    else
+        return {to_string(name), to_string(value)};
+}
+
+inline json::object to_operator(string_view query)
 {
     auto pos   = query.find_first_of('=');
     auto name  = to_string(query.substr(0,pos));
-    auto value = query.substr(pos+1,query.length());
+    auto value = query.substr(pos+1);
     if(numeric(value))
-        return {"$"s + name, stoll(value)};
+        return {"$"s + name, stoi(value)};
+    else if(value == "true")
+        return {"$"s + name, true};
+    else if(value == "false")
+        return {"$"s + name, false};
+    else if(value == "null")
+        return {"$"s + name, nullptr};
     else
         return {"$"s + name, to_string(value)};
 }
@@ -34,7 +54,7 @@ json::object to_filter(const T& query)
     auto filter = json::object{};
     for(auto q : query)
         if(q.rfind("top") != 0)
-            filter += to_object(q);
+            filter += to_operator(q);
     return filter;
 }
 
@@ -44,7 +64,7 @@ json::object to_top(const T& query)
     auto filter = json::object{};
     for(auto q : query)
         if(q.rfind("top") == 0)
-            filter += to_object(q);
+            filter += to_operator(q);
     return filter;
 }
 
@@ -253,7 +273,7 @@ std::tuple<string_view,json::object> db::rest::server::convert(string_view reque
         selector += {to_string(key), to_filter(query)};
 
     else                                                 // collection/field/value
-        selector += json::object{to_string(key), to_string(value)} += to_filter(query);
+        selector += to_object(key,value) += to_filter(query);
 
     selector += to_top(query);
 

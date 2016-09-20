@@ -21,6 +21,7 @@ using null_type    = std::nullptr_t;
 using date_type    = std::chrono::system_clock::time_point;
 using int32_type   = std::int32_t;
 using int64_type   = std::int64_t;
+using integer_type = std::int64_t;
 
 enum class type : xson::byte_type
 {

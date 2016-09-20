@@ -20,7 +20,7 @@ namespace
 inline json::object to_object(string_view name, string_view value)
 {
     if(numeric(value))
-        return {to_string(name), stoi(value)};
+        return {to_string(name), stoll(value)};
     else if(value == "true")
         return {to_string(name), true};
     else if(value == "false")
@@ -37,7 +37,7 @@ inline json::object to_operator(string_view query)
     auto name  = to_string(query.substr(0,pos));
     auto value = query.substr(pos+1);
     if(numeric(value))
-        return {"$"s + name, stoi(value)};
+        return {"$"s + name, stoll(value)};
     else if(value == "true")
         return {"$"s + name, true};
     else if(value == "false")

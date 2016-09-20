@@ -9,8 +9,8 @@ auto make_secondary_key = [](const xson::value& v){return xson::to_string(v);};
 template <typename T, typename F>
 db::index_range query_analysis(const db::object& selector, const T& keys, F make_key)
 {
-    auto begin = keys.cbegin(),
-         end   = keys.cend();
+    auto begin = std::cbegin(keys),
+         end   = std::cend(keys);
 
     if(selector.has(u8"$gt"s))
     {
@@ -42,14 +42,14 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
     else if(selector.has(u8"$head"s))
     {
         const xson::int64_type n = selector[u8"$head"s];
-        auto itr = keys.begin();
+        auto itr = std::begin(keys);
         std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         end = itr;
     }
     else if(selector.has(u8"$tail"s))
     {
         const xson::int64_type n = selector[u8"$tail"s];
-        auto itr = keys.rbegin();
+        auto itr = std::rbegin(keys);
         std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         begin = itr.base();
     }
@@ -112,13 +112,10 @@ db::index_range db::index::range(const object& selector) const
 
     // else
 
-    auto begin = m_primary_keys.cbegin(),
-         end   = m_primary_keys.cend();
-
     if(!selector.has(u8"$desc"s))
-        return {begin, end};
+        return {std::cbegin(m_primary_keys),std::cend(m_primary_keys)};
     else
-        return {std::make_reverse_iterator(end), std::make_reverse_iterator(begin)};
+        return {std::crbegin(m_primary_keys),std::crend(m_primary_keys)};
 }
 
 void db::index::update(object& document)

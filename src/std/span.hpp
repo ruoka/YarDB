@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iterator>
+#include <experimental/type_traits>
 
 namespace std {
 
@@ -58,15 +59,17 @@ public:
     constexpr span(span&& other) noexcept = default;
 
     template <class OtherElementType, ptrdiff_t OtherExtent>
-    constexpr span(const span<OtherElementType, OtherExtent>& other)
+    constexpr span(const span<OtherElementType, OtherExtent>& other) : span{other.m_data, other.m_size}
     {
-        static_assert("Not implemented");
+        using std::experimental::is_convertible_v;
+        static_assert(is_convertible_v<OtherElementType,ElementType>, "Not convertible");
     }
 
     template <class OtherElementType, ptrdiff_t OtherExtent>
-    constexpr span(span<OtherElementType, OtherExtent>&& other)
+    constexpr span(span<OtherElementType, OtherExtent>&& other) : span{other.m_data, other.m_size}
     {
-        static_assert("Not implemented");
+        using std::experimental::is_convertible_v;
+        static_assert(is_convertible_v<OtherElementType,ElementType>, "Not convertible");
     }
 
     ~span() noexcept = default;
@@ -125,14 +128,12 @@ public:
 
     constexpr index_type length_bytes() const noexcept
     {
-        static_assert("Not implemented");
-        return 0;
+        return sizeof(element_type) * m_size;
     }
 
     constexpr index_type size_bytes() const noexcept
     {
-        static_assert("Not implemented");
-        return 0;
+        return sizeof(element_type) * m_size;
     }
 
     constexpr bool empty() const noexcept

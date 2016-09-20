@@ -247,7 +247,7 @@ void db::rest::server::handle(net::endpointstream client)
     slog << debug << "Client closed connection" << flush;
 }
 
-std::tuple<string_view,json::object> db::rest::server::convert(string_view request_uri) // FIXME
+std::tuple<string_view,json::object> db::rest::server::convert(string_view request_uri)
 {
     auto components = net::uri{request_uri};
     auto root       = components.path[0];                // Should be /

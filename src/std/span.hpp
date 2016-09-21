@@ -291,13 +291,13 @@ constexpr bool operator>=(const span<ElementType, Extent>& l, const span<Element
 template <class ElementType, ptrdiff_t Extent>
 constexpr span<const byte, (Extent == dynamic_extent ? dynamic_extent : (sizeof(ElementType) * Extent))> as_bytes(span<ElementType, Extent> s) noexcept
 {
-    return {static_cast<byte*>(s.data()), s.length_bytes()};
+    return {static_cast<const byte*>(s.data()), s.length_bytes()};
 }
 
 template <class ElementType, ptrdiff_t Extent>
 constexpr span<byte, (Extent == dynamic_extent ? dynamic_extent : (sizeof(ElementType) * Extent))> as_writeable_bytes(span<ElementType, Extent> s) noexcept
 {
-    return {static_cast<char*>(s.data()), s.length_bytes()};
+    return {static_cast<byte*>(s.data()), s.length_bytes()};
 }
 
 } // namespace std

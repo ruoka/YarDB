@@ -11,6 +11,43 @@ enum class byte : unsigned char {};
 // [views.constants], constants
 constexpr ptrdiff_t dynamic_extent = -1;
 
+template<ptrdiff_t Extent>
+struct span_size
+{
+    template<typename T>
+    span_size(T)
+    {}
+    constexpr operator ptrdiff_t () const
+    {
+        return Extent;
+    }
+    template<typename T>
+    auto& operator = (T s)
+    {
+        return *this;
+    }
+};
+
+template<>
+struct span_size<dynamic_extent>
+{
+    template<typename T>
+    span_size(T s) : m_value{static_cast<ptrdiff_t>(s)}
+    {}
+    constexpr operator ptrdiff_t () const
+    {
+        return m_value;
+    }
+    template<typename T>
+    auto& operator = (T s)
+    {
+        m_value = s;
+        return *this;
+    }
+private:
+    ptrdiff_t m_value;
+};
+
 // A view over a contiguous, single-dimension sequence of objects
 template <class ElementType, ptrdiff_t Extent = dynamic_extent>
 class span
@@ -29,51 +66,30 @@ public:
     static constexpr index_type extent = Extent;
 
     // [span.cons], span constructors, copy, assignment, and destructor constexpr span();
-    constexpr span(nullptr_t) : m_data{nullptr}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = 0;
-    }
+    constexpr span(nullptr_t) : m_data{nullptr}, m_size{0}
+    {}
 
-    constexpr span(pointer ptr, index_type count) : m_data{ptr}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = count;
-    }
+    constexpr span(pointer ptr, index_type count) : m_data{ptr}, m_size{count}
+    {}
 
-    constexpr span(pointer firstElem, pointer lastElem) : m_data{firstElem}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = std::distance(firstElem,lastElem);
-    }
+    constexpr span(pointer firstElem, pointer lastElem) : m_data{firstElem}, m_size{std::distance(firstElem,lastElem)}
+    {}
 
     template <size_t N>
-    constexpr span(element_type (&arr)[N]) : m_data{arr}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = N;
-    }
+    constexpr span(element_type (&arr)[N]) : m_data{arr}, m_size{N}
+    {}
 
     template <size_t N>
-    constexpr span(array<remove_const_t<element_type>, N>& arr) : m_data{arr.data()}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = N;
-    }
+    constexpr span(array<remove_const_t<element_type>, N>& arr) : m_data{arr.data()}, m_size{N}
+    {}
 
     template <size_t N>
-    constexpr span(const array<remove_const_t<element_type>, N>& arr) : m_data{arr.data()}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = N;
-    }
+    constexpr span(const array<remove_const_t<element_type>, N>& arr) : m_data{arr.data()}, m_size{N}
+    {}
 
     template <class Container>
-    constexpr span(Container& cont) : m_data{cont.data()}, m_size{}
-    {
-        if(extent == dynamic_extent)
-            m_size = cont.size();
-    }
+    constexpr span(Container& cont) : m_data{cont.data()}, m_size{cont.size()}
+    {}
 
     template <class Container> span(const Container&&) = delete;
 
@@ -124,61 +140,58 @@ public:
 
     constexpr span<element_type, dynamic_extent> first(index_type count) const
     {
-        if(count > size()) std::terminate();
+        if(count > m_size) std::terminate();
         return {m_data,count};
     }
 
     constexpr span<element_type, dynamic_extent> last(index_type count) const
     {
-        if(count > size()) std::terminate();
+        if(count > m_size) std::terminate();
         return {m_data + m_size - count, count};
     }
 
     constexpr span<element_type, dynamic_extent> subspan(index_type offset, index_type count = dynamic_extent) const
     {
-        if(offset > size()) std::terminate();
+        if(offset > m_size) std::terminate();
         return {m_data+offset,m_size - offset};
     }
 
     // [span.obs], span observers
     constexpr index_type length() const noexcept
     {
-        return size();
+        return m_size;
     }
 
     constexpr index_type size() const noexcept
     {
-        if(extent == dynamic_extent)
-            return m_size;
-        else
-            return Extent;
+        return m_size;
     }
 
     constexpr index_type length_bytes() const noexcept
     {
-        return size() * sizeof(element_type);
+        return m_size * sizeof(element_type);
     }
 
     constexpr index_type size_bytes() const noexcept
     {
-        return length_bytes();
+        return m_size * sizeof(element_type);
     }
 
     constexpr bool empty() const noexcept
     {
-        return !size();
+        return !m_size;
     }
 
     // [span.elem], span element access
     constexpr reference operator[](index_type idx) const
     {
-        if(idx > size()) std::terminate();
+        if(idx > m_size) std::terminate();
         return m_data[idx];
     }
 
     constexpr reference operator()(index_type idx) const
     {
-        if(idx > size()) std::terminate();
+        if(idx > m_size) std::terminate();
         return m_data[idx];
     }
 
@@ -195,7 +208,7 @@ public:
 
     iterator end() const noexcept
     {
-        return m_data + size();
+        return m_data + m_size;
     }
 
     const_iterator cbegin() const noexcept
@@ -234,7 +247,7 @@ private:
 
     pointer m_data;
 
-    index_type m_size;
+    span_size<Extent> m_size;
 };
 
 // [span.comparison], span comparison operators

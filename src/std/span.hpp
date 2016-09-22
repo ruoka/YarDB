@@ -12,10 +12,10 @@ enum class byte : unsigned char {};
 constexpr ptrdiff_t dynamic_extent = -1;
 
 template<ptrdiff_t Extent>
-struct span_size
+struct __span_size
 {
     template<typename T>
-    span_size(T)
+    __span_size(T)
     {}
     constexpr operator ptrdiff_t () const
     {
@@ -29,10 +29,10 @@ struct span_size
 };
 
 template<>
-struct span_size<dynamic_extent>
+struct __span_size<dynamic_extent>
 {
     template<typename T>
-    span_size(T s) : m_value{static_cast<ptrdiff_t>(s)}
+    __span_size(T s) : m_value{static_cast<ptrdiff_t>(s)}
     {}
     constexpr operator ptrdiff_t () const
     {
@@ -247,7 +247,7 @@ private:
 
     pointer m_data;
 
-    span_size<Extent> m_size;
+    __span_size<Extent> m_size;
 };
 
 // [span.comparison], span comparison operators

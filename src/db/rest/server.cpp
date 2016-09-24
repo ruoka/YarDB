@@ -1,4 +1,5 @@
 #include <thread>
+#include <sstream>
 #include "net/acceptor.hpp"
 #include "net/syslogstream.hpp"
 #include "net/uri.hpp"
@@ -17,6 +18,19 @@ using std::ws;
 namespace
 {
 
+inline auto csv(string_view value)
+{
+    return value.find_first_of(',') != value.npos;
+}
+
+inline json::object to_array(string_view values)
+{
+    std::stringstream ss;
+    ss << '[' << values << ']';
+    auto array = json::parse(ss);
+    return array;
+}
+
 inline json::object to_object(string_view name, string_view value)
 {
     if(numeric(value))
@@ -27,6 +41,8 @@ inline json::object to_object(string_view name, string_view value)
         return {to_string(name), false};
     else if(value == "null")
         return {to_string(name), nullptr};
+    else if(csv(value))
+        return {to_string(name), db::object{"$in"s, to_array(value)}};
     else
         return {to_string(name), to_string(value)};
 }
@@ -59,6 +75,16 @@ json::object to_filter(const T& query)
 }
 
 template<typename T>
+json::object to_order(const T& query)
+{
+    auto filter = json::object{};
+    for(auto q : query)
+        if(q.rfind("desc") == 0)
+            filter += to_operator(q);
+    return filter;
+}
+
+template<typename T>
 json::object to_top(const T& query)
 {
     auto filter = json::object{};
@@ -66,6 +92,17 @@ json::object to_top(const T& query)
         if(q.rfind("top") == 0)
             filter += to_operator(q);
     return filter;
+}
+
+template<typename T1, typename T2, typename T3>
+json::object to_selector(const T1& name, const T2& value, const T3& query)
+{
+    auto selector = json::object{};
+    if(value.empty())                                            // collection/id?$head=10
+        selector += {to_string(name), to_filter(query)};
+    else                                                         // collection/id/123 or collection/id/1,2,3
+        selector += to_object(name, value);
+    return selector;
 }
 
 } // namespace
@@ -250,32 +287,23 @@ void db::rest::server::handle(net::endpointstream client)
 std::tuple<string_view,json::object> db::rest::server::convert(string_view request_uri)
 {
     auto components = net::uri{request_uri};
-    auto root       = components.path[0];                // Should be /
+    auto root       = components.path[0];               // Should be /
     auto collection = components.path[1];
     auto key        = components.path[2];
     auto value      = components.path[3];
     auto query      = components.query;
     auto selector   = xson::object{};
 
-    if(key.empty())                                      // collection?lte=4?desc
-        selector += {"_id"s, to_filter(query)};
+    if(key == "id"s)                                    // collection/id?$head=10, collection/id/123 or collection/id/1,2,3
+        selector = to_selector(u8"_id"s, value, query);
 
-    else if(numeric(key))                                // collection/123
-        selector += {"_id"s, stoll(key)};
+    else if(value.empty())                              // collection?lte=4?desc, collection/123 or collection/1,2,3
+        selector = to_selector(u8"_id"s, key, query);
 
-    else if(key == "id"s && value.empty())              // collection/id?$head=10
-        selector += {"_id"s, to_filter(query)};
+    else                                                // collection/field?eq=value?desc or collection/field/value
+        selector = to_selector(key, value, query);
 
-    else if(key == "id"s && numeric(value))              // collection/id/123
-        selector += {"_id"s, stoll(value)};
-
-    else if(value.empty())                               // collection/field?eq=value?desc
-        selector += {to_string(key), to_filter(query)};
-
-    else                                                 // collection/field/value
-        selector += to_object(key,value) += to_filter(query);
-
-    selector += to_top(query);
+    selector += to_top(query) += to_order(query);
 
     return std::make_tuple(collection,selector);
 }

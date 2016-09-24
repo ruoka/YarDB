@@ -377,8 +377,8 @@ private:
     using operator_type = std::function<bool(const xson::value&,const xson::value&)>;
 
     const std::map<string_type,operator_type> operators = std::map<string_type,operator_type>{
-        { "$eq"s,  std::equal_to<xson::value>{}       },
-        { "$ne"s,  std::not_equal_to<xson::value>{}   },
+        { "$eq"s,  std::equal_to<xson::value>{}      },
+        { "$ne"s,  std::not_equal_to<xson::value>{}  },
         { "$lt"s,  std::less<xson::value>{}          },
         { "$lte"s, std::less_equal<xson::value>{}    },
         { "$gt"s,  std::greater<xson::value>{}       },

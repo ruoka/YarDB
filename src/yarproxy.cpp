@@ -1,0 +1,176 @@
+#include <thread>
+#include "std/span.hpp"
+#include "net/connector.hpp"
+#include "net/acceptor.hpp"
+#include "net/syslogstream.hpp"
+#include "db/rest/server.hpp"
+
+using namespace std;
+using namespace experimental;
+using namespace string_literals;
+using namespace chrono_literals;
+using namespace this_thread;
+using namespace ext;
+using namespace net;
+
+const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port])";
+
+using replica_set = lockable<vector<endpointstream>>;
+
+inline auto& operator >> (istream& is, ostream& os)
+{
+    auto line = ""s;
+    auto content_length = 0u;
+    getline(is, line);
+    trim(line);
+    slog << debug << line << flush;
+    os << line << crlf;
+    is >> ws;
+    while(is && is.peek() != '\r')
+    {
+        auto header = ""s, value = ""s;
+        getline(is, header, ':');
+        trim(header);
+        getline(is, value);
+        trim(value);
+        slog << debug << header << ": " << value << flush;
+        os << header << ": " << value << crlf;
+        if(header == "Content-Length"s)
+            content_length = stoul(value);
+    }
+    is.ignore(2);
+    os << crlf;
+    while(content_length && is && os)
+    {
+        os.put(is.get());
+        --content_length;
+    }
+    os << flush;
+    return is;
+}
+
+void handle(endpointstream client, replica_set& replicas)
+{
+    auto buffer = stringstream{};
+
+    auto request = [&buffer](auto& replica)->bool {
+        buffer.seekg(0) >> replica;
+        return replica.good();
+    };
+
+    auto response = [&buffer](auto& replica)->bool {
+        replica >> buffer.seekp(0);
+        return replica.good();
+    };
+
+    auto request_and_response = [&buffer](auto& replica)->bool {
+        buffer.seekg(0) >> replica;
+        replica >> buffer.seekp(0);
+        return replica.good();
+    };
+
+    while(client >> buffer)
+    {
+        auto method = ""s;
+        buffer.seekg(0) >> method;
+
+        if(method == "GET"s || method == "HEAD"s)
+        {
+            const auto lock = make_lock(replicas);
+            any_of(begin(replicas), end(replicas), request_and_response);
+            random_shuffle(begin(replicas), end(replicas));
+        }
+        else
+        {
+            const auto lock = make_lock(replicas);
+            all_of(begin(replicas), end(replicas), request);
+            all_of(begin(replicas), end(replicas), response);
+        }
+        buffer.seekg(0) >> client;
+        buffer.seekp(0);
+    }
+}
+
+int main(int argc, char** argv)
+try
+{
+    const auto arguments = span<char*>{argv,argc}.subspan(1);
+    auto replicas = replica_set{};
+    auto service_or_port = "2113"s;
+    slog.tag("YarPROXY");
+    slog.level(net::syslog::severity::debug);
+
+    for(const string_view option : arguments)
+    {
+        if(option.find("--clog") == 0)
+        {
+            slog.redirect(clog);
+        }
+        else if(option.find("--slog_tag=") == 0)
+        {
+            const auto name = option.substr(option.find('=')+1).to_string();
+            slog.tag(name);
+        }
+        else if(option.find("--slog_level=") == 0)
+        {
+            const auto mask = stol(option.substr(option.find('=')+1));
+            slog.level(mask);
+        }
+        else if(option.find("--replica") == 0)
+        {
+            const auto url = option.substr(option.find('=')+1).to_string();
+            replicas.emplace_back(connect(url));
+        }
+        else if(option.find("--help") == 0)
+        {
+            clog << usage << endl;
+            return 0;
+        }
+        else if(option.find("-") == 0)
+        {
+            cerr << usage << endl;
+            return 1;
+        }
+        else
+        {
+            service_or_port = option.to_string();
+        }
+    }
+
+    if(replicas.empty())
+    {
+        cerr << usage << endl;
+        return 1;
+    }
+
+    slog << notice << "Starting up at "s + service_or_port << flush;
+    auto endpoint = net::acceptor{service_or_port};
+    endpoint.timeout(24h);
+    slog << info << "Started up at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
+
+    while(true)
+    {
+        slog << notice << "Accepting connections" << flush;
+        auto host = ""s, port = ""s;
+        auto client = endpoint.accept(host, port);
+        slog << info << "Accepted connection from "s + host + ":" + port << flush;
+        auto worker = thread{handle, move(client), ref(replicas)};
+        sleep_for(1s);
+        worker.detach();
+    }
+}
+catch(const system_error& e)
+{
+    slog << error << "System error with code " << e.code() << " " << e.what() << flush;
+    return 1;
+}
+catch(const exception& e)
+{
+    slog << error << "Exception " << e.what() << flush;
+    return 1;
+}
+catch(...)
+{
+    slog << error << "Shit hit the fan!" << flush;
+    return 1;
+}

@@ -56,7 +56,7 @@ try
     while(cin && server)
     {
         auto method = ""s, uri = ""s, version = "HTTP/1.1"s, content = ""s, reason = ""s;
-        auto status = 0;
+        auto status = 0u;
 
         cin >> method;
         for (auto & c: method) c = std::toupper(c);
@@ -104,6 +104,7 @@ try
             trim(value);
             clog << name << ": " << value << endl;
         }
+        server.ignore(2);
 
         if(status == 200 || status == 404)
             cout << json::stringify(json::parse(server)) << endl;

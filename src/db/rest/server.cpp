@@ -7,6 +7,7 @@
 
 using namespace std::string_literals;
 using namespace std::chrono_literals;
+using namespace std::this_thread;
 using namespace net;
 using namespace xson;
 using namespace ext;
@@ -107,23 +108,25 @@ json::object to_selector(const T1& name, const T2& value, const T3& query)
 
 } // namespace
 
-db::rest::server::server(db::engine& engine) :
-m_engine{engine}
+db::rest::server::server(const std::string& file) :
+m_engine{file}
 {}
 
-void db::rest::server::start(const std::string& serice_or_port)
+void db::rest::server::start(const std::string& service_or_port)
 {
-    slog << notice << "Starting server" << flush;
-    auto endpoint = net::acceptor{"localhost"s, serice_or_port};
-    endpoint.timeout(1h);
-    slog << notice << "Started server" << flush;
+    slog << notice << "Starting up at "s + service_or_port << flush;
+    auto endpoint = net::acceptor{"localhost"s, service_or_port};
+    endpoint.timeout(24h);
+    slog << info << "Started up at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
+
     while(true)
     {
         slog << notice << "Accepting connections" << flush;
-        auto client = endpoint.accept();
-        slog << info << "Accepted connection" << flush;
-        auto worker = thread{[&](){handle(move(client));}};
-        std::this_thread::sleep_for(1s);
+        auto host = ""s, port = ""s;
+        auto client = endpoint.accept(host, port);
+        slog << info << "Accepted connection from "s + host + ":" + port << flush;
+        auto worker = thread{[this,&client](){handle(move(client));}};
+        sleep_for(1s);
         worker.detach();
     }
 }
@@ -155,6 +158,7 @@ void db::rest::server::handle(net::endpointstream client)
             trim(value);
             slog << info << "With request header " << request_header << ": " << value << flush;
         }
+        client.ignore(2);
 
         slog << debug << "Read HTTP request headers" << flush;
 
@@ -208,7 +212,7 @@ void db::rest::server::handle(net::endpointstream client)
             auto selector = json::object{};
             std::tie(collection,selector) = convert(request_uri);
 
-            const auto lock = std::unique_lock<db::engine>{m_engine};
+            const auto lock = make_lock(m_engine);
             m_engine.collection(to_string(collection));
 
             if(method == "GET" || method == "HEAD")

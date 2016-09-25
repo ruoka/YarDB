@@ -1,6 +1,7 @@
 #pragma once
 
 #include <set>
+#include "std/lockable.hpp"
 #include "xson/json.hpp"
 #include "net/endpointstream.hpp"
 #include "db/engine.hpp"
@@ -15,7 +16,7 @@ public:
 
     const std::set<std::string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};
 
-    server(db::engine& engine);
+    server(const std::string& file = "./yar.db"s);
 
     void start(const std::string& serice_or_port = "http"s);
 
@@ -27,7 +28,7 @@ private:
 
     void handle(net::endpointstream client);
 
-    db::engine& m_engine;
+    ext::lockable<db::engine> m_engine;
 };
 
 } // namespace db::rest

@@ -8,8 +8,9 @@ using namespace std;
 using namespace experimental;
 using namespace string_literals;
 using namespace net;
+using namespace ext;
 
-const auto usage = R"(yardb [--help] [--slog_tag=<tag>] [--slog_level=<level>] [--clog] [service_or_port])";
+const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] [--file=<name>] [service_or_port])";
 
 int main(int argc, char** argv)
 try
@@ -18,13 +19,18 @@ try
     std::signal(SIGINT,  std::exit); // Handle ctrl-c
 
     const auto arguments = span<char*>{argv,argc}.subspan(1);
+    auto file = "yar.db"s;
     auto service_or_port = "2112"s;
     slog.tag("YarDB");
     slog.level(net::syslog::severity::debug);
 
     for(const string_view option : arguments)
     {
-        if(option.find("--slog_tag=") == 0)
+        if(option.find("--clog") == 0)
+        {
+            slog.redirect(clog);
+        }
+        else if(option.find("--slog_tag=") == 0)
         {
             const auto name = option.substr(option.find('=')+1).to_string();
             slog.tag(name);
@@ -34,9 +40,9 @@ try
             const auto mask = stol(option.substr(option.find('=')+1));
             slog.level(mask);
         }
-        else if(option.find("--clog") == 0)
+        else if(option.find("--file") == 0)
         {
-            slog.redirect(clog);
+            file = option.substr(option.find('=')+1).to_string();
         }
         else if(option.find("--help") == 0)
         {
@@ -55,8 +61,7 @@ try
     }
 
     slog << notice << "Initializing server" << flush;
-    auto engine = db::engine{};
-    auto server = db::rest::server{engine};
+    auto server = db::rest::server{file};
     slog << notice << "Initialized server" << flush;
     server.start(service_or_port);
     slog << notice << "Closed server" << flush;

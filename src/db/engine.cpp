@@ -46,8 +46,7 @@ db::engine::engine(const std::string& db) :
     m_db{db},
     m_collection{u8"_db"s},
     m_index{},
-    m_storage{},
-    m_mutex{}
+    m_storage{}
 {
     ::lock(m_db);
     m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary);
@@ -63,8 +62,7 @@ db::engine::engine(db::engine&& e) :
     m_db{std::move(e.m_db)},
     m_collection{std::move(e.m_collection)},
     m_index{std::move(e.m_index)},
-    m_storage{std::move(e.m_storage)},
-    m_mutex{}
+    m_storage{std::move(e.m_storage)}
 {}
 
 db::engine::~engine()

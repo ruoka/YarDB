@@ -17,7 +17,7 @@ GTESTDIR = ../googletest/googletest
 GTESTLIB = $(GTESTDIR)/make/gtest_main.a
 
 
-TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport)
+TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 

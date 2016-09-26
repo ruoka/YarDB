@@ -15,7 +15,7 @@ using namespace net;
 
 const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port])";
 
-using replica_set = lockable<vector<endpointstream>>;
+using replica_set = lockable<list<endpointstream>>;
 
 inline auto& operator >> (istream& is, ostream& os)
 {
@@ -69,6 +69,10 @@ void handle(endpointstream client, replica_set& replicas)
         return replica.good();
     };
 
+    auto disconnected = [](auto& replica)->bool {
+        return !replica.good();
+    };
+
     while(client >> buffer)
     {
         auto method = ""s;
@@ -78,7 +82,7 @@ void handle(endpointstream client, replica_set& replicas)
         {
             const auto lock = make_lock(replicas);
             any_of(begin(replicas), end(replicas), request_and_response);
-            random_shuffle(begin(replicas), end(replicas));
+            rotate(begin(replicas), ++begin(replicas), end(replicas));
         }
         else
         {
@@ -89,6 +93,9 @@ void handle(endpointstream client, replica_set& replicas)
         buffer.seekg(0) >> client;
         buffer.seekp(0);
     }
+
+    const auto lock = make_lock(replicas);
+    replicas.remove_if(disconnected);
 }
 
 int main(int argc, char** argv)
@@ -154,7 +161,7 @@ try
         auto host = ""s, port = ""s;
         auto client = endpoint.accept(host, port);
         slog << info << "Accepted connection from "s + host + ":" + port << flush;
-        auto worker = thread{handle, move(client), ref(replicas)};
+        auto worker = thread{[&client,&replicas](){handle(move(client), replicas);}};
         sleep_for(1s);
         worker.detach();
     }

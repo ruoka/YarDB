@@ -3,7 +3,6 @@
 
 TEST(DbRestServerTest, Start)
 {
-    auto engine = db::engine{};
-    auto server = db::rest::server{engine};
+    auto server = db::rest::server{};
     server.start();
 }

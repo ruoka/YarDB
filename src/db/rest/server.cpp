@@ -121,7 +121,7 @@ void db::rest::server::start(const std::string& service_or_port)
 
     while(true)
     {
-        slog << notice << "Accepting connections" << flush;
+        slog << notice << "Accepting connections at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
         auto host = ""s, port = ""s;
         auto client = endpoint.accept(host, port);
         slog << info << "Accepted connection from "s + host + ":" + port << flush;
@@ -178,7 +178,7 @@ void db::rest::server::handle(net::endpointstream client)
 
         if(request_uri == "/" || request_uri == "/favicon.ico")
         {
-            slog << info << "HTTP requests message with request URI " << request_uri << " was ignored" << flush;
+            slog << info << "HTTP " << method << " requests message with URI " << request_uri << " was ignored" << flush;
             client << "HTTP/1.1 404 Not Found"                    << crlf
                    << "Date: " << to_rfc1123(system_clock::now()) << crlf
                    << "Server: YarDB/0.1"                         << crlf
@@ -190,7 +190,7 @@ void db::rest::server::handle(net::endpointstream client)
 
         if(http_version != "HTTP/1.1")
         {
-            slog << warning << "HTTP requests message with HTTP version " << http_version << " was rejected" << flush;
+            slog << warning << "HTTP " << method << " requests message with HTTP version " << http_version << " was rejected" << flush;
             client << "HTTP/1.1 505 HTTP Version Not Supported"   << crlf
                    << "Date: " << to_rfc1123(system_clock::now()) << crlf
                    << "Server: YarDB/0.1"                         << crlf
@@ -200,7 +200,7 @@ void db::rest::server::handle(net::endpointstream client)
             break; // reject with break
         }
 
-        slog << debug << "HTTP request with request URI " << request_uri << " was OK" << flush;
+        slog << debug << "HTTP " << method << " request with URI " << request_uri << " was accepted" << flush;
 
         auto found = false;
         auto request_body  = json::object{},
@@ -217,29 +217,29 @@ void db::rest::server::handle(net::endpointstream client)
 
             if(method == "GET" || method == "HEAD")
             {
-                slog << debug << "Reading from collection " << collection << " with selector "<< json::stringify(selector,0) << flush;
+                slog << debug << "Reading from collection \"" << collection << "\" with selector "<< json::stringify(selector,0) << flush;
                 found = m_engine.read(selector, response_body);
-                slog << info << "Read from collection " << collection << " with selector " << json::stringify(selector,0) << flush;
+                slog << info << "Read from collection \"" << collection << "\" with selector " << json::stringify(selector,0) << flush;
             }
             else if(method == "DELETE")
             {
-                slog << debug << "Deleting from collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                slog << debug << "Deleting from collection \"" << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
                 found = m_engine.destroy(selector, response_body);
-                slog << info << "Deleted from collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                slog << info << "Deleted from collection \""  << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
             }
             else if(method == "POST" || method == "PUT" || method == "PATCH")
             {
                 slog << debug << "Reading HTTP request body" << flush;
                 request_body = json::parse(client);
                 slog << debug << "Read  HTTP request body " << json::stringify(request_body,0) << flush;
-                slog << debug << "Updating collection " << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                slog << debug << "Updating collection \"" << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
                 if(method == "POST"s)
                     found = m_engine.create(request_body);
                 else if(method == "PUT"s)
                     found = m_engine.replace(selector, request_body);
                 else if(method == "PATCH"s)
                     found = m_engine.upsert(selector, request_body, response_body);
-                slog << info << "Updated collection "  << collection <<  " with selector " << json::stringify(selector,0) << flush;
+                slog << info << "Updated collection \""  << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
             }
         }
         catch(const std::exception& e)
@@ -305,7 +305,10 @@ std::tuple<string_view,json::object> db::rest::server::convert(string_view reque
         selector = to_selector(u8"_id"s, key, query);
 
     else                                                // collection/field?eq=value?desc or collection/field/value
-        selector = to_selector(key, value, query);
+         selector = to_selector(key, value, query);
+
+    for(auto i = 4; !components.path[i].empty(); i+=2)
+         selector += to_selector(components.path[i], components.path[i+1], query);
 
     selector += to_top(query) += to_order(query);
 

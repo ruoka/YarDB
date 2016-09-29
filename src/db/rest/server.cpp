@@ -231,7 +231,7 @@ void db::rest::server::handle(net::endpointstream client)
             {
                 slog << debug << "Reading HTTP request body" << flush;
                 request_body = json::parse(client);
-                slog << debug << "Read  HTTP request body " << json::stringify(request_body,0) << flush;
+                slog << debug << "Read HTTP request body " << json::stringify(request_body,0) << flush;
                 slog << debug << "Updating collection \"" << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
                 if(method == "POST"s)
                     found = m_engine.create(request_body);
@@ -240,6 +240,12 @@ void db::rest::server::handle(net::endpointstream client)
                 else if(method == "PATCH"s)
                     found = m_engine.upsert(selector, request_body, response_body);
                 slog << info << "Updated collection \""  << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
+            }
+
+            if(collection == "_db")
+            {
+                m_engine.reindex();
+                m_engine.reindex();
             }
         }
         catch(const std::exception& e)
@@ -301,7 +307,7 @@ std::tuple<string_view,json::object> db::rest::server::convert(string_view reque
     if(key == "id"s)                                    // collection/id?$head=10, collection/id/123 or collection/id/1,2,3
         selector = to_selector(u8"_id"s, value, query);
 
-    else if(value.empty())                              // collection?lte=4?desc, collection/123 or collection/1,2,3
+    else if(key.empty() || numeric(key) || csv(key))    // collection?lte=4?desc, collection/123 or collection/1,2,3
         selector = to_selector(u8"_id"s, key, query);
 
     else                                                // collection/field?eq=value?desc or collection/field/value

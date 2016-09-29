@@ -97,12 +97,12 @@ try
 
         while(server && server.peek() != '\r')
         {
-            auto name = ""s, value = ""s;
-            getline(server, name, ':');
-            trim(name);
+            auto header = ""s, value = ""s;
+            getline(server, header, ':');
+            trim(header);
             getline(server, value);
             trim(value);
-            clog << name << ": " << value << endl;
+            clog << header << ": " << value << endl;
         }
         server.ignore(2);
 

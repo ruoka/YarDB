@@ -1,6 +1,7 @@
 
 #include <iostream>
 #include <fstream>
+#include "std/span.hpp"
 #include "db/metadata.hpp"
 #include "xson/json.hpp"
 
@@ -8,17 +9,36 @@ using namespace std;
 using namespace string_literals;
 using namespace xson;
 
-const auto usage = R"(
-Currently supported options commands are:
-)";
+const auto usage = R"(yarexport [--help] [--file=<name>])";
 
-int main(int, char**)
+int main(int argc, char** argv)
 try
 {
-    ifstream storage{"./yar.db"};
+    const auto arguments = span<char*>{argv,argc}.subspan(1);
+    auto file = "yar.db"s;
+
+    for(const string_view option : arguments)
+    {
+        if(option.find("--file") == 0)
+        {
+            file = option.substr(option.find('=')+1).to_string();
+        }
+        else if(option.find("--help") == 0)
+        {
+            clog << usage << endl;
+            return 0;
+        }
+        else if(option.find("-") == 0)
+        {
+            clog << usage << endl;
+            return 1;
+        }
+    }
+
+    auto storage = ifstream{file};
 
     if(!storage.is_open())
-        throw runtime_error{"file "s + "./yar.db" + " not found"s};
+        throw runtime_error{"file "s + file + " not found"s};
 
     while(storage)
     {

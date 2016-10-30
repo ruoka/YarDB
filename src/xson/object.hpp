@@ -67,9 +67,9 @@ public:
     {}
 
     template <typename T,
-             std::enable_if_t<!is_object_v<T>      &&
-                              !is_value_array_v<T> &&
-                              !is_object_array_v<T>,bool> = true>
+             std::enable_if_t<std::conjunction_v<std::negation<is_object<T>>,
+                                                 std::negation<is_value_array<T>>,
+                                                 std::negation<is_object_array<T>>>,bool> = true>
     object(const string_type& name, const T& val) :
     object{}
     {
@@ -147,9 +147,9 @@ public:
     }
 
     template <typename T,
-              typename = std::enable_if_t<!is_object_v<T>      &&
-                                          !is_value_array_v<T> &&
-                                          !is_object_array_v<T>>>
+              std::enable_if_t<std::conjunction_v<std::negation<is_object<T>>,
+                                                  std::negation<is_value_array<T>>,
+                                                  std::negation<is_object_array<T>>>,bool> = true>
     object& operator = (const T& val)
     {
         static_assert(is_value_v<T>, "This type is not supported");

@@ -6,7 +6,6 @@
 #include "db/rest/server.hpp"
 
 using namespace std;
-using namespace experimental;
 using namespace string_literals;
 using namespace chrono_literals;
 using namespace this_thread;
@@ -115,7 +114,7 @@ try
         }
         else if(option.find("--slog_tag=") == 0)
         {
-            const auto name = option.substr(option.find('=')+1).to_string();
+            const auto name = string{option.substr(option.find('=')+1)};
             slog.tag(name);
         }
         else if(option.find("--slog_level=") == 0)
@@ -125,7 +124,7 @@ try
         }
         else if(option.find("--replica") == 0)
         {
-            const auto url = option.substr(option.find('=')+1).to_string();
+            const auto url = string{option.substr(option.find('=')+1)};
             replicas.emplace_back(connect(url));
         }
         else if(option.find("--help") == 0)
@@ -140,7 +139,7 @@ try
         }
         else
         {
-            service_or_port = option.to_string();
+            service_or_port = option;
         }
     }
 

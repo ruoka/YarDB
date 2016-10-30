@@ -14,14 +14,14 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using namespace std::experimental;
 
-using  value = variant<null_type,    // \x0A
-                       number_type,  // \x01
-                       string_type,  // \x02
-                       boolean_type, // \x08
-                       date_type,    // \x09
-                       int32_type,   // \x10
-                       int64_type    // \x12
-                       >;
+using value = variant<null_type,    // \x0A
+                      number_type,  // \x01
+                      string_type,  // \x02
+                      boolean_type, // \x08
+                      date_type,    // \x09
+                      int32_type,   // \x10
+                      int64_type    // \x12
+                      >;
 
 inline auto to_string(const value& val)
 {

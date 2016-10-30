@@ -1,4 +1,5 @@
 #include <set>
+#include "net/syslogstream.hpp"
 #include "db/metadata.hpp"
 #include "db/engine.hpp"
 
@@ -35,7 +36,7 @@ inline void lock(const std::string& db)
     file.open(lock, std::ios::out | std::ios::trunc);
     if(!file.is_open())
         throw std::runtime_error{"Failed to create DB lock "s + lock};
-    file << ::getpid() << std::endl;
+    file << net::syslog::getpid() << std::endl;
     locks.emplace(lock);
     std::atexit(unlock);
 }

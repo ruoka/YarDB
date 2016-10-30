@@ -1,11 +1,10 @@
 #include <csignal>
-#include <experimental/string_view>
+#include <string_view>
 #include "std/span.hpp"
 #include "net/syslogstream.hpp"
 #include "db/rest/server.hpp"
 
 using namespace std;
-using namespace experimental;
 using namespace string_literals;
 using namespace net;
 using namespace ext;
@@ -32,7 +31,7 @@ try
         }
         else if(option.find("--slog_tag=") == 0)
         {
-            const auto name = option.substr(option.find('=')+1).to_string();
+            const auto name = string{option.substr(option.find('=')+1)};
             slog.tag(name);
         }
         else if(option.find("--slog_level=") == 0)
@@ -42,7 +41,7 @@ try
         }
         else if(option.find("--file") == 0)
         {
-            file = option.substr(option.find('=')+1).to_string();
+            file = option.substr(option.find('=')+1);
         }
         else if(option.find("--help") == 0)
         {
@@ -56,7 +55,7 @@ try
         }
         else
         {
-            service_or_port = option.to_string();
+            service_or_port = option;
         }
     }
 

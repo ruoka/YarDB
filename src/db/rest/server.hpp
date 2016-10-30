@@ -8,8 +8,6 @@
 
 namespace db::rest {
 
-using string_view = std::experimental::string_view;
-
 class server
 {
 public:
@@ -22,7 +20,7 @@ public:
 
 protected:
 
-    virtual std::tuple<string_view,xson::json::object> convert(string_view request_uri);
+    virtual std::tuple<std::string_view,xson::json::object> convert(std::string_view request_uri);
 
 private:
 

@@ -1,4 +1,4 @@
-#include <experimental/string_view>
+#include <string_view>
 #include "std/span.hpp"
 #include "net/connector.hpp"
 #include "xson/json.hpp"
@@ -45,7 +45,7 @@ try
         }
         else
         {
-            url = option.to_string();
+            url = option;
         }
     }
 

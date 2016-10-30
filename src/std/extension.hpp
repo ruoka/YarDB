@@ -5,7 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iterator>
-#include <experimental/string_view>
+#include <string_view>
 
 namespace ext {
 
@@ -208,7 +208,7 @@ constexpr auto& to_string(const string& str) noexcept
     return str;
 }
 
-inline auto stoi(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
+inline auto stoi(std::string_view sv, std::size_t* pos = nullptr, int base = 10)
 {
     char* end;
     auto i = std::strtol(sv.data(), &end, base);
@@ -216,7 +216,7 @@ inline auto stoi(std::experimental::string_view sv, std::size_t* pos = nullptr, 
     return static_cast<std::int32_t>(i);
 }
 
-inline auto stol(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
+inline auto stol(std::string_view sv, std::size_t* pos = nullptr, int base = 10)
 {
     char* end;
     auto i = std::strtol(sv.data(), &end, base);
@@ -224,7 +224,7 @@ inline auto stol(std::experimental::string_view sv, std::size_t* pos = nullptr, 
     return i;
 }
 
-inline auto stoll(std::experimental::string_view sv, std::size_t* pos = nullptr, int base = 10)
+inline auto stoll(std::string_view sv, std::size_t* pos = nullptr, int base = 10)
 {
     char* end;
     auto ll = std::strtoll(sv.data(), &end, base);

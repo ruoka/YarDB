@@ -5,16 +5,14 @@
 #include "net/uri.hpp"
 #include "db/rest/server.hpp"
 
-using namespace std::string_literals;
-using namespace std::chrono_literals;
-using namespace std::this_thread;
+using namespace std;
+using namespace string_literals;
+using namespace chrono_literals;
+using namespace chrono;
+using namespace this_thread;
 using namespace net;
 using namespace xson;
 using namespace ext;
-
-using std::chrono::system_clock;
-using std::thread;
-using std::ws;
 
 namespace
 {

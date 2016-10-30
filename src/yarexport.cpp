@@ -21,7 +21,7 @@ try
     {
         if(option.find("--file") == 0)
         {
-            file = option.substr(option.find('=')+1).to_string();
+            file = option.substr(option.find('=')+1);
         }
         else if(option.find("--help") == 0)
         {

@@ -12,7 +12,10 @@ namespace xson {
 
 using namespace std::string_literals;
 using namespace std::chrono_literals;
-using namespace std::experimental;
+
+using std::experimental::variant;
+using std::experimental::holds_alternative;
+using std::experimental::get;
 
 using value = variant<null_type,    // \x0A
                       number_type,  // \x01

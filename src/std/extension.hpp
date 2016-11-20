@@ -188,27 +188,27 @@ auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexce
 }
 
 template<typename T>
-auto to_string(const chrono::time_point<T>& tp) noexcept
+string to_string(const chrono::time_point<T>& tp) noexcept
 {
     return ext::to_iso8601(tp);
 }
 
-constexpr auto& to_string(bool b) noexcept
+constexpr const string& to_string(bool b) noexcept
 {
     return ext::bool2string[b];
 }
 
-constexpr auto& to_string(nullptr_t) noexcept
+constexpr const string& to_string(nullptr_t) noexcept
 {
     return ext::null2string;
 }
 
-constexpr auto& to_string(const string& str) noexcept
+constexpr const string& to_string(const string& str) noexcept
 {
     return str;
 }
 
-inline auto to_string(string_view sv) noexcept
+inline string to_string(string_view sv) noexcept
 {
     return string{sv};
 }

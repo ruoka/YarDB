@@ -208,6 +208,11 @@ constexpr auto& to_string(const string& str) noexcept
     return str;
 }
 
+inline auto to_string(string_view sv) noexcept
+{
+    return string{sv};
+}
+
 inline auto stoi(std::string_view sv, std::size_t* pos = nullptr, int base = 10)
 {
     char* end;

@@ -13,11 +13,13 @@ namespace xson {
 using namespace std::string_literals;
 using namespace std::chrono_literals;
 
-using std::experimental::variant;
-using std::experimental::holds_alternative;
-using std::experimental::get;
+using std::variant;
+using std::monostate;
+using std::holds_alternative;
+using std::get;
 
-using value = variant<null_type,    // \x0A
+using value = variant<monostate,
+                      null_type,    // \x0A
                       number_type,  // \x01
                       string_type,  // \x02
                       boolean_type, // \x08
@@ -29,7 +31,7 @@ using value = variant<null_type,    // \x0A
 inline auto to_string(const value& val)
 {
     if(holds_alternative<string_type>(val))
-        return get<string_type>(val);
+        return std::to_string(get<string_type>(val));
     if(holds_alternative<number_type>(val))
         return std::to_string(get<number_type>(val));
     if(holds_alternative<boolean_type>(val))

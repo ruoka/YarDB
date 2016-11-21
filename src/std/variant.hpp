@@ -1,181 +1,5 @@
 #pragma once
 
-/*
-
-// Header <variant> synopsis
-
-namespace std {
-// 20.7.2, variant of value types
-template <class... Types>
-class variant;
-// 20.7.3, variant helper classes
-template <class T>
-struct variant_size; // undefined
-template <class T>
-struct variant_size<const T>;
-template <class T>
-struct variant_size<volatile T>;
-template <class T>
-struct variant_size<const volatile T>;
-template <class T>
-constexpr size_t variant_size_v = variant_size<T>::value;
-template <class... Types>
-struct variant_size<variant<Types...>>;
-template <size_t I, class T>
-struct variant_alternative; // undefined
-template <size_t I, class T>
-struct variant_alternative<I, const T>;
-template <size_t I, class T>
-struct variant_alternative<I, volatile T>;
-template <size_t I, class T>
-struct variant_alternative<I, const volatile T>;
-template <size_t I, class T>
-using variant_alternative_t = typename variant_alternative<I, T>::type;
-template <size_t I, class... Types>
-struct variant_alternative<I, variant<Types...>>;
-constexpr size_t variant_npos = -1;
-// 20.7.4, value access
-template <class T, class... Types>
-constexpr bool holds_alternative(const variant<Types...>&) noexcept;
-template <size_t I, class... Types>
-constexpr variant_alternative_t<I, variant<Types...>>&
-get(variant<Types...>&);
-template <size_t I, class... Types>
-constexpr variant_alternative_t<I, variant<Types...>>&&
-get(variant<Types...>&&);
-template <size_t I, class... Types>
-constexpr variant_alternative_t<I, variant<Types...>> const&
-get(const variant<Types...>&);
-template <size_t I, class... Types>
-constexpr variant_alternative_t<I, variant<Types...>>
-const&& get(const variant<Types...>&&);
-template <class T, class... Types>
-constexpr T& get(variant<Types...>&);
-template <class T, class... Types>
-constexpr T&& get(variant<Types...>&&);
-template <class T, class... Types>
-constexpr const T& get(const variant<Types...>&);
-template <class T, class... Types>
-constexpr const T&& get(const variant<Types...>&&);
-template <size_t I, class... Types>
-constexpr add_pointer_t<variant_alternative_t<I, variant<Types...>>>
-get_if(variant<Types...>*) noexcept;
-template <size_t I, class... Types>
-constexpr add_pointer_t<const variant_alternative_t<I, variant<Types...>>>
-get_if(const variant<Types...>*) noexcept;
-template <class T, class... Types>
-constexpr add_pointer_t<T>
-get_if(variant<Types...>*) noexcept;
-template <class T, class... Types>
-constexpr add_pointer_t<const T>
-get_if(const variant<Types...>*) noexcept;
-// 20.7.5, relational operators
-template <class... Types>
-constexpr bool operator==(const variant<Types...>&,
-                          const variant<Types...>&);
-template <class... Types>
-constexpr bool operator!=(const variant<Types...>&,
-                          const variant<Types...>&);
-template <class... Types>
-constexpr bool operator<(const variant<Types...>&,
-                         const variant<Types...>&);
-template <class... Types>
-constexpr bool operator>(const variant<Types...>&,
-                         const variant<Types...>&);
-template <class... Types>
-constexpr bool operator<=(const variant<Types...>&,
-                          const variant<Types...>&);
-template <class... Types>
-constexpr bool operator>=(const variant<Types...>&,
-                          const variant<Types...>&);
-// 20.7.6, visitation
-// template <class Visitor, class... Variants>
-// constexpr see below visit(_Visitor&&, Variants&&...);
-// 20.7.7, class monostate
-struct monostate;
-// 20.7.8, monostate relational operators
-constexpr bool operator<(monostate, monostate) noexcept;
-constexpr bool operator>(monostate, monostate) noexcept;
-constexpr bool operator<=(monostate, monostate) noexcept;
-constexpr bool operator>=(monostate, monostate) noexcept;
-constexpr bool operator==(monostate, monostate) noexcept;
-constexpr bool operator!=(monostate, monostate) noexcept;
-// 20.7.9, specialized algorithms
-template <class... Types>
-void swap(variant<Types...>&, variant<Types...>&) noexcept; //(see below)
-// 20.7.10, class bad_variant_access
-class bad_variant_access;
-// 20.7.11, hash support
-// template <class T> struct hash;
-template <class... Types> struct hash<variant<Types...>>;
-template <> struct hash<monostate>;
-// 20.7.12, allocator-related traits
-// template <class T, class Alloc> struct uses_allocator;
-template <class... Types, class Alloc>
-struct uses_allocator<variant<Types...>, Alloc>;
-} // namespace std
-
-namespace std {
-template <class... Types>
-class variant {
-public:
-  // 20.7.2.1, constructors
-  constexpr variant() noexcept; //(see below)
-  variant(const variant&);
-  variant(variant&&) noexcept; //(see below)
-  template <class T>
-  constexpr variant(_T&&) noexcept; //(see below)
-  template <class T, class... Args>
-  constexpr explicit variant(in_place_type_t<T>, Args&&...);
-  template <class T, class U, class... Args>
-  constexpr explicit variant(in_place_type_t<T>, initializer_list<U>, Args&&...);
-  template <size_t I, class... Args>
-  constexpr explicit variant(in_place_index_t<I>, Args&&...);
-  template <size_t I, class U, class... Args>
-  constexpr explicit variant(in_place_index_t<I>, initializer_list<U>, Args&&...);
-  // allocator-extended constructors
-  template <class Alloc>
-  variant(allocator_arg_t, const Alloc&);
-  template <class Alloc>
-  variant(allocator_arg_t, const Alloc&, const variant&);
-  template <class Alloc>
-  variant(allocator_arg_t, const Alloc&, variant&&);
-  template <class Alloc, class T>
-  variant(allocator_arg_t, const Alloc&, T&&);
-  template <class Alloc, class T, class... Args>
-  variant(allocator_arg_t, const Alloc&, in_place_type_t<T>, Args&&...);
-  template <class Alloc, class T, class U, class... Args>
-  variant(allocator_arg_t, const Alloc&, in_place_type_t<T>, initializer_list<U>, Args&&...);
-  template <class Alloc, size_t I, class... Args>
-  variant(allocator_arg_t, const Alloc&, in_place_index_t<I>, Args&&...);
-  template <class Alloc, size_t I, class U, class... Args>
-  variant(allocator_arg_t, const Alloc&, in_place_index_t<I>, initializer_list<U>, Args&&...);
-  // 20.7.2.2, destructor
-  ~variant();
-  // 20.7.2.3, assignment
-  variant& operator=(const variant&);
-  variant& operator=(variant&&) noexcept; //(see below)
-  template <class T> variant& operator=(_T&&) noexcept; //(see below)
-  // 20.7.2.4, modifiers
-  template <class T, class... Args>
-  void emplace(_Args&&...);
-  template <class T, class U, class... Args>
-  void emplace(initializer_list<U>, Args&&...);
-  template <size_t I, class... Args>
-  void emplace(_Args&&...);
-  template <size_t I, class U, class... Args>
-  void emplace(initializer_list<U>, Args&&...);
-  // 20.7.2.5, value status
-  constexpr bool valueless_by_exception() const noexcept;
-  constexpr size_t index() const noexcept;
-  // 20.7.2.6, swap
-  void swap(variant&) noexcept; //(see below)
-  };
-} // namespace std
-
-*/
-
-#include <experimental/__config>
 #include <tuple>
 #include <array>
 #include <utility>
@@ -183,6 +7,13 @@ public:
 #include <cassert>
 
 namespace std {
+
+// 20.7.10, class bad_variant_access
+class bad_variant_access : logic_error {
+public:
+  bad_variant_access() : logic_error{"Bad variant Access"} {};
+  virtual ~bad_variant_access() noexcept {};
+};
 
 constexpr size_t variant_npos = -1;
 
@@ -227,6 +58,20 @@ template <>
 union __variant_storage<void,__trivial>
 {
   constexpr __variant_storage() = default;
+};
+
+template <class _Type>
+union __variant_storage<_Type&,__trivial>
+{
+  reference_wrapper<remove_reference_t<_Type>> m_type;
+
+  constexpr __variant_storage() : m_type{}
+  {}
+
+  template<class... _Args>
+  constexpr __variant_storage(in_place_type_t<_Type&>, _Args&&... __args) :
+    m_type{forward<_Args>(__args)...}
+  {}
 };
 
 template <class _Type>
@@ -373,7 +218,7 @@ class __variant_base; // undefined
 // Non_TiviallyDestructible Specialisation
 
 template <class... _Types>
-class __variant_base<false,false,false,false,false,_Types...>
+class __variant_base<false,false,false,false,false, _Types...>
 {
 public:
 
@@ -423,7 +268,7 @@ protected:
   {
     assert(__m_index == variant_npos);
     new(&__m_storage) decay_t<_T>{forward<_Args>(__args) ...};
-    __m_index = __variant_index_v<decay_t<_T>, _Types...>;
+    __m_index = __variant_index_v<_T, _Types...>;
   };
 
   template <class _Alloc,
@@ -435,7 +280,7 @@ protected:
   {
     assert(__m_index == variant_npos);
     new(&__m_storage) decay_t<_T>{allocator_arg, __a, forward<_Args>(__args) ...};
-    __m_index = __variant_index_v<decay_t<_T>, _Types...>;
+    __m_index = __variant_index_v<_T, _Types...>;
   };
 
   template <class _Alloc,
@@ -447,7 +292,7 @@ protected:
   {
     assert(__m_index == variant_npos);
     new(&__m_storage) decay_t<_T>{forward<_Args>(__args) ...,  __a};
-    __m_index = __variant_index_v<decay_t<_T>, _Types...>;
+    __m_index = __variant_index_v<_T, _Types...>;
   };
 
   template <class _Alloc,
@@ -460,7 +305,7 @@ protected:
   {
     assert(__m_index == variant_npos);
     new(&__m_storage) decay_t<_T>{forward<_Args>(__args) ...};
-    __m_index = __variant_index_v<decay_t<_T>, _Types...>;
+    __m_index = __variant_index_v<_T, _Types...>;
   };
 
 private:
@@ -498,7 +343,7 @@ protected:
     assert(__v.__m_index < sizeof...(_Types));
     assert(__m_index == variant_npos);
     using function = void(__variant_base::*)(allocator_arg_t, const _Alloc&, const __variant_base&);
-    constexpr function __array[sizeof...(_Types)] = {&__variant_base::__private_copy<_Alloc,_Types> ...};
+    constexpr function __array[sizeof...(_Types)] = {&__variant_base::__private_copy<_Alloc, _Types> ...};
     (this->*__array[__v.__m_index])(allocator_arg, __a, __v);
   }
 
@@ -538,7 +383,7 @@ protected:
     assert(__v.__m_index < sizeof...(_Types));
     assert(__m_index == variant_npos);
     using function = void(__variant_base::*)(allocator_arg_t, const _Alloc&, __variant_base&&);
-    constexpr function __array[sizeof...(_Types)] = {&__variant_base::__private_move<_Alloc,_Types> ...};
+    constexpr function __array[sizeof...(_Types)] = {&__variant_base::__private_move<_Alloc, _Types> ...};
     (this->*__array[__v.__m_index])(allocator_arg, __a, forward<__variant_base>(__v));
     __v.__m_index = variant_npos;
   }
@@ -575,7 +420,7 @@ protected:
 // _TiviallyDestructible Specialisation
 
 template <class... _Types>
-class __variant_base<false,false,false,false,true,_Types...>
+class __variant_base<false,false,false,false,true, _Types...>
 {
 public:
 
@@ -599,7 +444,7 @@ protected:
   template <class _T, class... _Args>
   constexpr __variant_base(in_place_type_t<_T>, _Args&&... __args) :
     __m_storage{in_place_type<_T>, forward<_Args>(__args) ...},
-    __m_index{__variant_index_v<decay_t<_T>, _Types...>}
+    __m_index{__variant_index_v<_T, _Types...>}
   {}
 
   template <class _T, class... _Args>
@@ -607,7 +452,7 @@ protected:
   {
     assert(__m_index == variant_npos);
     new(&__m_storage) remove_reference_t<_T>{forward<_Args>(__args) ...};
-    __m_index = __variant_index_v<decay_t<_T>, _Types...>;
+    __m_index = __variant_index_v<_T, _Types...>;
   };
 
 private:
@@ -737,7 +582,7 @@ protected:
       unless is_copy_constructible_v<_Ti> is true for all i.)");
     if(__v.__m_index != variant_npos)
     {
-      __move(__v);
+      __move(forward<__variant_base>(__v));
       __v.__m_index = variant_npos;
     }
   }
@@ -774,6 +619,7 @@ protected:
       __copy(__v);
   }
 
+  __variant_base(__variant_base&&) = default;
   __variant_base& operator=(const __variant_base&) = default;
   __variant_base& operator=(__variant_base&&) = default;
 };
@@ -843,7 +689,7 @@ struct __is_imaginary_function_well_formed :
 
 template <class _T, class... _Types>
 constexpr bool __is_imaginary_function_well_formed_v =
-  __is_imaginary_function_well_formed<_T,_Types...>::value;
+  __is_imaginary_function_well_formed<_T, _Types...>::value;
 
 // 20.7.2, variant of value types
 template <class... _Types>
@@ -876,12 +722,6 @@ struct variant_alternative<_I, variant<_Types...>>
   using type = tuple_element_t<_I, tuple<_Types...>>;
 };
 
-// 20.7.10, class bad_variant_access
-class _LIBCPP_EXCEPTION_ABI bad_variant_access : logic_error {
-public:
-  bad_variant_access() : logic_error{"bad variant access"} {};
-};
-
 // 20.7.4, value access
 template <class _T, class... _Types>
 inline
@@ -895,7 +735,7 @@ inline
 constexpr variant_alternative_t<_I, variant<_Types...>>&
 get(variant<_Types...>& __v)
 {
-  using _T = variant_alternative_t<_I,variant<_Types...>>;
+  using _T = variant_alternative_t<_I, variant<_Types...>>;
   return get<_T>(__v);
 };
 
@@ -904,7 +744,7 @@ inline
 constexpr variant_alternative_t<_I, variant<_Types...>>&&
 get(variant<_Types...>&& __v)
 {
-  using _T = variant_alternative_t<_I,variant<_Types...>>;
+  using _T = variant_alternative_t<_I, variant<_Types...>>;
   return move(get<_T>(__v));
 };
 
@@ -913,7 +753,7 @@ inline
 constexpr variant_alternative_t<_I, variant<_Types...>> const&
 get(const variant<_Types...>& __v)
 {
-  using _T = variant_alternative_t<_I,variant<_Types...>>;
+  using _T = variant_alternative_t<_I, variant<_Types...>>;
   return get<_T>(__v);
 };
 
@@ -922,7 +762,7 @@ inline
 constexpr variant_alternative_t<_I, variant<_Types...>> const&&
 get(const variant<_Types...>&& __v)
 {
-  using _T = variant_alternative_t<_I,variant<_Types...>>;
+  using _T = variant_alternative_t<_I, variant<_Types...>>;
   return move(get<_T>(__v));
 };
 
@@ -931,6 +771,7 @@ inline
 constexpr _T&
 get(variant<_Types...>& __v)
 {
+  static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
   if(holds_alternative<_T>(__v))
   return __v.__m_storage.template get<_T>();
   throw bad_variant_access{};
@@ -941,6 +782,7 @@ inline
 constexpr _T&&
 get(variant<_Types...>&& __v)
 {
+  static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
   if(holds_alternative<_T>(__v))
   return __v.__m_storage.template get<_T>();
   throw bad_variant_access{};
@@ -951,6 +793,7 @@ inline
 constexpr const _T&
 get(const variant<_Types...>& __v)
 {
+  static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
   if(holds_alternative<_T>(__v))
   return __v.__m_storage.template get<_T>();
   throw bad_variant_access{};
@@ -961,6 +804,7 @@ inline
 constexpr const _T&&
 get(const variant<_Types...>&& __v)
 {
+  static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
   if(holds_alternative<_T>(__v))
   return __v.__m_storage.template get<_T>();
   throw bad_variant_access{};
@@ -971,7 +815,7 @@ inline
 constexpr add_pointer_t<variant_alternative_t<_I, variant<_Types...>>>
 get_if(variant<_Types...>* __v) noexcept
 {
-  using _T = variant_alternative_t<_I,variant<_Types...>>;
+  using _T = variant_alternative_t<_I, variant<_Types...>>;
   return get_if<_T>(__v);
 };
 
@@ -980,7 +824,7 @@ inline
 constexpr add_pointer_t<const variant_alternative_t<_I, variant<_Types...>>>
 get_if(const variant<_Types...>* __v) noexcept
 {
-  using _T = variant_alternative_t<_I,variant<_Types...>>;
+  using _T = variant_alternative_t<_I, variant<_Types...>>;
   return get_if<_T>(__v);
 };
 
@@ -989,6 +833,7 @@ inline
 constexpr add_pointer_t<_T>
 get_if(variant<_Types...>* __v) noexcept
 {
+  static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
   if(holds_alternative<_T>(*__v))
   return &(__v->__m_storage.template get<_T>());
   return nullptr;
@@ -999,6 +844,7 @@ inline
 constexpr add_pointer_t<const _T>
 get_if(const variant<_Types...>* __v) noexcept
 {
+  static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
   if(holds_alternative<_T>(*__v))
   return &(__v->__m_storage.template get<_T>());
   return nullptr;
@@ -1244,10 +1090,10 @@ public:
   variant(variant&&) = default;
 
   template <class _T,
-            class _Tj = __imaginary_function_argument_t<_T,_Types...>,
-            enable_if_t<!is_same_v<decay_t<_T>,variant>,int> = 0,
-            enable_if_t<is_constructible_v<_Tj, _T>,int> = 0,
-            enable_if_t<__is_imaginary_function_well_formed_v<_Tj,_Types...>,int> = 0
+            class _Tj = __imaginary_function_argument_t<_T, _Types...>,
+            enable_if_t<conjunction_v<negation<is_same<decay_t<_T>,variant>>,
+                                      is_constructible<_Tj, _T>,
+                                      __is_imaginary_function_well_formed<_Tj, _Types...>>,int> = 0
             >
   inline
   constexpr
@@ -1256,12 +1102,12 @@ public:
   {
     static_assert(!is_same_v<decay_t<_T>,variant> &&
                   is_constructible_v<_Tj, _T> &&
-                  __is_imaginary_function_well_formed_v<_Tj,_Types...>,
+                  __is_imaginary_function_well_formed_v<_Tj, _Types...>,
       R"(This function shall not participate in overload resolution
       unless is_same_v<decay_t<_T>, variant> is false,
       unless is_constructible_v<_Tj, _T> is true, and
-      unless the expression F_UN(std::forward<_T>(__t))
-      (with F_UN being the above-mentioned set of imaginary functions)
+      unless the expression FUN(std::forward<_T>(__t))
+      (with FUN being the above-mentioned set of imaginary functions)
       is well formed.)");
   };
 
@@ -1288,7 +1134,7 @@ public:
 
   template <size_t _I,
             class... _Args,
-            class _T = variant_alternative_t<_I,variant>,
+            class _T = variant_alternative_t<_I, variant>,
             enable_if_t<is_constructible_v<_T, _Args...>, int> = 0
             >
   inline
@@ -1300,7 +1146,7 @@ public:
   template <size_t _I,
             class _U,
             class... _Args,
-            class _Ti = variant_alternative_t<_I,variant>,
+            class _Ti = variant_alternative_t<_I, variant>,
             enable_if_t<is_constructible_v<_Ti, initializer_list<_U>&, _Args...>, int> = 0
             >
   inline
@@ -1354,23 +1200,23 @@ public:
 
   template <class _Alloc,
             class _T,
-            class _Tj = __imaginary_function_argument_t<_T,_Types...>,
+            class _Tj = __imaginary_function_argument_t<_T, _Types...>,
             enable_if_t<conjunction_v<negation<is_same<decay_t<_T>,variant>>,
                                              is_constructible<_Tj, _T>,
-                                             __is_imaginary_function_well_formed<_Tj,_Types...>>,int> = 0
+                                             __is_imaginary_function_well_formed<_Tj, _Types...>>,int> = 0
             >
   inline
   variant(allocator_arg_t, const _Alloc& __a, _T&&  __t) :
-      __base{allocator_arg, __a, in_place_type<_T>, forward<_T>(__t)}
+      __base{allocator_arg, __a, in_place_type<_Tj>, forward<_T>(__t)}
   {
     static_assert(!is_same_v<decay_t<_T>,variant> &&
                   is_constructible_v<_Tj, _T> &&
-                  __is_imaginary_function_well_formed_v<_Tj,_Types...>,
+                  __is_imaginary_function_well_formed_v<_Tj, _Types...>,
       R"(This function shall not participate in overload resolution
       unless is_same_v<decay_t<_T>, variant> is false,
       unless is_constructible_v<_Tj, _T> is true, and
-      unless the expression F_UN( std::forward<_T>(__t))
-      (with F_UN being the above-mentioned set of imaginary functions)
+      unless the expression FUN( std::forward<_T>(__t))
+      (with FUN being the above-mentioned set of imaginary functions)
       is well formed.)");
   };
 
@@ -1400,7 +1246,7 @@ public:
   template <class _Alloc,
             size_t _I,
             class... _Args,
-            class _T = variant_alternative_t<_I,variant>,
+            class _T = variant_alternative_t<_I, variant>,
             enable_if_t<is_constructible_v<_T, _Args...>, int> = 0
             >
   inline
@@ -1412,7 +1258,7 @@ public:
             size_t _I,
             class _U,
             class... _Args,
-            class _T = variant_alternative_t<_I,variant>,
+            class _T = variant_alternative_t<_I, variant>,
             enable_if_t<is_constructible_v<_T, initializer_list<_U>&, _Args...>, int> = 0
             >
   inline
@@ -1432,24 +1278,25 @@ public:
   variant& operator=(variant&&) = default;
 
   template <class _T,
-            class _Tj = __imaginary_function_argument_t<_T,_Types...>,
-            enable_if_t<!is_same_v<decay_t<_T>,variant>,int> = 0,
-            enable_if_t<conjunction_v<is_assignable_v<_Tj&, _T>, is_constructible_v<_Tj, _T>>,int> = 0,
-            enable_if_t<__is_imaginary_function_well_formed_v<_Tj,_Types...>,int> = 0
+            class _Tj = __imaginary_function_argument_t<_T, _Types...>,
+            enable_if_t<conjunction_v<negation<is_same<decay_t<_T>,variant>>,
+                                      is_assignable_v<_Tj&, _T>,
+                                      is_constructible<_Tj, _T>,
+                                      __is_imaginary_function_well_formed<_Tj, _Types...>>,int> = 0
             >
   inline
   variant& operator=(_T&& __rhs)
-    noexcept(conjunction_v<is_nothrow_assignable<_Types&,_Types>...,
-                           is_nothrow_constructible<_Types&,_Types>...>)
+    noexcept(conjunction_v<is_nothrow_assignable<_Types&, _Types>...,
+                           is_nothrow_constructible<_Types&, _Types>...>)
   {
     static_assert(!is_same_v<decay_t<_T>, variant> &&
                   is_assignable_v<_Tj&, _T> && is_constructible_v<_Tj, _T> &&
-                  __is_imaginary_function_well_formed_v<_Tj,_Types...>,
+                  __is_imaginary_function_well_formed_v<_Tj, _Types...>,
       R"(This function shall not participate in overload resolution
          unless is_same_v<decay_t<_T>, variant> is false,
          unless is_assignable_v<_Tj&, _T> && is_constructible_v<_Tj, _T> is true, and
-         unless the expression F_UN (std::forward<_T>(__t))
-         (with F_UN being the above-mentioned set of imaginary functions) is well formed.)");
+         unless the expression FUN (std::forward<_T>(__t))
+         (with FUN being the above-mentioned set of imaginary functions) is well formed.)");
     if(!valueless_by_exception())
       __destroy();
     __construct(in_place_type<_Tj>, forward<_T>(__rhs));
@@ -1462,6 +1309,8 @@ public:
   inline
   void emplace(_Args&&... __args)
   {
+    static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
+    static_assert(!is_lvalue_reference_v<_T>, "references cannot be reassigned");
     if(!valueless_by_exception())
       __destroy();
     __construct(in_place_type<_T>, forward<_Args>(__args)...);
@@ -1471,6 +1320,8 @@ public:
   inline
   void emplace(initializer_list<_U> __il, _Args&&... __args)
   {
+    static_assert(__count_v<_T, _Types...> > 0, "_Type is not an alternative");
+    static_assert(!is_lvalue_reference_v<_T>, "references cannot be reassigned");
     if(!valueless_by_exception())
       __destroy();
     __construct(in_place_type<_T>, __il, forward<_Args>(__args)...);
@@ -1480,7 +1331,7 @@ public:
   inline
   void emplace(_Args&&... __args)
   {
-    using _T = variant_alternative_t<_I,variant>;
+    using _T = variant_alternative_t<_I, variant>;
     emplace<_T>(forward<_Args>(__args)...);
   };
 
@@ -1488,7 +1339,7 @@ public:
   inline
   void emplace(initializer_list<_U> __il, _Args&&... __args)
   {
-    using _T = variant_alternative_t<_I,variant>;
+    using _T = variant_alternative_t<_I, variant>;
     emplace<_T>(__il, forward<_Args>(__args)...);
   };
 

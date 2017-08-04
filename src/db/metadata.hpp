@@ -64,7 +64,8 @@ inline auto to_string(metadata::action a)
 {
     if(a == metadata::created) return "created"s;
     if(a == metadata::updated) return "updated"s;
-    return "deleted"s;
+    if(a == metadata::deleted) return "deleted"s;
+    std::terminate();
 }
 
 } // namespace db

@@ -206,6 +206,7 @@ void db::rest::server::handle(net::endpointstream client)
 
         try
         {
+            // auto[collection,selector] = convert(request_uri);
             auto collection = string_view{};
             auto selector = json::object{};
             std::tie(collection,selector) = convert(request_uri);

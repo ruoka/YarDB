@@ -100,7 +100,7 @@ void handle(endpointstream client, replica_set& replicas)
 int main(int argc, char** argv)
 try
 {
-    const auto arguments = span<char*>{argv,argc}.subspan(1);
+    const auto arguments = make_span(argv,argc).subspan(1);
     auto replicas = replica_set{};
     auto service_or_port = "2113"s;
     slog.tag("YarPROXY");

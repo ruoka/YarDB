@@ -28,7 +28,7 @@ EXIT                     i.e. Exit the shell
 int main(int argc, char** argv)
 try
 {
-    const auto arguments = span<char*>{argv,argc}.subspan(1);
+    const auto arguments = make_span(argv,argc).subspan(1);
     auto url = "http://localhost:2112"s;
 
     for(const string_view option : arguments)

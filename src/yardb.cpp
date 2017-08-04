@@ -17,7 +17,7 @@ try
     std::signal(SIGTERM, std::exit); // Handle kill
     std::signal(SIGINT,  std::exit); // Handle ctrl-c
 
-    const auto arguments = span<char*>{argv,argc}.subspan(1);
+    const auto arguments = make_span(argv,argc).subspan(1);
     auto file = "yar.db"s;
     auto service_or_port = "2112"s;
     slog.tag("YarDB");

@@ -14,7 +14,7 @@ const auto usage = R"(yarexport [--help] [--file=<name>])";
 int main(int argc, char** argv)
 try
 {
-    const auto arguments = span<char*>{argv,argc}.subspan(1);
+    const auto arguments = make_span(argv,argc).subspan(1);
     auto file = "yar.db"s;
 
     for(const string_view option : arguments)

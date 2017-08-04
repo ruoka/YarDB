@@ -167,7 +167,7 @@ inline std::string& trim(std::string& str, const std::string& delimiters = " \f\
 }
 
 template<typename T>
-bool numeric(const T& str)
+bool isnumeric(const T& str)
 {
     return str.find_first_not_of("0123456789") == str.npos;
 }

@@ -59,8 +59,11 @@ try
         auto method = ""s, uri = ""s, version = "HTTP/1.1"s, content = ""s, reason = ""s;
         auto status = 0u;
 
+        clog << "Enter HTTP request or command: ";
         cin >> method;
-        for (auto & c: method) c = std::toupper(c);
+        if(method.empty()) continue;
+
+        for(auto& c : method) c = std::toupper(c);
 
         if (method == "HELP")
         {
@@ -75,9 +78,23 @@ try
         }
 
         cin >> uri;
+        if(uri.empty()) continue;
 
-        if(method == "POST"s || method == "PUT"s || method == "PATCH"s)
+        if(method == "POST" || method == "PUT" || method == "PATCH")
             content = json::stringify(json::parse(cin));
+
+        clog << newl;
+
+        clog << method << sp << uri << sp << version     << newl
+               << "Host: localhost:2112 "                << newl
+               << "Accept: application/json"             << newl
+               << "Content-Type: application/json"       << newl
+               << "Content-Length: " << content.length() << newl
+               << newl
+               << content
+               << flush;
+
+        server.clear();
 
         server << method << sp << uri << sp << version   << crlf
                << "Host: localhost:2112 "                << crlf
@@ -94,7 +111,9 @@ try
 
         clog << version << sp << status << sp << reason << endl;
 
-        server >> ws;
+        server >> ws;  // Skip all whitespaces
+
+        auto content_length = 0ll;
 
         while(server && server.peek() != '\r')
         {
@@ -103,24 +122,33 @@ try
             trim(header);
             getline(server, value);
             trim(value);
-            clog << header << ": " << value << endl;
+            clog << header << ": " << value << newl;
+
+            if(header == "Content-Length")
+                content_length = stoll(value);
         }
+        // assert(server.get() == '\r');
+        // assert(server.get() == '\n');
         server.ignore(2);
 
-        if(status == 200 || status == 404)
-            cout << json::stringify(json::parse(server)) << endl;
+        if(method != "HEAD" && (status == 200 /* || status == 404 */ ))
+        {
+            // server.ignore(content_length);
+            clog << json::stringify(json::parse(server)) << newl;
+        }
+        clog << newl;
     }
-    clog << "See you latter - bye!" << endl;
+    clog << "See you latter - bye!" << newl;
     return 0;
 }
 catch(const system_error& e)
 {
-    cerr << "System error with code " << e.code() << " " << e.what() << endl;
+    cerr << "System error with code: \"" << e.code() << "\" \"" << e.what() << "\"" << endl;
     return 1;
 }
 catch(const std::exception& e)
 {
-    cerr << "Exception " << e.what() << endl;
+    cerr << "Exception: " << e.what() << endl;
     return 1;
 }
 catch(...)

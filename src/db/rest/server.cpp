@@ -17,12 +17,12 @@ using namespace ext;
 namespace
 {
 
-inline auto csv(string_view value)
+inline auto iscsv(string_view value)
 {
     return value.find_first_of(',') != value.npos;
 }
 
-inline json::object to_array(string_view values)
+inline json::object make_array(string_view values)
 {
     std::stringstream ss;
     ss << '[' << values << ']';
@@ -30,28 +30,28 @@ inline json::object to_array(string_view values)
     return array;
 }
 
-inline json::object to_object(string_view name, string_view value)
+inline json::object make_object(string_view name, string_view value)
 {
-    if(numeric(value))
-        return {to_string(name), stoll(value)};
+    if(isnumeric(value))
+        return {string{name}, stoll(value)};
     else if(value == "true")
-        return {to_string(name), true};
+        return {string{name}, true};
     else if(value == "false")
-        return {to_string(name), false};
+        return {string{name}, false};
     else if(value == "null")
-        return {to_string(name), nullptr};
-    else if(csv(value))
-        return {to_string(name), db::object{"$in"s, to_array(value)}};
+        return {string{name}, nullptr};
+    else if(iscsv(value))
+        return {string{name}, db::object{"$in"s, make_array(value)}};
     else
-        return {to_string(name), to_string(value)};
+        return {string{name}, string(value)};
 }
 
-inline json::object to_operator(string_view query)
+inline json::object make_operator(string_view query)
 {
     auto pos   = query.find_first_of('=');
-    auto name  = to_string(query.substr(0,pos));
+    auto name  = string(query.substr(0,pos));
     auto value = query.substr(pos+1);
-    if(numeric(value))
+    if(isnumeric(value))
         return {"$"s + name, stoll(value)};
     else if(value == "true")
         return {"$"s + name, true};
@@ -60,47 +60,47 @@ inline json::object to_operator(string_view query)
     else if(value == "null")
         return {"$"s + name, nullptr};
     else
-        return {"$"s + name, to_string(value)};
+        return {"$"s + name, string(value)};
 }
 
 template<typename T>
-json::object to_filter(const T& query)
+json::object make_filter(const T& query)
 {
     auto filter = json::object{};
     for(auto q : query)
         if(q.rfind("top") != 0)
-            filter += to_operator(q);
+            filter += make_operator(q);
     return filter;
 }
 
 template<typename T>
-json::object to_order(const T& query)
+json::object make_order(const T& query)
 {
     auto filter = json::object{};
     for(auto q : query)
         if(q.rfind("desc") == 0)
-            filter += to_operator(q);
+            filter += make_operator(q);
     return filter;
 }
 
 template<typename T>
-json::object to_top(const T& query)
+json::object make_top(const T& query)
 {
     auto filter = json::object{};
     for(auto q : query)
         if(q.rfind("top") == 0)
-            filter += to_operator(q);
+            filter += make_operator(q);
     return filter;
 }
 
 template<typename T1, typename T2, typename T3>
-json::object to_selector(const T1& name, const T2& value, const T3& query)
+json::object make_selector(const T1& name, const T2& value, const T3& query)
 {
     auto selector = json::object{};
     if(value.empty())                                            // collection/id?$head=10
-        selector += {to_string(name), to_filter(query)};
+        selector += {string{name}, make_filter(query)};
     else                                                         // collection/id/123 or collection/id/1,2,3
-        selector += to_object(name, value);
+        selector += make_object(name, value);
     return selector;
 }
 
@@ -126,6 +126,7 @@ void db::rest::server::start(const std::string& service_or_port)
         auto worker = thread{[this,&client](){handle(move(client));}};
         sleep_for(1s);
         worker.detach();
+        handle(move(client));
     }
 }
 
@@ -133,57 +134,32 @@ void db::rest::server::handle(net::endpointstream client)
 {
     while(client)
     {
+        auto c = client.peek();
+
         slog << debug << "Reading HTTP request message" << flush;
 
         slog << debug << "Reading HTTP request line" << flush;
 
         auto method = ""s, request_uri = ""s, http_version = ""s;
         client >> method >> request_uri >> http_version;
-        slog << info << "Received request " << method << ' ' << request_uri << ' ' << http_version << flush;
+        slog << info << "Received request \"" << method << ' ' << request_uri << ' ' << http_version << "\"" << flush;
 
         slog << debug << "Read HTTP request line" << flush;
 
-        slog << debug << "Reading HTTP request headers" << flush;
-
-        client >> ws;
-
-        while(client && client.peek() != '\r')
-        {
-            auto request_header = ""s, value = ""s;
-            getline(client, request_header, ':');
-            trim(request_header);
-            getline(client, value);
-            trim(value);
-            slog << info << "With request header " << request_header << ": " << value << flush;
-        }
-        client.ignore(2);
-
-        slog << debug << "Read HTTP request headers" << flush;
-
-        slog << debug << "Read HTTP request message" << flush;
-
         if(!methods.count(method))
         {
-            slog << notice << "HTTP requests message with method " << method << " was ignored" << flush;
-            client << "HTTP/1.1 400 Bad Request"                  << crlf
-                   << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                   << "Server: YarDB/0.1"                         << crlf
-                   << "Content-Length: 0"                         << crlf
+            slog << notice << "HTTP requests message with method \"" << method << "\" was rejected" << flush;
+            client << "HTTP/1.1 400 Bad Request"                                          << crlf
+                   << "Date: " << to_rfc1123(system_clock::now())                         << crlf
+                   << "Server: YarDB/0.1"                                                 << crlf
+                   << "Access-Control-Allow-Origin: *"                                    << crlf
+                   << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                   << "Accept: application/json"                                          << crlf
+                   << "Content-Type: application/json"                                    << crlf
+                   << "Content-Length: 0"                                                 << crlf
                    << crlf
                    << flush;
-            continue; // ignore with continue
-        }
-
-        if(request_uri == "/" || request_uri == "/favicon.ico")
-        {
-            slog << info << "HTTP " << method << " requests message with URI " << request_uri << " was ignored" << flush;
-            client << "HTTP/1.1 404 Not Found"                    << crlf
-                   << "Date: " << to_rfc1123(system_clock::now()) << crlf
-                   << "Server: YarDB/0.1"                         << crlf
-                   << "Content-Length: 0"                         << crlf
-                   << crlf
-                   << flush;
-            continue; // ignore with continue
+            break; // reject with break
         }
 
         if(http_version != "HTTP/1.1")
@@ -198,7 +174,40 @@ void db::rest::server::handle(net::endpointstream client)
             break; // reject with break
         }
 
-        slog << debug << "HTTP " << method << " request with URI " << request_uri << " was accepted" << flush;
+        if(request_uri == "/" || request_uri == "/favicon.ico")
+        {
+            slog << info << "HTTP " << method << " requests message with URI " << request_uri << " was ignored" << flush;
+            client << "HTTP/1.1 404 Not Found"                    << crlf
+                   << "Date: " << to_rfc1123(system_clock::now()) << crlf
+                   << "Server: YarDB/0.1"                         << crlf
+                   << "Content-Length: 0"                         << crlf
+                   << crlf
+                   << flush;
+            break; // ignore with break
+        }
+
+        slog << debug << "Reading HTTP request headers" << flush;
+
+        client >> ws; // Skip all whitespaces
+
+        while(client && client.peek() != '\r')
+        {
+            auto request_header = ""s, value = ""s;
+            getline(client, request_header, ':');
+            trim(request_header);
+            getline(client, value);
+            trim(value);
+            slog << info << "With request header \"" << request_header << "\": \"" << value << "\"" << flush;
+        }
+        assert(client.get() == '\r');
+        assert(client.get() == '\n');
+        // client.ignore(2);
+
+        slog << debug << "Read HTTP request headers" << flush;
+
+        slog << debug << "Read HTTP request message" << flush;
+
+        slog << debug << "HTTP \"" << method << "\" request with URI \"" << request_uri << "\" was accepted" << flush;
 
         auto found = false;
         auto request_body  = json::object{},
@@ -212,7 +221,7 @@ void db::rest::server::handle(net::endpointstream client)
             std::tie(collection,selector) = convert(request_uri);
 
             const auto lock = make_lock(m_engine);
-            m_engine.collection(to_string(collection));
+            m_engine.collection(string(collection));
 
             if(method == "GET" || method == "HEAD")
             {
@@ -286,36 +295,38 @@ void db::rest::server::handle(net::endpointstream client)
                    << "Content-Type: application/json"                                    << crlf
                    << "Content-Length: " << content.length()                              << crlf
                    << crlf
-                   << (method != "HEAD"s ? content : ""s) << flush;
+                  //  << (method != "HEAD"s ? content : ""s) << flush;
+                   << flush;
+
         }
         slog << debug << "Sent HTTP response message" << flush;
     }
-    slog << debug << "Client closed connection" << flush;
+    slog << debug << "Connection was closed" << flush;
 }
 
 std::tuple<string_view,json::object> db::rest::server::convert(string_view request_uri)
 {
     auto components = net::uri{request_uri};
-    auto root       = components.path[0];               // Should be /
+    auto root       = components.path[0];                // Should be /
     auto collection = components.path[1];
     auto key        = components.path[2];
     auto value      = components.path[3];
     auto query      = components.query;
     auto selector   = xson::object{};
 
-    if(key == "id"s)                                    // collection/id?$head=10, collection/id/123 or collection/id/1,2,3
-        selector = to_selector(u8"_id"s, value, query);
+    if(key == "id"s)                                     // collection/id?$head=10, collection/id/123 or collection/id/1,2,3
+        selector = make_selector(u8"_id"s, value, query);
 
-    else if(key.empty() || numeric(key) || csv(key))    // collection?lte=4?desc, collection/123 or collection/1,2,3
-        selector = to_selector(u8"_id"s, key, query);
+    else if(key.empty() || isnumeric(key) || iscsv(key)) // collection?lte=4?desc, collection/123 or collection/1,2,3
+        selector = make_selector(u8"_id"s, key, query);
 
-    else                                                // collection/field?eq=value?desc or collection/field/value
-         selector = to_selector(key, value, query);
+    else                                                 // collection/field?eq=value?desc or collection/field/value
+         selector = make_selector(key, value, query);
 
     for(auto i = 4; !components.path[i].empty(); i+=2)
-         selector += to_selector(components.path[i], components.path[i+1], query);
+         selector += make_selector(components.path[i], components.path[i+1], query);
 
-    selector += to_top(query) += to_order(query);
+    selector += make_top(query) += make_order(query);
 
     return std::make_tuple(collection,selector);
 }

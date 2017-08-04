@@ -1,12 +1,13 @@
 
 #include <iostream>
 #include <fstream>
-#include "std/span.hpp"
+#include "gsl/span.hpp"
 #include "db/metadata.hpp"
 #include "xson/json.hpp"
 
 using namespace std;
 using namespace string_literals;
+using namespace gsl;
 using namespace xson;
 
 const auto usage = R"(yarexport [--help] [--file=<name>])";

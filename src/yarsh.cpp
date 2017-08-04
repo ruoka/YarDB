@@ -1,10 +1,11 @@
 #include <string_view>
-#include "std/span.hpp"
+#include "gsl/span.hpp"
 #include "net/connector.hpp"
 #include "xson/json.hpp"
 
 using namespace std;
 using namespace string_literals;
+using namespace gsl;
 using namespace ext;
 using namespace net;
 using namespace xson;

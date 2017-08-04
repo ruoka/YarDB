@@ -1,5 +1,5 @@
 #include <thread>
-#include "std/span.hpp"
+#include "gsl/span.hpp"
 #include "net/connector.hpp"
 #include "net/acceptor.hpp"
 #include "net/syslogstream.hpp"
@@ -9,6 +9,7 @@ using namespace std;
 using namespace string_literals;
 using namespace chrono_literals;
 using namespace this_thread;
+using namespace gsl;
 using namespace ext;
 using namespace net;
 

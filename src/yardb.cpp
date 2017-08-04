@@ -1,11 +1,12 @@
 #include <csignal>
 #include <string_view>
-#include "std/span.hpp"
+#include "gsl/span.hpp"
 #include "net/syslogstream.hpp"
 #include "db/rest/server.hpp"
 
 using namespace std;
 using namespace string_literals;
+using namespace gsl;
 using namespace net;
 using namespace ext;
 

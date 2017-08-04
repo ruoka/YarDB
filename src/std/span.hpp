@@ -6,8 +6,6 @@
 
 namespace std {
 
-enum class byte : unsigned char {};
-
 // [views.constants], constants
 constexpr ptrdiff_t dynamic_extent = -1;
 
@@ -296,6 +294,12 @@ template <class ElementType, ptrdiff_t Extent>
 constexpr span<byte, (Extent == dynamic_extent ? dynamic_extent : (sizeof(ElementType) * Extent))> as_writeable_bytes(span<ElementType, Extent> s) noexcept
 {
     return {static_cast<byte*>(s.data()), s.length_bytes()};
+}
+
+template <class ElementType>
+span<ElementType> make_span(ElementType* ptr, typename span<ElementType>::index_type count)
+{
+    return span<ElementType>(ptr, count);
 }
 
 } // namespace std

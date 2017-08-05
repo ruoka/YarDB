@@ -24,6 +24,8 @@ GET /collection/{id}     aka Raad
 DELETE /collection/id    aka Delete
 HELP                     i.e. This text
 EXIT                     i.e. Exit the shell
+GET /                    i.e. Returns all the collections
+GET /_reindex            i.e. Reindex all the collections
 )";
 
 int main(int argc, char** argv)
@@ -59,9 +61,8 @@ try
         auto method = ""s, uri = ""s, version = "HTTP/1.1"s, content = ""s, reason = ""s;
         auto status = 0u;
 
-        clog << "Enter HTTP request or command: ";
+        clog << "Enter restful request: ";
         cin >> method;
-        if(method.empty()) continue;
 
         for(auto& c : method) c = std::toupper(c);
 
@@ -78,7 +79,6 @@ try
         }
 
         cin >> uri;
-        if(uri.empty()) continue;
 
         if(method == "POST" || method == "PUT" || method == "PATCH")
             content = json::stringify(json::parse(cin));
@@ -111,9 +111,9 @@ try
 
         clog << version << sp << status << sp << reason << endl;
 
-        server >> ws;  // Skip all whitespaces
-
         auto content_length = 0ll;
+
+        server >> ws;  // Skip all whitespaces
 
         while(server && server.peek() != '\r')
         {
@@ -132,10 +132,8 @@ try
         server.ignore(2);
 
         if(method != "HEAD" && (status == 200 /* || status == 404 */ ))
-        {
-            // server.ignore(content_length);
             clog << json::stringify(json::parse(server)) << newl;
-        }
+
         clog << newl;
     }
     clog << "See you latter - bye!" << newl;
@@ -148,7 +146,7 @@ catch(const system_error& e)
 }
 catch(const std::exception& e)
 {
-    cerr << "Exception: " << e.what() << endl;
+    cerr << "Exception: \"" << e.what() << "\"" << endl;
     return 1;
 }
 catch(...)

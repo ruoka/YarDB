@@ -76,6 +76,14 @@ public:
         m_collection = in_use;
     }
 
+    auto collections() const
+    {
+        auto documents = std::vector<std::string>{};
+        for(const auto idx : m_index)
+            documents.push_back(std::get<0>(idx));
+        return documents;
+    };
+
 private:
 
     std::string m_db;

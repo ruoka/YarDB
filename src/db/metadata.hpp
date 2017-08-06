@@ -18,8 +18,9 @@ struct metadata
     {
         collection = c;
     };
-    action status           = created;
-    std::string collection  = u8"db"s;
+    action status = created;
+    std::string collection = u8""s;
+    std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::time_point{};
     std::streamoff position = -1;
     std::streamoff previous = -1;
 };
@@ -30,16 +31,15 @@ static const metadata deleted{metadata::deleted};
 
 inline auto& operator << (std::ostream& os, metadata& data)
 {
+    data.timestamp = std::chrono::system_clock::now();
     data.previous = data.position;
     data.position = os.tellp();
     auto encoder = xson::fson::encoder{os};
     encoder.encode(data.status);
-    if(data.status != metadata::deleted || data.status != metadata::updated)
-    {
-        encoder.encode(data.collection);
-        encoder.encode(data.position);
-        encoder.encode(data.previous);
-    }
+    encoder.encode(data.collection);
+    encoder.encode(data.timestamp);
+    encoder.encode(data.position);
+    encoder.encode(data.previous);
     return os;
 }
 
@@ -55,6 +55,7 @@ inline auto& operator >> (std::istream& is, metadata& data)
     auto decoder = xson::fson::decoder{is};
     decoder.decode(data.status);
     decoder.decode(data.collection);
+    decoder.decode(data.timestamp);
     decoder.decode(data.position);
     decoder.decode(data.previous);
     return is;

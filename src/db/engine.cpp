@@ -124,6 +124,7 @@ bool db::engine::create(db::object& document)
     index.update(document);
     index.insert(document, m_storage.tellp());
     m_storage << metadata << document;
+    m_storage.flush();
     return true;
 }
 
@@ -190,6 +191,9 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
         }
     }
 
+    if(success)
+        m_storage.flush();
+
     return success;
 }
 
@@ -216,6 +220,9 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
             success = true;
         }
     }
+
+    if(success)
+        m_storage.flush();
 
     for(const auto document : documents)
         index.erase(document.second);

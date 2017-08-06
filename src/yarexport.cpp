@@ -9,6 +9,7 @@ using namespace std;
 using namespace string_literals;
 using namespace gsl;
 using namespace xson;
+using namespace ext;
 
 const auto usage = R"(yarexport [--help] [--file=<name>])";
 
@@ -48,11 +49,12 @@ try
         storage >> metadata >> document;
         if(storage)
             clog << json::stringify(
-                            {{"collection"s, metadata.collection         },
-                             {"status"s,     to_string(metadata.status)  },
-                             {"position"s,   metadata.position           },
-                             {"previous"s,   metadata.previous           },
-                             {"document"s,   document                    }})
+                            {{"collection"s, metadata.collection            },
+                             {"status"s,     to_string(metadata.status)     },
+                             {"timestamp"s,  to_iso8601(metadata.timestamp) },
+                             {"position"s,   metadata.position              },
+                             {"previous"s,   metadata.previous              },
+                             {"document"s,   document                       }})
                       << ",\n";
     }
 }

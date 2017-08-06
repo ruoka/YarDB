@@ -20,7 +20,7 @@ PUT /collection/id       aka Replace
 JSON
 PATCH /collection/id     aka Update/Upsert
 JSON
-GET /collection/{id}     aka Raad
+GET /collection/{id}     aka Read
 DELETE /collection/id    aka Delete
 HELP                     i.e. This text
 EXIT                     i.e. Exit the shell

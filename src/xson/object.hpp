@@ -29,7 +29,9 @@ using value = variant<null_type,    // \x0A
 
 inline std::string to_string(const value& val)
 {
-    return visit([](const auto& arg){return std::to_string(arg);}, val);
+    using std::to_string;
+    using ext::to_string;
+    return visit([](const auto& arg){return to_string(arg);}, val);
 }
 
 struct less

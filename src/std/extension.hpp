@@ -208,41 +208,31 @@ static const std::string bool2string[] = {"false", "true"};
 
 static const std::string null2string = {"null"};
 
-} // namespace ext
-
-namespace std {
-
-template<typename T, typename R>
-auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexcept
-{
-    os << d.count();
-    return os;
-}
 
 template<typename T>
-string to_string(const chrono::time_point<T>& point) noexcept
+std::string to_string(const std::chrono::time_point<T>& point) noexcept
 {
     return ext::to_iso8601(point);
 }
 
-constexpr const string& to_string(bool b) noexcept
+constexpr const std::string& to_string(bool b) noexcept
 {
     return ext::bool2string[b];
 }
 
-constexpr const string& to_string(nullptr_t) noexcept
+constexpr const std::string& to_string(std::nullptr_t) noexcept
 {
     return ext::null2string;
 }
 
-constexpr const string& to_string(const string& str) noexcept
+constexpr const std::string& to_string(const std::string& str) noexcept
 {
     return str;
 }
 
-inline string to_string(string_view sv) noexcept
+inline std::string to_string(std::string_view sv) noexcept
 {
-    return string{sv};
+    return std::string{sv};
 }
 
 inline auto stoi(std::string_view sv, std::size_t* pos = nullptr, int base = 10)
@@ -267,6 +257,17 @@ inline auto stoll(std::string_view sv, std::size_t* pos = nullptr, int base = 10
     auto ll = std::strtoll(sv.data(), &end, base);
     if(pos) *pos = std::distance<const char*>(sv.data(), end);
     return ll;
+}
+
+} // namespace ext
+
+namespace std {
+
+template<typename T, typename R>
+auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexcept
+{
+    os << d.count();
+    return os;
 }
 
 } // namespace std

@@ -36,7 +36,7 @@ constexpr auto& to_string(const days& d) noexcept
 
 // http://howardhinnant.github.io/date_algorithms.html#days_from_civil
 
-constexpr auto convert(const years& ys, const months& ms, const days& ds)
+constexpr auto to_time_point(const years& ys, const months& ms, const days& ds)
 {
     using namespace std::chrono;
     static_assert(std::numeric_limits<unsigned>::digits >= 18,
@@ -56,7 +56,7 @@ constexpr auto convert(const years& ys, const months& ms, const days& ds)
 
 // http://howardhinnant.github.io/date_algorithms.html#civil_from_days
 
-constexpr auto convert(const days& ds)
+constexpr auto to_years_days_months(const days& ds)
 {
     static_assert(std::numeric_limits<unsigned>::digits >= 18,
              "This algorithm has not been ported to a 16 bit unsigned integer");
@@ -75,11 +75,27 @@ constexpr auto convert(const days& ds)
 }
 
 template<typename T>
-constexpr auto convert(const std::chrono::time_point<T>& tp) noexcept
+constexpr auto to_years_days_months_hours_minutes_seconds(const std::chrono::time_point<T>& point) noexcept
 {
     using namespace std;
-    using namespace std::chrono;
-    auto tmp = tp;
+    using namespace chrono;
+    auto tmp = point;
+    const auto ds = duration_cast<days>(tmp.time_since_epoch());
+    tmp -= ds;
+    const auto hs = duration_cast<hours>(tmp.time_since_epoch());
+    tmp -= hs;
+    const auto ms = duration_cast<minutes>(tmp.time_since_epoch());
+    tmp -= ms;
+    const auto ss = duration_cast<seconds>(tmp.time_since_epoch());
+    return tuple_cat( to_years_days_months(ds), make_tuple(hs, ms, ss) );
+}
+
+template<typename T>
+constexpr auto to_years_days_months_hours_minutes_seconds_milliseconds(const std::chrono::time_point<T>& point) noexcept
+{
+    using namespace std;
+    using namespace chrono;
+    auto tmp = point;
     const auto ds = duration_cast<days>(tmp.time_since_epoch());
     tmp -= ds;
     const auto hs = duration_cast<hours>(tmp.time_since_epoch());
@@ -89,47 +105,56 @@ constexpr auto convert(const std::chrono::time_point<T>& tp) noexcept
     const auto ss = duration_cast<seconds>(tmp.time_since_epoch());
     tmp -= ss;
     const auto fs = duration_cast<milliseconds>(tmp.time_since_epoch());
-    return tuple_cat( convert(ds), make_tuple(hs, ms, ss, fs) );
+    return tuple_cat( to_years_days_months(ds), make_tuple(hs, ms, ss, fs) );
 }
 
 template<typename T>
-auto to_rfc1123(const std::chrono::time_point<T>& tp) noexcept
+constexpr auto& to_day_of_week(const std::chrono::time_point<T>& point) noexcept
 {
     using namespace std;
-    using namespace std::chrono;
+    using namespace chrono;
+    const auto d = duration_cast<days>(point.time_since_epoch());
+    return to_string(d);
+}
+
+template<typename T>
+auto to_rfc1123(const std::chrono::time_point<T>& point) noexcept
+{
+    using namespace std;
+    using namespace chrono;
     // Sun, 06 Nov 1994 08:49:37 GMT
-    const auto timestamp = convert(tp);
+    const auto date = to_years_days_months_hours_minutes_seconds(point);
     auto os = ostringstream{};
-    os << to_string(duration_cast<days>(tp.time_since_epoch())) << ',' << ' '
-       << setw(2) << setfill('0') << get<days>(timestamp)       << ' '
-       << to_string(get<months>(timestamp))                     << ' '
-       << setw(4) << setfill('0') << get<years>(timestamp)      << ' '
-       << setw(2) << setfill('0') << get<hours>(timestamp)      << ':'
-       << setw(2) << setfill('0') << get<minutes>(timestamp)    << ':'
-       << setw(2) << setfill('0') << get<seconds>(timestamp)    << ' '
+    os << to_day_of_week(point) << ',' << ' '
+       << setw(2) << setfill('0') << get<days>(date)       << ' '
+       << to_string(get<months>(date))                     << ' '
+       << setw(4) << setfill('0') << get<years>(date)      << ' '
+       << setw(2) << setfill('0') << get<hours>(date)      << ':'
+       << setw(2) << setfill('0') << get<minutes>(date)    << ':'
+       << setw(2) << setfill('0') << get<seconds>(date)    << ' '
        << "GMT";
     return os.str();
 }
 
 template<typename T>
-auto to_iso8601(const std::chrono::time_point<T>& tp) noexcept
+auto to_iso8601(const std::chrono::time_point<T>& point) noexcept
 {
     using namespace std;
     using namespace std::chrono;
     // YYYY-MM-DDThh:mm:ss.fffZ
-    const auto timestamp = convert(tp);
+    const auto date = to_years_days_months_hours_minutes_seconds_milliseconds(point);
     auto os = ostringstream{};
-    os << setw(4) << setfill('0') << get<years>(timestamp)        << '-'
-       << setw(2) << setfill('0') << get<months>(timestamp)       << '-'
-       << setw(2) << setfill('0') << get<days>(timestamp)         << 'T'
-       << setw(2) << setfill('0') << get<hours>(timestamp)        << ':'
-       << setw(2) << setfill('0') << get<minutes>(timestamp)      << ':'
-       << setw(2) << setfill('0') << get<seconds>(timestamp)      << '.'
-       << setw(3) << setfill('0') << get<milliseconds>(timestamp) << 'Z';
+    os << setw(4) << setfill('0') << get<years>(date)        << '-'
+       << setw(2) << setfill('0') << get<months>(date)       << '-'
+       << setw(2) << setfill('0') << get<days>(date)         << 'T'
+       << setw(2) << setfill('0') << get<hours>(date)        << ':'
+       << setw(2) << setfill('0') << get<minutes>(date)      << ':'
+       << setw(2) << setfill('0') << get<seconds>(date)      << '.'
+       << setw(3) << setfill('0') << get<milliseconds>(date) << 'Z';
     return os.str();
 }
 
-inline auto stotp(const std::string& str)
+inline auto to_time_point(const std::string& str)
 {
     // YYYY-MM-DDThh:mm:ss.fffZ
     using namespace std::chrono;
@@ -140,12 +165,12 @@ inline auto stotp(const std::string& str)
     const auto mm = minutes{stoi(str.substr(14,2))};
     const auto ss = seconds {stoi(str.substr(17,2))};
     const auto ff = milliseconds{stoi(str.substr(20,3))};
-    auto tp = ext::convert(YY,MM,DD);
-    tp += hh; tp += mm; tp += ss; tp += ff;
-    return tp;
+    auto point = to_time_point(YY,MM,DD);
+    point += hh; point += mm; point += ss; point += ff;
+    return point;
 }
 
-inline auto stob(const std::string& str) noexcept
+inline auto to_boolean(const std::string& str) noexcept
 {
     using namespace std::string_literals;
     if(str == "true"s  || str == "1"s) return true;
@@ -195,9 +220,9 @@ auto& operator << (std::ostream& os, const std::chrono::duration<T,R>& d) noexce
 }
 
 template<typename T>
-string to_string(const chrono::time_point<T>& tp) noexcept
+string to_string(const chrono::time_point<T>& point) noexcept
 {
-    return ext::to_iso8601(tp);
+    return ext::to_iso8601(point);
 }
 
 constexpr const string& to_string(bool b) noexcept

@@ -297,11 +297,9 @@ void db::rest::server::handle(net::endpointstream client)
                    << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
                    << "Accept: application/json"                                          << crlf
                    << "Content-Type: application/json"                                    << crlf
-                   << "Content-Length: " << content.length()                              << crlf
+                   << "Content-Length: 0"                                                 << crlf
                    << crlf
-                  //  << (method != "HEAD"s ? content : ""s) << flush;
                    << flush;
-
         }
         slog << debug << "Sent HTTP response message" << flush;
     }

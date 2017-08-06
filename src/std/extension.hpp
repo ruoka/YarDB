@@ -6,6 +6,8 @@
 #include <iomanip>
 #include <iterator>
 #include <string_view>
+#include <algorithm>
+#include <cctype>
 
 namespace ext {
 
@@ -149,6 +151,11 @@ inline auto stob(const std::string& str) noexcept
     if(str == "true"s  || str == "1"s) return true;
     if(str == "false"s || str == "0"s) return false;
     throw std::invalid_argument{"No conversion to bool could be done for '"s + str + "'"s};
+}
+
+inline void to_upper(std::string& str) noexcept
+{
+    for(auto& c : str) c = std::toupper(c);
 }
 
 inline std::string& trim_right(std::string& str, const std::string& delimiters = " \f\n\r\t\v")

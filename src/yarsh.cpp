@@ -64,7 +64,7 @@ try
         clog << "Enter restful request: ";
         cin >> method;
 
-        for(auto& c : method) c = std::toupper(c);
+        ext::to_upper(method);
 
         if (method == "HELP")
         {
@@ -92,9 +92,9 @@ try
                << "Content-Length: " << content.length() << newl
                << newl
                << content
-               << flush;
+               << newl;
 
-        server.clear();
+        clog << endl;
 
         server << method << sp << uri << sp << version   << crlf
                << "Host: localhost:2112 "                << crlf
@@ -109,7 +109,7 @@ try
         getline(server, reason);
         trim(reason);
 
-        clog << version << sp << status << sp << reason << endl;
+        clog << version << sp << status << sp << reason << newl;
 
         auto content_length = 0ll;
 
@@ -130,11 +130,13 @@ try
         // assert(server.get() == '\r');
         // assert(server.get() == '\n');
         server.ignore(2);
+        clog << newl;
 
-        if(method != "HEAD" && (status == 200 /* || status == 404 */ ))
+        // only {} and [] are valid, complete JSON strings in parsers and stringifiers
+        if(content_length > 1)
             clog << json::stringify(json::parse(server)) << newl;
 
-        clog << newl;
+        clog << endl;
     }
     clog << "See you latter - bye!" << newl;
     return 0;

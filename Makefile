@@ -82,7 +82,7 @@ lib: $(LIBRARIES) $(INCLUDES)
 
 .PHONY: test
 test: $(GTEST_TARGET)
-	$(GTEST_TARGET) --gtest_filter=-*.CommandLine:DbServerTest.*:DbRestServerTest.*:HttpServerTest.*
+	$(GTEST_TARGET) --gtest_filter=-*.CommandLine:DbRestServerTest.*:HttpServerTest.*
 
 .PHONY: all
 all: $(TARGETS) $(LIBRARIES) $(GTEST_TARGET)

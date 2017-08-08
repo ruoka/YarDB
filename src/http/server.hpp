@@ -80,6 +80,7 @@ namespace http {
                 auto worker = std::thread{[&](){handle(std::move(client));}};
                 worker.detach();
             }
+            std::this_thread::sleep_for(3ms);
         }
 
     private:
@@ -97,7 +98,7 @@ namespace http {
 
                 client >> ws;
 
-                auto authorization = ""s, content_type = ""s;
+                auto content_type = "text/html"s, authorization = ""s;
 
                 while(client && client.peek() != '\r')
                 {
@@ -108,7 +109,7 @@ namespace http {
                     ext::trim(value);
                     clog << name << ": " << value << endl;
 
-                    if(name == "Content-Type")
+                    if(name == "Accept")
                         content_type = value;
 
                     if(name == "Authorization")

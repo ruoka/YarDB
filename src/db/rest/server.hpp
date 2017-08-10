@@ -12,7 +12,7 @@ class server
 {
 public:
 
-    const std::set<std::string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE"};
+    const std::set<std::string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"};
 
     server(const std::string& file = "./yar.db"s);
 

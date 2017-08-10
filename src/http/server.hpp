@@ -145,7 +145,8 @@ namespace http {
                          << "Server: net4cpp/1.1"                                               << net::crlf
                          << "Access-Control-Allow-Origin: *"                                    << net::crlf
                          << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << net::crlf
-                        << "Content-Type: " << content_type                                     << net::crlf
+                         << "Access-Control-Allow-Headers: Content-Type"                        << net::crlf
+                         << "Content-Type: " << content_type                                    << net::crlf
                          << "Content-Length: " << content.length()                              << net::crlf
                          << net::crlf
                          << (method != "HEAD"s ? content : ""s) << net::flush;

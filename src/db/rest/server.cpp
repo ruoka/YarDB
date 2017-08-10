@@ -212,6 +212,8 @@ void db::rest::server::handle(net::endpointstream client)
         auto found = false;
         auto request_body  = json::object{},
              response_body = json::object{};
+        request_body.type(xson::type::array);
+        response_body.type(xson::type::array);
 
         try
         {
@@ -268,8 +270,10 @@ void db::rest::server::handle(net::endpointstream client)
         auto content = ""s;
         if(method == "POST" || method == "PUT")
             content = json::stringify(request_body);
-        else
+        else if(method != "OPTIONS")
             content = json::stringify(response_body);
+        else
+            found = true;
 
         slog << debug << "Sending HTTP response message" << flush;
 
@@ -281,6 +285,7 @@ void db::rest::server::handle(net::endpointstream client)
                    << "Server: YarDB/0.2"                                                 << crlf
                    << "Access-Control-Allow-Origin: *"                                    << crlf
                    << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                   << "Access-Control-Allow-Headers: Content-Type"                        << crlf
                    << "Accept: application/json"                                          << crlf
                    << "Content-Type: application/json"                                    << crlf
                    << "Content-Length: " << content.length()                              << crlf
@@ -295,11 +300,12 @@ void db::rest::server::handle(net::endpointstream client)
                    << "Server: YarDB/0.2"                                                 << crlf
                    << "Access-Control-Allow-Origin: *"                                    << crlf
                    << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                   << "Access-Control-Allow-Headers: Content-Type"                        << crlf
                    << "Accept: application/json"                                          << crlf
                    << "Content-Type: application/json"                                    << crlf
-                   << "Content-Length: 0"                                                 << crlf
+                   << "Content-Length: " << content.length()                              << crlf
                    << crlf
-                   << flush;
+                   << (method != "HEAD"s ? content : ""s) << flush;
         }
         slog << debug << "Sent HTTP response message" << flush;
     }

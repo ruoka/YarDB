@@ -146,6 +146,7 @@ namespace http {
                          << "Access-Control-Allow-Origin: *"                                    << net::crlf
                          << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << net::crlf
                          << "Access-Control-Allow-Headers: Content-Type"                        << net::crlf
+                         << "Access-Control-Allow-Credentials: true"                            << net::crlf
                          << "Content-Type: " << content_type                                    << net::crlf
                          << "Content-Length: " << content.length()                              << net::crlf
                          << net::crlf

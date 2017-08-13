@@ -148,15 +148,15 @@ void db::rest::server::handle(net::endpointstream client)
 
         if(!methods.count(method) || (request_uri == "/" && method != "GET"))
         {
-            slog << notice << "HTTP requests message with method \"" << method << "\" was rejected" << flush;
-            client << "HTTP/1.1 400 Bad Request"                                          << crlf
-                   << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                   << "Server: YarDB/0.2"                                                 << crlf
-                   << "Access-Control-Allow-Origin: *"                                    << crlf
-                   << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
-                   << "Accept: application/json"                                          << crlf
-                   << "Content-Type: application/json"                                    << crlf
-                   << "Content-Length: 0"                                                 << crlf
+            slog << info << "HTTP " << method << " requests message with URI " << request_uri << " was rejected" << flush;
+            client << "HTTP/1.1 400 Bad Request"                                                    << crlf
+                   << "Date: " << to_rfc1123(system_clock::now())                                   << crlf
+                   << "Server: YarDB/0.2"                                                           << crlf
+                   << "Access-Control-Allow-Origin: *"                                              << crlf
+                   << "Access-Control-Allow-Methods: OPTIONS, HEAD, GET, POST, PUT, PATCH, DELETE"  << crlf
+                   << "Accept: application/json"                                                    << crlf
+                   << "Content-Type: application/json"                                              << crlf
+                   << "Content-Length: 0"                                                           << crlf
                    << crlf
                    << flush;
             break; // reject with break
@@ -164,7 +164,7 @@ void db::rest::server::handle(net::endpointstream client)
 
         if(request_uri == "/favicon.ico")
         {
-            slog << info << "HTTP " << method << " requests message with URI " << request_uri << " was ignored" << flush;
+            slog << info << "HTTP \"" << method << "\" requests message with URI \"" << request_uri << "\" was ignored" << flush;
             client << "HTTP/1.1 404 Not Found"                    << crlf
                    << "Date: " << to_rfc1123(system_clock::now()) << crlf
                    << "Server: YarDB/0.2"                         << crlf
@@ -176,7 +176,7 @@ void db::rest::server::handle(net::endpointstream client)
 
         if(http_version != "HTTP/1.1")
         {
-            slog << warning << "HTTP " << method << " requests message with HTTP version " << http_version << " was rejected" << flush;
+            slog << warning << "HTTP \"" << method << "\" requests message with HTTP version \"" << http_version << "\" was rejected" << flush;
             client << "HTTP/1.1 505 HTTP Version Not Supported"   << crlf
                    << "Date: " << to_rfc1123(system_clock::now()) << crlf
                    << "Server: YarDB/0.2"                         << crlf
@@ -188,6 +188,8 @@ void db::rest::server::handle(net::endpointstream client)
 
         slog << debug << "Reading HTTP request headers" << flush;
 
+        auto content_type = "text/html"s, authorization = ""s;
+
         client >> ws; // Skip all whitespaces
 
         while(client && client.peek() != '\r')
@@ -198,6 +200,12 @@ void db::rest::server::handle(net::endpointstream client)
             getline(client, value);
             trim(value);
             slog << info << "With request header \"" << request_header << "\": \"" << value << "\"" << flush;
+
+            if(request_header == "Accept")
+                content_type = value;
+
+            if(request_header == "Authorization")
+                authorization = value;
         }
         // assert(client.get() == '\r');
         // assert(client.get() == '\n');
@@ -206,6 +214,19 @@ void db::rest::server::handle(net::endpointstream client)
         slog << debug << "Read HTTP request headers" << flush;
 
         slog << debug << "Read HTTP request message" << flush;
+
+        if(method != "OPTIONS" && (authorization.empty() || authorization == "Basic Og=="))
+        {
+            slog << info << "HTTP \"" << method << "\" requests message with URI \"" << request_uri << "\" was unauthorized" << flush;
+            client << "HTTP/1.1 401 Unauthorized status"                       << net::crlf
+                   << "Date: " << ext::to_rfc1123(chrono::system_clock::now()) << net::crlf
+                   << "Server: net4cpp/1.1"                                    << net::crlf
+                   << "WWW-Authenticate: Basic realm=\"User Visible Realm\""   << net::crlf
+                   << "Content-Type: " << content_type                         << net::crlf
+                   << "Content-Length: 0"                                      << net::crlf
+                   << net::crlf << net::flush;
+            continue;
+        }
 
         slog << debug << "HTTP \"" << method << "\" request with URI \"" << request_uri << "\" was accepted" << flush;
 
@@ -280,30 +301,32 @@ void db::rest::server::handle(net::endpointstream client)
         if(found)
         {
             // const auto content = json::stringify({"success"s, body});
-            client << "HTTP/1.1 200 OK"                                                   << crlf
-                   << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                   << "Server: YarDB/0.2"                                                 << crlf
-                   << "Access-Control-Allow-Origin: *"                                    << crlf
-                   << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
-                   << "Access-Control-Allow-Headers: Content-Type"                        << crlf
-                   << "Accept: application/json"                                          << crlf
-                   << "Content-Type: application/json"                                    << crlf
-                   << "Content-Length: " << content.length()                              << crlf
+            client << "HTTP/1.1 200 OK"                                                            << crlf
+                   << "Date: " << to_rfc1123(system_clock::now())                                  << crlf
+                   << "Server: YarDB/0.2"                                                          << crlf
+                   << "Access-Control-Allow-Origin: http://localhost:8080"                         << crlf
+                   << "Access-Control-Allow-Methods: OPTIONS, HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                   << "Access-Control-Allow-Headers: authorization,content-type"                   << crlf
+                   << "Access-Control-Allow-Credentials: true"                                     << crlf
+                   << "Accept: application/json"                                                   << crlf
+                   << "Content-Type: application/json"                                             << crlf
+                   << "Content-Length: " << content.length()                                       << crlf
                    << crlf
                    << (method != "HEAD"s ? content : ""s) << flush;
         }
         else
         {
             // const auto content = json::stringify({"error"s, body});
-            client << "HTTP/1.1 404 Not Found"                                            << crlf
-                   << "Date: " << to_rfc1123(system_clock::now())                         << crlf
-                   << "Server: YarDB/0.2"                                                 << crlf
-                   << "Access-Control-Allow-Origin: *"                                    << crlf
-                   << "Access-Control-Allow-Methods: HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
-                   << "Access-Control-Allow-Headers: Content-Type"                        << crlf
-                   << "Accept: application/json"                                          << crlf
-                   << "Content-Type: application/json"                                    << crlf
-                   << "Content-Length: " << content.length()                              << crlf
+            client << "HTTP/1.1 404 Not Found"                                                     << crlf
+                   << "Date: " << to_rfc1123(system_clock::now())                                  << crlf
+                   << "Server: YarDB/0.2"                                                          << crlf
+                   << "Access-Control-Allow-Origin: http://localhost:8080"                         << crlf
+                   << "Access-Control-Allow-Methods: OPTIONS, HEAD, GET, POST, PUT, PATCH, DELETE" << crlf
+                   << "Access-Control-Allow-Headers: authorization,content-type"                   << crlf
+                   << "Access-Control-Allow-Credentials: true"                                     << crlf
+                   << "Accept: application/json"                                                   << crlf
+                   << "Content-Type: application/json"                                             << crlf
+                   << "Content-Length: " << content.length()                                       << crlf
                    << crlf
                    << (method != "HEAD"s ? content : ""s) << flush;
         }

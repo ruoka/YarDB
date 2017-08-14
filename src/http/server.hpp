@@ -83,6 +83,16 @@ namespace http {
             std::this_thread::sleep_for(3ms);
         }
 
+        bool authenticate() const
+        {
+            return m_authenticate;
+        }
+
+        void authenticate(bool b)
+        {
+            m_authenticate = b;
+        }
+
     private:
 
         void handle(net::endpointstream client)
@@ -126,7 +136,7 @@ namespace http {
                            << "Content-Length: 0"                                      << net::crlf
                            << net::crlf << net::flush;
                 }
-                else if(authorization.empty() || authorization == "Basic Og==")
+                else if(m_authenticate && (authorization.empty() || authorization == "Basic Og=="))
                 {
                     client << "HTTP/1.1 401 Unauthorized status"                       << net::crlf
                            << "Date: " << ext::to_rfc1123(chrono::system_clock::now()) << net::crlf
@@ -158,6 +168,8 @@ namespace http {
         using router = std::unordered_map<std::string,std::unordered_map<std::string,controller>>;
 
         router m_router;
+
+        bool m_authenticate = false;
     };
 
 } // namespace http

@@ -259,6 +259,11 @@ inline auto stoll(std::string_view sv, std::size_t* pos = nullptr, int base = 10
     return ll;
 }
 
+inline std::string operator+(std::string& str, std::string_view sv)
+{
+	return str.append(sv.data(), sv.size());
+}
+
 } // namespace ext
 
 namespace std {

@@ -9,7 +9,7 @@ class engine
 {
 public:
 
-    engine(const std::string& db = "./yar.db"s);
+    engine(std::string_view db = "./yar.db"s);
 
     engine(engine&&);
 

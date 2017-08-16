@@ -106,23 +106,23 @@ json::object make_selector(const T1& name, const T2& value, const T3& query)
 
 } // namespace
 
-db::rest::server::server(const std::string& file) :
+db::rest::server::server(std::string_view file) :
 m_engine{file}
 {}
 
-void db::rest::server::start(const std::string& service_or_port)
+void db::rest::server::start(std::string_view service_or_port)
 {
-    slog << notice << "Starting up at "s + service_or_port << flush;
+    slog << notice << "Starting up at " << service_or_port << flush;
     auto endpoint = net::acceptor{"localhost"s, service_or_port};
     endpoint.timeout(24h);
-    slog << info << "Started up at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
+    slog << info << "Started up at " << endpoint.host() << ":" << endpoint.service_or_port() << flush;
 
     while(true)
     {
-        slog << notice << "Accepting connections at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
+        slog << notice << "Accepting connections at " << endpoint.host() << ":" << endpoint.service_or_port() << flush;
         auto host = ""s, port = ""s;
         auto client = endpoint.accept(host, port);
-        slog << info << "Accepted connection from "s + host + ":" + port << flush;
+        slog << info << "Accepted connection from " << host << ":" << port << flush;
         auto worker = thread{[this,&client](){handle(move(client));}};
         sleep_for(1s);
         worker.detach();

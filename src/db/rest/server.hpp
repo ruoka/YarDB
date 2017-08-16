@@ -12,11 +12,11 @@ class server
 {
 public:
 
-    const std::set<std::string> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"};
+    const std::set<std::string_view> methods = {"HEAD", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"};
 
-    server(const std::string& file = "./yar.db"s);
+    server(std::string_view file = "./yar.db"s);
 
-    void start(const std::string& serice_or_port = "http"s);
+    void start(std::string_view serice_or_port = "http"s);
 
 protected:
 

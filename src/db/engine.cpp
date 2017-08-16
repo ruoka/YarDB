@@ -16,22 +16,22 @@ inline void unlock()
     locks.clear();
 }
 
-inline void unlock(const std::string& db)
+inline void unlock(std::string_view db)
 {
-    const auto lock = db + ".pid"s;
+    const auto lock = std::string{db} + ".pid"s;
     std::remove(lock.c_str());
     locks.erase(lock);
 }
 
-inline void lock(const std::string& db)
+inline void lock(std::string_view db)
 {
-    const auto lock = db + ".pid"s;
+    const auto lock = std::string{db} + ".pid"s;
     auto file = std::fstream{lock, std::ios::in};
     if(file.is_open())
     {
         auto pid = ""s;
         file >> pid;
-        throw std::runtime_error{"DB "s + db + " is already in use by PID "s + pid};
+        throw std::runtime_error{"DB "s + lock + " is already in use by PID "s + pid};
     }
     file.open(lock, std::ios::out | std::ios::trunc);
     if(!file.is_open())
@@ -43,18 +43,18 @@ inline void lock(const std::string& db)
 
 } // namespace
 
-db::engine::engine(const std::string& db) :
+db::engine::engine(std::string_view db) :
     m_db{db},
     m_collection{u8"_db"s},
     m_index{},
     m_storage{}
 {
     ::lock(m_db);
-    m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary);
+    m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary);
     if(!m_storage.is_open())
-        m_storage.open(db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
+        m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
     if(!m_storage.is_open())
-        throw std::runtime_error{"Failed to open/create DB "s + db};
+        throw std::runtime_error{"Failed to open/create DB "s + m_db};
     reindex();
     reindex(); // Intentional double
 }

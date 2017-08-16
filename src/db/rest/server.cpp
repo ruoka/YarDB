@@ -66,7 +66,7 @@ inline json::object make_operator(string_view query)
 template<typename T>
 json::object make_filter(const T& query)
 {
-    auto filter = json::object{};
+    auto filter = db::object{};
     for(auto q : query)
         if(q.rfind("top") != 0)
             filter += make_operator(q);
@@ -76,7 +76,7 @@ json::object make_filter(const T& query)
 template<typename T>
 json::object make_order(const T& query)
 {
-    auto filter = json::object{};
+    auto filter = db::object{};
     for(auto q : query)
         if(q.rfind("desc") == 0)
             filter += make_operator(q);
@@ -86,7 +86,7 @@ json::object make_order(const T& query)
 template<typename T>
 json::object make_top(const T& query)
 {
-    auto filter = json::object{};
+    auto filter = db::object{};
     for(auto q : query)
         if(q.rfind("top") == 0)
             filter += make_operator(q);
@@ -96,7 +96,7 @@ json::object make_top(const T& query)
 template<typename T1, typename T2, typename T3>
 json::object make_selector(const T1& name, const T2& value, const T3& query)
 {
-    auto selector = json::object{};
+    auto selector = db::object{};
     if(value.empty())                                            // collection/id?$head=10
         selector += {string{name}, make_filter(query)};
     else                                                         // collection/id/123 or collection/id/1,2,3
@@ -218,21 +218,21 @@ void db::rest::server::handle(net::endpointstream client)
         if(method != "OPTIONS" && (authorization.empty() || authorization == "Basic Og=="))
         {
             slog << info << "HTTP \"" << method << "\" requests message with URI \"" << request_uri << "\" was unauthorized" << flush;
-            client << "HTTP/1.1 401 Unauthorized status"                       << net::crlf
-                   << "Date: " << ext::to_rfc1123(chrono::system_clock::now()) << net::crlf
-                   << "Server: net4cpp/1.1"                                    << net::crlf
-                   << "WWW-Authenticate: Basic realm=\"User Visible Realm\""   << net::crlf
-                   << "Content-Type: " << content_type                         << net::crlf
-                   << "Content-Length: 0"                                      << net::crlf
-                   << net::crlf << net::flush;
+            client << "HTTP/1.1 401 Unauthorized status"                       << crlf
+                   << "Date: " << ext::to_rfc1123(chrono::system_clock::now()) << crlf
+                   << "Server: net4cpp/1.1"                                    << crlf
+                   << "WWW-Authenticate: Basic realm=\"User Visible Realm\""   << crlf
+                   << "Content-Type: " << content_type                         << crlf
+                   << "Content-Length: 0"                                      << crlf
+                   << crlf << flush;
             continue;
         }
 
         slog << debug << "HTTP \"" << method << "\" request with URI \"" << request_uri << "\" was accepted" << flush;
 
         auto found = false;
-        auto request_body  = json::object{},
-             response_body = json::object{};
+        auto request_body  = db::object{},
+             response_body = db::object{};
         request_body.type(xson::type::array);
         response_body.type(xson::type::array);
 
@@ -240,7 +240,7 @@ void db::rest::server::handle(net::endpointstream client)
         {
             // auto[collection,selector] = convert(request_uri);
             auto collection = string_view{};
-            auto selector = json::object{};
+            auto selector = db::object{};
             std::tie(collection,selector) = convert(request_uri);
 
             const auto lock = make_lock(m_engine);

@@ -358,6 +358,11 @@ public:
         return m_objects.size();
     }
 
+    std::size_t count() const
+    {
+        return m_objects.size();
+    }
+
     const_iterator begin() const
     {
         return m_objects.cbegin();

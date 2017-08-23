@@ -104,7 +104,7 @@ namespace http {
                 auto method = ""s, uri = ""s, version = ""s;
                 client >> method >> uri >> version;
 
-                clog << method << ' ' << uri << ' ' << version;
+                clog << method << ' ' << uri << ' ' << version << net::newl;
 
                 client >> ws;
 

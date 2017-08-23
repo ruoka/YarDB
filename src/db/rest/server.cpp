@@ -66,7 +66,7 @@ inline json::object make_operator(string_view query)
 template<typename T>
 json::object make_filter(const T& query)
 {
-    auto filter = json::object{};
+    auto filter = db::object{};
     for(auto q : query)
         if(q.rfind("top") != 0)
             filter += make_operator(q);
@@ -76,7 +76,7 @@ json::object make_filter(const T& query)
 template<typename T>
 json::object make_order(const T& query)
 {
-    auto filter = json::object{};
+    auto filter = db::object{};
     for(auto q : query)
         if(q.rfind("desc") == 0)
             filter += make_operator(q);
@@ -86,7 +86,7 @@ json::object make_order(const T& query)
 template<typename T>
 json::object make_top(const T& query)
 {
-    auto filter = json::object{};
+    auto filter = db::object{};
     for(auto q : query)
         if(q.rfind("top") == 0)
             filter += make_operator(q);
@@ -96,7 +96,7 @@ json::object make_top(const T& query)
 template<typename T1, typename T2, typename T3>
 json::object make_selector(const T1& name, const T2& value, const T3& query)
 {
-    auto selector = json::object{};
+    auto selector = db::object{};
     if(value.empty())                                            // collection/id?$head=10
         selector += {string{name}, make_filter(query)};
     else                                                         // collection/id/123 or collection/id/1,2,3
@@ -107,7 +107,7 @@ json::object make_selector(const T1& name, const T2& value, const T3& query)
 } // namespace
 
 db::rest::server::server(std::string_view file) :
-m_engine{file}
+m_engine{file}, m_hook{m_engine}
 {}
 
 void db::rest::server::start(std::string_view service_or_port)
@@ -231,8 +231,8 @@ void db::rest::server::handle(net::endpointstream client)
         slog << debug << "HTTP \"" << method << "\" request with URI \"" << request_uri << "\" was accepted" << flush;
 
         auto found = false;
-        auto request_body  = json::object{},
-             response_body = json::object{};
+        auto request_body  = db::object{},
+             response_body = db::object{};
         request_body.type(xson::type::array);
         response_body.type(xson::type::array);
 
@@ -240,7 +240,7 @@ void db::rest::server::handle(net::endpointstream client)
         {
             // auto[collection,selector] = convert(request_uri);
             auto collection = string_view{};
-            auto selector = json::object{};
+            auto selector = db::object{};
             std::tie(collection,selector) = convert(request_uri);
 
             const auto lock = make_lock(m_engine);
@@ -275,7 +275,10 @@ void db::rest::server::handle(net::endpointstream client)
                 slog << debug << "Read HTTP request body " << json::stringify(request_body,0) << flush;
                 slog << debug << "Updating collection \"" << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
                 if(method == "POST"s)
+                {
+                    m_hook.pre_post(request_body);
                     found = m_engine.create(request_body);
+                }
                 else if(method == "PUT"s)
                     found = m_engine.replace(selector, request_body);
                 else if(method == "PATCH"s)

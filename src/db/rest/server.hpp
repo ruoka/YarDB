@@ -5,6 +5,7 @@
 #include "xson/json.hpp"
 #include "net/endpointstream.hpp"
 #include "db/engine.hpp"
+#include "db/hook.hpp"
 
 namespace db::rest {
 
@@ -27,6 +28,8 @@ private:
     void handle(net::endpointstream client);
 
     ext::lockable<db::engine> m_engine;
+
+    db::hook m_hook;
 };
 
 } // namespace db::rest

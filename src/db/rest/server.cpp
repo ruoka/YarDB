@@ -107,7 +107,7 @@ json::object make_selector(const T1& name, const T2& value, const T3& query)
 } // namespace
 
 db::rest::server::server(std::string_view file) :
-m_engine{file}
+m_engine{file}, m_hook{m_engine}
 {}
 
 void db::rest::server::start(std::string_view service_or_port)
@@ -275,7 +275,10 @@ void db::rest::server::handle(net::endpointstream client)
                 slog << debug << "Read HTTP request body " << json::stringify(request_body,0) << flush;
                 slog << debug << "Updating collection \"" << collection <<  "\" with selector " << json::stringify(selector,0) << flush;
                 if(method == "POST"s)
+                {
+                    m_hook.pre_post(request_body);
                     found = m_engine.create(request_body);
+                }
                 else if(method == "PUT"s)
                     found = m_engine.replace(selector, request_body);
                 else if(method == "PATCH"s)

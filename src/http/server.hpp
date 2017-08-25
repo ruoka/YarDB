@@ -79,8 +79,8 @@ namespace http {
                 auto client = acceptor.accept();
                 auto worker = std::thread{[&](){handle(std::move(client));}};
                 worker.detach();
+                std::this_thread::sleep_for(3ms);
             }
-            std::this_thread::sleep_for(3ms);
         }
 
         bool authenticate() const
@@ -148,7 +148,7 @@ namespace http {
                 }
                 else
                 {
-                  const auto content = m_router[uri][method].render();
+                  const auto& content = m_router[uri][method].render();
 
                   client << "HTTP/1.1 200 OK"                                                   << net::crlf
                          << "Date: " << ext::to_rfc1123(chrono::system_clock::now())            << net::crlf

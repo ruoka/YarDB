@@ -100,7 +100,7 @@ public:
     template <class OtherElementType, ptrdiff_t OtherExtent>
     constexpr span(const span<OtherElementType, OtherExtent>& other) : span<ElementType,Extent>{other.m_data}
     {
-        using std::experimental::is_convertible_v;
+        using std::is_convertible_v;
         static_assert(std::is_convertible_v<OtherElementType,ElementType>, "Not convertible");
         static_assert(OtherExtent == Extent, "Size mismatch");
     }
@@ -108,7 +108,7 @@ public:
     template <class OtherElementType, ptrdiff_t OtherExtent>
     constexpr span(span<OtherElementType, OtherExtent>&& other) : span<ElementType,Extent>{other.m_data}
     {
-        using std::experimental::is_convertible_v;
+        using std::is_convertible_v;
         static_assert(std::is_convertible_v<OtherElementType,ElementType>, "Not convertible");
         static_assert(OtherExtent == Extent, "Size mismatch");
     }

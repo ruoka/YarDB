@@ -1,6 +1,7 @@
 #pragma once
 #include <set>
 #include <tuple>
+#include <regex>
 #include <string>
 #include <thread>
 #include <functional>
@@ -19,7 +20,7 @@ class controller
 {
 public:
 
-    using callback = std::function<const std::string&(const std::string&)>;
+    using callback = std::function<std::string(const std::string&)>;
 
     void text(const std::string& content)
     {
@@ -238,7 +239,10 @@ private:
             else
             {
                 auto content = ""s, content_type = ""s;
-                std::tie(content,content_type) = m_router[uri][method].render(uri);
+
+                for(auto& route : m_router)
+                    if(std::regex_match(uri,std::regex(route.first)))
+                        std::tie(content,content_type) = route.second[method].render(uri);
 
                 client << "HTTP/1.1 200 OK"                             << crlf
                        << "Date: " << date()                            << crlf

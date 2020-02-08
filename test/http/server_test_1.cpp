@@ -53,11 +53,11 @@ const auto patch = u8R"(<p>PATCH response</p>)";
 
 // const auto json = u8R"({"foo" : 1, "bar" : false})";
 
-const auto json = std::string{"{\"foo\" : 1, \"bar\" : false}\""};
+const auto json = std::string{"{\"foo\" : 1, \"bar\" : false}"};
 
 } // namespace view
 
-TEST(HttpServerTest,Setup)
+TEST(HttpServerTest1,TestMethodds)
 {
     auto server = http::server{};
 

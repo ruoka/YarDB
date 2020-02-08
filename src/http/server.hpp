@@ -1,5 +1,6 @@
 #pragma once
 #include <set>
+#include <tuple>
 #include <string>
 #include <thread>
 #include <functional>
@@ -20,10 +21,10 @@ public:
 
     using callback = std::function<const std::string&(const std::string&)>;
 
-    void text(const std::string& view)
+    void text(const std::string& content)
     {
         m_content_type = "text/plain"s;
-        m_callback = [&](const std::string&){return view;};
+        m_callback = [&](const std::string&){return content;};
     }
 
     void html(const std::string& content)
@@ -61,9 +62,9 @@ public:
         m_callback = cb;
     }
 
-    std::string render(const std::string& uri = ""s)
+    std::tuple<std::string,std::string> render(const std::string& uri = ""s)
     {
-        return m_callback(uri);
+        return {m_callback(uri),m_content_type};
     }
 
     void content_type(const std::string& type)
@@ -236,8 +237,8 @@ private:
             }
             else
             {
-                const auto& content = m_router[uri][method].render(uri);
-                const auto& content_type = m_router[uri][method].content_type();
+                auto content = ""s, content_type = ""s;
+                std::tie(content,content_type) = m_router[uri][method].render(uri);
 
                 client << "HTTP/1.1 200 OK"                             << crlf
                        << "Date: " << date()                            << crlf

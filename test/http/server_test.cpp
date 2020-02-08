@@ -51,7 +51,9 @@ const auto destroy = u8R"(<p>DELETE response</p>)";
 
 const auto patch = u8R"(<p>PATCH response</p>)";
 
-const auto json = u8R"( {"foo" : 1, "bar" : false} )";
+// const auto json = u8R"({"foo" : 1, "bar" : false})";
+
+const auto json = std::string{"{\"foo\" : 1, \"bar\" : false}\""};
 
 } // namespace view
 
@@ -59,14 +61,14 @@ TEST(HttpServerTest,Setup)
 {
     auto server = http::server{};
 
-    server.get("/").response(view::index);
-    server.get("/vk").response(view::get);
-    server.head("/vk").response(view::head);
-    server.post("/vk").response(view::post);
-    server.put("/vk").response(view::put);
-    server.patch("/vk").response(view::patch);
-    server.destroy("/vk").response(view::destroy);
-    server.get("/json").response(view::json);
+    server.get("/").html(view::index);
+    server.get("/vk").html(view::get);
+    server.head("/vk").html(view::head);
+    server.post("/vk").html(view::post);
+    server.put("/vk").html(view::put);
+    server.patch("/vk").html(view::patch);
+    server.destroy("/vk").html(view::destroy);
+    server.get("/json").json(view::json);
 
     server.listen("8080");
 }

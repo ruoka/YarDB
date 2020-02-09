@@ -8,130 +8,126 @@
 namespace db {
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 
-void restful_web_server(const std::string& file, const std::string& port_or_service)
+void restful_web_server(std::string_view file, const std::string_view port_or_service)
 {
     auto server = http::server{};
 
     auto engine = ext::lockable<db::engine>{file};
 
     // List all collections
-    server.get("/").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.get("/"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
-                const auto lock = std::lock_guard(engine);
-                auto document = xson::json::object{"collections", engine.collections()};
-                return xson::json::stringify(document);
+                const auto guard = std::lock_guard(engine);
+                return xson::json::stringify({"collections", engine.collections()});
             });
 
     // Create
-    server.post("/[a-z]+").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.post("/[a-z]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
-                auto stream = std::stringstream{body};
-                auto document = xson::json::parse(stream);
+                auto document = xson::json::parse(body);
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
                 engine.create(document);
                 return xson::json::stringify(document);
             });
 
     // Read all
-    server.get("/[a-z]+").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.get("/[a-z]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
                 auto document = db::object{};
                 auto selector = db::object{};
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
             });
 
     // Read all in descending order
-    server.get("/[a-z]+\\?desc").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.get("/[a-z]+\\?desc"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
                 auto document = db::object{};
                 auto selector = db::object{"$desc", true};
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
             });
 
     // Read _id
-    server.get("/[a-z]+/[0-9]+").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.get("/[a-z]+/[0-9]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
                 auto document = db::object{};
                 auto selector = db::object{"_id", ext::stoll(uri.path[2])};
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
             });
 
     // Update aka replace _id
-    server.put("/[a-z]+/[0-9]+").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.put("/[a-z]+/[0-9]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
-                auto stream = std::stringstream{body};
-                auto document = xson::json::parse(stream);
+                auto document = xson::json::parse(body);
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
                 engine.replace(selector,document);
                 return xson::json::stringify(document);
             });
 
     // Update aka modify _id
-    server.patch("/[a-z]+/[0-9]+").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.patch("/[a-z]+/[0-9]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
-                auto stream = std::stringstream{body};
-                auto updates = xson::json::parse(stream);
+                auto updates = xson::json::parse(body);
                 auto documents = db::object{};
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
                 engine.upsert(selector,updates,documents);
                 return xson::json::stringify(documents);
             });
 
     // Delete _id
-    server.destroy("/[a-z]+/[0-9]+").response(
-        "application/json"s,
-        [&](const std::string& request, const std::string& body)
+    server.destroy("/[a-z]+/[0-9]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
             {
                 auto uri = http::uri{request};
-                auto stream = std::stringstream{body};
-                auto document = xson::json::parse(stream);
+                auto documents = db::object{};
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
 
-                const auto lock = std::lock_guard(engine);
+                const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
-                engine.destroy(selector,document);
-                return xson::json::stringify(document);
+                engine.destroy(selector,documents);
+                return xson::json::stringify(documents);
             });
 
     server.listen(port_or_service);

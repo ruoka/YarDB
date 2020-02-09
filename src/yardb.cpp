@@ -2,7 +2,7 @@
 #include <string_view>
 #include "gsl/span.hpp"
 #include "net/syslogstream.hpp"
-#include "db/rest/server.hpp"
+#include "db/restful_web_server.hpp"
 
 using namespace std;
 using namespace string_literals;
@@ -61,9 +61,7 @@ try
     }
 
     slog << notice << "Initializing server" << flush;
-    auto server = db::rest::server{file};
-    slog << notice << "Initialized server" << flush;
-    server.start(service_or_port);
+    db::restful_web_server(file, service_or_port);
     slog << notice << "Closed server" << flush;
     return 0;
 }

@@ -5,13 +5,15 @@
 #include "xson/json.hpp"
 #include "std/lockable.hpp"
 
+namespace db {
+
 using namespace std::string_literals;
 
-inline void restful_web_server()
+void restful_web_server(const std::string& file, const std::string& port_or_service)
 {
     auto server = http::server{};
 
-    auto engine = ext::lockable<db::engine>{};
+    auto engine = ext::lockable<db::engine>{file};
 
     // Create
     server.post("/[a-z]+").response(
@@ -107,5 +109,7 @@ inline void restful_web_server()
                 return xson::json::stringify(document);
             });
 
-    server.listen("2112"s);
+    server.listen(port_or_service);
 }
+
+} // namespace db

@@ -128,11 +128,14 @@ public:
 
     void listen(const std::string& serice_or_port = "http"s)
     {
-        auto acceptor = net::acceptor{"localhost"s, serice_or_port};
-        acceptor.timeout(1h);
+        auto endpoint = net::acceptor{"localhost"s, serice_or_port};
+        endpoint.timeout(1h);
+        slog << notice << "Started up at " << endpoint.host() << ":" << endpoint.service_or_port() << flush;
         while(true)
         {
-            auto client = acceptor.accept();
+            auto host = ""s, port = ""s;
+            auto client = endpoint.accept(host, port);
+            slog << notice << "Accepted connection from " << host << ":" << port << flush;
             auto worker = std::thread{[&](){handle(std::move(client));}};
             worker.detach();
             std::this_thread::sleep_for(3ms);

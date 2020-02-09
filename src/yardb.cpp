@@ -60,9 +60,9 @@ try
         }
     }
 
-    slog << notice << "Initializing server" << flush;
+    slog << notice << "Starting up server" << flush;
     db::restful_web_server(file, service_or_port);
-    slog << notice << "Closed server" << flush;
+    slog << notice << "Shutting down server" << flush;
     return 0;
 }
 catch(const system_error& e)

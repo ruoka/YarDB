@@ -1,4 +1,5 @@
 #include <thread>
+#include <mutex>
 #include "gsl/span.hpp"
 #include "net/connector.hpp"
 #include "net/acceptor.hpp"
@@ -80,13 +81,13 @@ void handle(endpointstream client, replica_set& replicas)
 
         if(method == "GET"s || method == "HEAD"s)
         {
-            const auto lock = make_lock(replicas);
+            const auto lock = lock_guard(replicas);
             any_of(begin(replicas), end(replicas), request_and_response);
             rotate(begin(replicas), ++begin(replicas), end(replicas));
         }
         else
         {
-            const auto lock = make_lock(replicas);
+            const auto lock = lock_guard(replicas);
             all_of(begin(replicas), end(replicas), request);
             all_of(begin(replicas), end(replicas), response);
         }
@@ -94,7 +95,7 @@ void handle(endpointstream client, replica_set& replicas)
         buffer.seekp(0);
     }
 
-    const auto lock = make_lock(replicas);
+    const auto lock = lock_guard(replicas);
     replicas.remove_if(disconnected);
 }
 

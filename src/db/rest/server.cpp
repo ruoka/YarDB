@@ -243,7 +243,7 @@ void db::rest::server::handle(net::endpointstream client)
             auto selector = db::object{};
             std::tie(collection,selector) = convert(request_uri);
 
-            const auto lock = make_lock(m_engine);
+            const auto lock = std::lock_guard(m_engine);
             m_engine.collection(string(collection));
 
             if(collection == "_reindex")

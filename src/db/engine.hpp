@@ -71,7 +71,7 @@ public:
         return m_collection;
     };
 
-    void collection(const std::string& in_use)
+    void collection(std::string_view in_use)
     {
         m_collection = in_use;
     }

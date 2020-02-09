@@ -4,6 +4,7 @@
 #include "net/connector.hpp"
 #include "net/acceptor.hpp"
 #include "net/syslogstream.hpp"
+#include "std/lockable.hpp"
 
 using namespace std;
 using namespace string_literals;
@@ -181,5 +182,3 @@ catch(...)
     slog << error << "Shit hit the fan!" << flush;
     return 1;
 }
-
-} // namespace db

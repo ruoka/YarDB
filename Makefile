@@ -17,7 +17,7 @@ LIBDIR = lib
 INCDIR = include
 
 
-TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy spike)
+TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 

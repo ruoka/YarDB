@@ -15,6 +15,16 @@ void restful_web_server(const std::string& file, const std::string& port_or_serv
 
     auto engine = ext::lockable<db::engine>{file};
 
+    // List all collections
+    server.get("/").response(
+        "application/json"s,
+        [&](const std::string& request, const std::string& body)
+            {
+                const auto lock = std::lock_guard(engine);
+                auto document = xson::json::object{"collections", engine.collections()};
+                return xson::json::stringify(document);
+            });
+
     // Create
     server.post("/[a-z]+").response(
         "application/json"s,
@@ -30,7 +40,7 @@ void restful_web_server(const std::string& file, const std::string& port_or_serv
                 return xson::json::stringify(document);
             });
 
-    // Read
+    // Read all
     server.get("/[a-z]+").response(
         "application/json"s,
         [&](const std::string& request, const std::string& body)
@@ -45,7 +55,7 @@ void restful_web_server(const std::string& file, const std::string& port_or_serv
                 return xson::json::stringify(document);
             });
 
-    // Read
+    // Read all in descending order
     server.get("/[a-z]+\\?desc").response(
         "application/json"s,
         [&](const std::string& request, const std::string& body)
@@ -60,7 +70,22 @@ void restful_web_server(const std::string& file, const std::string& port_or_serv
                 return xson::json::stringify(document);
             });
 
-    // Update = replace
+    // Read _id
+    server.get("/[a-z]+/[0-9]+").response(
+        "application/json"s,
+        [&](const std::string& request, const std::string& body)
+            {
+                auto uri = http::uri{request};
+                auto document = db::object{};
+                auto selector = db::object{"_id", ext::stoll(uri.path[2])};
+
+                const auto lock = std::lock_guard(engine);
+                engine.collection(uri.path[1]);
+                engine.read(selector, document);
+                return xson::json::stringify(document);
+            });
+
+    // Update aka replace _id
     server.put("/[a-z]+/[0-9]+").response(
         "application/json"s,
         [&](const std::string& request, const std::string& body)
@@ -76,7 +101,7 @@ void restful_web_server(const std::string& file, const std::string& port_or_serv
                 return xson::json::stringify(document);
             });
 
-    // Update = modify
+    // Update aka modify _id
     server.patch("/[a-z]+/[0-9]+").response(
         "application/json"s,
         [&](const std::string& request, const std::string& body)
@@ -93,7 +118,7 @@ void restful_web_server(const std::string& file, const std::string& port_or_serv
                 return xson::json::stringify(documents);
             });
 
-    // Delete
+    // Delete _id
     server.destroy("/[a-z]+/[0-9]+").response(
         "application/json"s,
         [&](const std::string& request, const std::string& body)

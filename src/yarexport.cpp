@@ -1,13 +1,11 @@
-
+#include <span>
 #include <iostream>
 #include <fstream>
-#include "gsl/span.hpp"
 #include "db/metadata.hpp"
 #include "xson/json.hpp"
 
 using namespace std;
 using namespace string_literals;
-using namespace gsl;
 using namespace xson;
 using namespace ext;
 
@@ -16,21 +14,21 @@ const auto usage = R"(yarexport [--help] [--file=<name>])";
 int main(int argc, char** argv)
 try
 {
-    const auto arguments = make_span(argv,argc).subspan(1);
+    const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;
 
     for(const string_view option : arguments)
     {
-        if(option.find("--file") == 0)
+        if(option.starts_with("--file"))
         {
             file = option.substr(option.find('=')+1);
         }
-        else if(option.find("--help") == 0)
+        else if(option.starts_with("--help"))
         {
             clog << usage << endl;
             return 0;
         }
-        else if(option.find("-") == 0)
+        else if(option.starts_with("-"))
         {
             clog << usage << endl;
             return 1;

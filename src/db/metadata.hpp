@@ -19,7 +19,7 @@ struct metadata
         collection = c;
     };
     action status = created;
-    std::string collection = u8""s;
+    std::string collection = ""s;
     std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::time_point{};
     std::streamoff position = -1;
     std::streamoff previous = -1;

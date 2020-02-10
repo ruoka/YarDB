@@ -1,10 +1,9 @@
 #pragma once
-
 #include <iostream>
 #include <initializer_list>
 #include <functional>
 #include <map>
-#include "std/variant.hpp"
+#include <variant>
 #include "std/extension.hpp"
 #include "xson/type.hpp"
 
@@ -387,13 +386,14 @@ private:
 
     using operator_type = std::function<bool(const xson::value&,const xson::value&)>;
 
+    // TODO: Fixme specialise comparison functions for std::variant or nullptr_t
     const std::map<string_type,operator_type> operators = std::map<string_type,operator_type>{
-        { "$eq"s,  std::equal_to<xson::value>{}      },
-        { "$ne"s,  std::not_equal_to<xson::value>{}  },
-        { "$lt"s,  std::less<xson::value>{}          },
-        { "$lte"s, std::less_equal<xson::value>{}    },
-        { "$gt"s,  std::greater<xson::value>{}       },
-        { "$gte"s, std::greater_equal<xson::value>{} }
+        // { "$eq"s,  std::equal_to<xson::value>{}      },
+        // { "$ne"s,  std::not_equal_to<xson::value>{}  },
+        // { "$lt"s,  std::less<xson::value>{}          },
+        // { "$lte"s, std::less_equal<xson::value>{}    },
+        // { "$gt"s,  std::greater<xson::value>{}       },
+        // { "$gte"s, std::greater_equal<xson::value>{} }
     };
 
     xson::type m_type;

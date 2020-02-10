@@ -35,7 +35,7 @@ protected:
 TEST_F(DbEngineTest, Create1)
 {
     auto engine = db::engine{test_file};
-    auto document = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+    auto document = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
          selector = object{},
          documents = object{};
     engine.collection("Create1"s);
@@ -53,7 +53,7 @@ TEST_F(DbEngineTest, Create9)
     engine.collection("Create9"s);
     for(auto i = 1; i < 10; ++i)
     {
-        auto document = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+        auto document = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
              all = object{},
              documents = object{};
         EXPECT_TRUE(engine.create(document));
@@ -88,9 +88,9 @@ TEST_F(DbEngineTest, UpdateEmptyCollection)
 TEST_F(DbEngineTest, Update1ByID)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}},
-         selector = object{u8"_id"s, 1ll},
+    auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document2 = object{{"A"s, 4}, {"D"s, 5}, {"E"s, 6}},
+         selector = object{"_id"s, 1ll},
          documents = object{};
     engine.collection("Update1ByID"s);
     EXPECT_TRUE(engine.create(document1));
@@ -106,10 +106,10 @@ TEST_F(DbEngineTest, Update1ByID)
 TEST_F(DbEngineTest, Update2ByValue)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}},
-         document4 = object{{u8"A"s, 4}, {u8"D"s, 5}, {u8"E"s, 6}},
+    auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document3 = object{{"A"s, 3}, {"B"s, 3}, {"C"s, 4}},
+         document4 = object{{"A"s, 4}, {"D"s, 5}, {"E"s, 6}},
          selector = object{},
          documents = object{};
     engine.collection("Update2ByValue"s);
@@ -119,7 +119,7 @@ TEST_F(DbEngineTest, Update2ByValue)
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
     EXPECT_EQ(3, documents.size());
-    selector = object{u8"A"s, 1};
+    selector = object{"A"s, 1};
     EXPECT_TRUE(engine.update(selector, document4));
     dump(engine);
     selector = {};
@@ -135,10 +135,10 @@ TEST_F(DbEngineTest, Update2ByValue)
 TEST_F(DbEngineTest, Update1ByKey)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 2}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document3 = object{{u8"A"s, 3}, {u8"B"s, 3}, {u8"C"s, 4}},
-         document4 = object{{u8"A"s, 1}, {u8"D"s, 5}, {u8"E"s, 6}},
+    auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document2 = object{{"A"s, 2}, {"B"s, 2}, {"C"s, 3}},
+         document3 = object{{"A"s, 3}, {"B"s, 3}, {"C"s, 4}},
+         document4 = object{{"A"s, 1}, {"D"s, 5}, {"E"s, 6}},
          selector = object{},
          documents = object{};
     engine.collection("Update1ByKey"s);
@@ -148,7 +148,7 @@ TEST_F(DbEngineTest, Update1ByKey)
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
     EXPECT_EQ(3, documents.size());
-    selector = object{u8"A"s, 1};
+    selector = object{"A"s, 1};
     EXPECT_TRUE(engine.update(selector, document4));
     dump(engine);
     selector = {};
@@ -166,7 +166,7 @@ TEST_F(DbEngineTest, Update1ByKey)
 TEST_F(DbEngineTest, DestroyEmptyCollection)
 {
     auto engine = db::engine{test_file};
-    auto selector = object{u8"id"s, 1ll},
+    auto selector = object{"id"s, 1ll},
          documents = object{};
     engine.collection("DestroyEmptyCollection"s);
     EXPECT_FALSE(engine.destroy(selector, documents));
@@ -178,9 +178,9 @@ TEST_F(DbEngineTest, DestroyEmptyCollection)
 TEST_F(DbEngineTest, Destroy1ByID)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
+    auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document3 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
          all = object{},
          documents = object{};
     engine.collection("Destroy1ByID"s);
@@ -190,8 +190,8 @@ TEST_F(DbEngineTest, Destroy1ByID)
     dump(engine);
     EXPECT_TRUE(engine.read(all, documents));
     EXPECT_EQ(3, documents.size());
-    long long id = documents[1][u8"_id"s];
-    auto selector = object{u8"_id"s, id};
+    long long id = documents[1]["_id"s];
+    auto selector = object{"_id"s, id};
     documents = {};
     EXPECT_TRUE(engine.destroy(selector, documents));
     dump(engine);
@@ -203,9 +203,9 @@ TEST_F(DbEngineTest, Destroy1ByID)
 TEST_F(DbEngineTest, Destroy2ByValue)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document3 = object{{u8"A"s, 2}, {u8"B"s, 3}, {u8"C"s, 4}},
+    auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document3 = object{{"A"s, 2}, {"B"s, 3}, {"C"s, 4}},
          selector = object{},
          documents = object{};
     engine.collection("Destroy2ByValue"s);
@@ -215,7 +215,7 @@ TEST_F(DbEngineTest, Destroy2ByValue)
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
     EXPECT_EQ(3, documents.size());
-    selector = object{u8"A"s, 1};
+    selector = object{"A"s, 1};
     documents = {};
     EXPECT_TRUE(engine.destroy(selector, documents));
     dump(engine);
@@ -229,10 +229,10 @@ TEST_F(DbEngineTest, Destroy2ByValue)
 TEST_F(DbEngineTest, History)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}},
-         document2 = object{{u8"A"s, 1}, {u8"B"s, 2}},
-         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         selector = object{u8"_id"s, 1ll},
+    auto document1 = object{{"A"s, 1}},
+         document2 = object{{"A"s, 1}, {"B"s, 2}},
+         document3 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         selector = object{"_id"s, 1ll},
          all = object{};
     engine.collection("History"s);
     EXPECT_TRUE(engine.create(document1));

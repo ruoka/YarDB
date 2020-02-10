@@ -1,11 +1,10 @@
+#include <span>
 #include <string_view>
-#include "gsl/span.hpp"
 #include "net/connector.hpp"
 #include "xson/json.hpp"
 
 using namespace std;
 using namespace string_literals;
-using namespace gsl;
 using namespace ext;
 using namespace net;
 using namespace xson;
@@ -31,17 +30,17 @@ GET /_reindex            i.e. Reindex all the collections
 int main(int argc, char** argv)
 try
 {
-    const auto arguments = make_span(argv,argc).subspan(1);
+    const auto arguments = span(argv,argc).subspan(1);
     auto url = "http://localhost:2112"s;
 
     for(const string_view option : arguments)
     {
-        if(option.find("--help") == 0)
+        if(option.starts_with("--help"))
         {
             clog << usage << endl;
             return 0;
         }
-        else if(option.find("-") == 0)
+        else if(option.starts_with("-"))
         {
             clog << usage << endl;
             return 1;

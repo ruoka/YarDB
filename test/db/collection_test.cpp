@@ -34,10 +34,10 @@ protected:
 TEST_F(DbEngineTest2, Create2Collections)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document2 = object{{u8"D"s, 4}, {u8"E"s, 5}, {u8"F"s, 6}},
-         document3 = object{{u8"A"s, 1}, {u8"B"s, 2}, {u8"C"s, 3}},
-         document4 = object{{u8"D"s, 4}, {u8"E"s, 5}, {u8"F"s, 6}},
+    auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document2 = object{{"D"s, 4}, {"E"s, 5}, {"F"s, 6}},
+         document3 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
+         document4 = object{{"D"s, 4}, {"E"s, 5}, {"F"s, 6}},
          all = object{},
          documents = object{};
     engine.collection("C1");
@@ -66,10 +66,10 @@ TEST_F(DbEngineTest2, Create2Collections)
 TEST_F(DbEngineTest2, Create2Keys)
 {
     auto engine = db::engine{test_file};
-    auto document1 = object{{u8"A"s, 1}, {u8"B"s, 4}, {u8"C"s, 3}},
-         document2 = object{{u8"A"s, 2}, {u8"B"s, 5}, {u8"C"s, 3}},
-         document3 = object{{u8"A"s, 3}, {u8"B"s, 6}, {u8"C"s, 3}},
-         selector = object{{u8"id"s, 1ll}},
+    auto document1 = object{{"A"s, 1}, {"B"s, 4}, {"C"s, 3}},
+         document2 = object{{"A"s, 2}, {"B"s, 5}, {"C"s, 3}},
+         document3 = object{{"A"s, 3}, {"B"s, 6}, {"C"s, 3}},
+         selector = object{{"id"s, 1ll}},
          documents = object{};
     engine.collection("Create2Keys");
     engine.index({"A", "B", "Z"});

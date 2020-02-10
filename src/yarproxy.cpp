@@ -1,6 +1,6 @@
 #include <thread>
 #include <mutex>
-#include "gsl/span.hpp"
+#include <span>
 #include "net/connector.hpp"
 #include "net/acceptor.hpp"
 #include "net/syslogstream.hpp"
@@ -10,7 +10,6 @@ using namespace std;
 using namespace string_literals;
 using namespace chrono_literals;
 using namespace this_thread;
-using namespace gsl;
 using namespace ext;
 using namespace net;
 
@@ -102,7 +101,7 @@ void handle(endpointstream client, replica_set& replicas)
 int main(int argc, char** argv)
 try
 {
-    const auto arguments = make_span(argv,argc).subspan(1);
+    const auto arguments = span(argv,argc).subspan(1);
     auto replicas = replica_set{};
     auto service_or_port = "2113"s;
     slog.tag("YarPROXY");
@@ -110,31 +109,31 @@ try
 
     for(const string_view option : arguments)
     {
-        if(option.find("--clog") == 0)
+        if(option.starts_with("--clog"))
         {
             slog.redirect(clog);
         }
-        else if(option.find("--slog_tag=") == 0)
+        else if(option.starts_with("--slog_tag="))
         {
             const auto name = string{option.substr(option.find('=')+1)};
             slog.tag(name);
         }
-        else if(option.find("--slog_level=") == 0)
+        else if(option.starts_with("--slog_level="))
         {
             const auto mask = stol(option.substr(option.find('=')+1));
             slog.level(mask);
         }
-        else if(option.find("--replica") == 0)
+        else if(option.starts_with("--replica"))
         {
             const auto url = string{option.substr(option.find('=')+1)};
             replicas.emplace_back(connect(url));
         }
-        else if(option.find("--help") == 0)
+        else if(option.starts_with("--help"))
         {
             clog << usage << endl;
             return 0;
         }
-        else if(option.find("-") == 0)
+        else if(option.starts_with("-"))
         {
             cerr << usage << endl;
             return 1;

@@ -12,43 +12,43 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
     auto begin = std::cbegin(keys),
          end   = std::cend(keys);
 
-    if(selector.has(u8"$gt"s))
+    if(selector.has("$gt"s))
     {
-        const auto key = make_key(selector[u8"$gt"s]);
+        const auto key = make_key(selector["$gt"s]);
         begin = keys.upper_bound(key);
     }
-    else if(selector.has(u8"$gte"s))
+    else if(selector.has("$gte"s))
     {
-        const auto key = make_key(selector[u8"$gte"s]);
+        const auto key = make_key(selector["$gte"s]);
         begin = keys.lower_bound(key);
     }
 
-    if(selector.has(u8"$lt"s))
+    if(selector.has("$lt"s))
     {
-        const auto key = make_key(selector[u8"$lt"s]);
+        const auto key = make_key(selector["$lt"s]);
         end = keys.lower_bound(key);
     }
-    else if(selector.has(u8"$lte"s))
+    else if(selector.has("$lte"s))
     {
-        const auto key = make_key(selector[u8"$lte"s]);
+        const auto key = make_key(selector["$lte"s]);
         end = keys.upper_bound(key);
     }
 
-    if(selector.has(u8"$eq"s))
+    if(selector.has("$eq"s))
     {
-        const auto key = make_key(selector[u8"$eq"s]);
+        const auto key = make_key(selector["$eq"s]);
         std::tie(begin,end) = keys.equal_range(key);
     }
-    else if(selector.has(u8"$head"s))
+    else if(selector.has("$head"s))
     {
-        const xson::int64_type n = selector[u8"$head"s];
+        const xson::int64_type n = selector["$head"s];
         auto itr = std::begin(keys);
         std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         end = itr;
     }
-    else if(selector.has(u8"$tail"s))
+    else if(selector.has("$tail"s))
     {
-        const xson::int64_type n = selector[u8"$tail"s];
+        const xson::int64_type n = selector["$tail"s];
         auto itr = std::rbegin(keys);
         std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
         begin = itr.base();
@@ -59,7 +59,7 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
         std::tie(begin,end) = keys.equal_range(key);
     }
 
-    if(!selector.has(u8"$desc"s))
+    if(!selector.has("$desc"s))
         return {begin, end};
     else
         return {std::make_reverse_iterator(end), std::make_reverse_iterator(begin)};
@@ -89,7 +89,7 @@ std::vector<std::string> db::index::keys() const
 
 bool db::index::primary_key(const object& selector) const
 {
-    return selector.has(u8"_id"s);
+    return selector.has("_id"s);
 }
 
 bool db::index::secondary_key(const object& selector) const
@@ -103,7 +103,7 @@ bool db::index::secondary_key(const object& selector) const
 db::index_range db::index::range(const object& selector) const
 {
     if(primary_key(selector))
-        return query_analysis(selector[u8"_id"s], m_primary_keys, make_primary_key);
+        return query_analysis(selector["_id"s], m_primary_keys, make_primary_key);
 
     else if(secondary_key(selector))
         for(const auto& key : m_secondary_keys)
@@ -112,7 +112,7 @@ db::index_range db::index::range(const object& selector) const
 
     // else
 
-    if(!selector.has(u8"$desc"s))
+    if(!selector.has("$desc"s))
         return {std::cbegin(m_primary_keys),std::cend(m_primary_keys)};
     else
         return {std::crbegin(m_primary_keys),std::crend(m_primary_keys)};
@@ -120,15 +120,15 @@ db::index_range db::index::range(const object& selector) const
 
 void db::index::update(object& document)
 {
-    if(document.has(u8"_id"s))
-        m_sequence = std::max<sequence_type>(m_sequence, document[u8"_id"s]);
+    if(document.has("_id"s))
+        m_sequence = std::max<sequence_type>(m_sequence, document["_id"s]);
     else
-        document[u8"_id"s] = ++m_sequence;
+        document["_id"s] = ++m_sequence;
 }
 
 void db::index::insert(object& document, position_type position)
 {
-    const auto pk = make_primary_key(document[u8"_id"s]);
+    const auto pk = make_primary_key(document["_id"s]);
     m_primary_keys[pk] = position;
 
     for(auto& key : m_secondary_keys)
@@ -141,7 +141,7 @@ void db::index::insert(object& document, position_type position)
 
 void db::index::erase(const object& document)
 {
-    const auto pk = make_primary_key(document[u8"_id"s]);
+    const auto pk = make_primary_key(document["_id"s]);
     m_primary_keys.erase(pk);
 
     for(auto& key : m_secondary_keys)

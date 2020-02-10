@@ -45,7 +45,7 @@ inline void lock(std::string_view db)
 
 db::engine::engine(std::string_view db) :
     m_db{db},
-    m_collection{u8"_db"s},
+    m_collection{"_db"s},
     m_index{},
     m_storage{}
 {
@@ -107,9 +107,9 @@ void db::engine::index(std::vector<std::string> keys)
 {
     auto& index = m_index[m_collection];
     index.add(keys);
-    auto selector = db::object{u8"collection"s, m_collection};
-    auto document = db::object{selector, {u8"keys"s, index.keys()}};
-    auto collection = u8"_db"s;
+    auto selector = db::object{"collection"s, m_collection};
+    auto document = db::object{selector, {"keys"s, index.keys()}};
+    auto collection = "_db"s;
     std::swap(collection, m_collection);
     upsert(selector, document);
     std::swap(collection, m_collection);
@@ -133,8 +133,8 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     documents.type(xson::type::array);
 
     auto top = std::numeric_limits<sequence_type>::max();
-    if(selector.has(u8"$top"s))
-        top = selector[u8"$top"s];
+    if(selector.has("$top"s))
+        top = selector["$top"s];
 
     auto success = false;
     const auto& index = m_index[m_collection];

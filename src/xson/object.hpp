@@ -12,12 +12,13 @@ namespace xson {
 using namespace std::string_literals;
 using namespace std::chrono_literals;
 
+using std::monostate;
 using std::variant;
 using std::monostate;
 using std::holds_alternative;
 using std::get;
 
-using value = variant<null_type,    // \x0A
+using value = variant<monostate,    // \x0A
                       number_type,  // \x01
                       string_type,  // \x02
                       boolean_type, // \x08
@@ -163,7 +164,15 @@ public:
         return m_value;
     }
 
-    template <typename T>
+    template <typename T, std::enable_if_t<std::is_null_pointer_v<T>, bool> = true>
+    void value(const T& val)
+    {
+        static_assert(is_value_v<T>, "This type is not supported");
+        m_type = to_type(val);
+        m_value = monostate{};
+    }
+
+    template <typename T, std::enable_if_t<!std::is_null_pointer_v<T>, bool> = true>
     void value(const T& val)
     {
         static_assert(is_value_v<T>, "This type is not supported");
@@ -225,7 +234,7 @@ public:
 
     operator null_type () const
     {
-        return get<null_type>(m_value);
+        return nullptr;
     }
 
     operator int32_type () const
@@ -386,14 +395,13 @@ private:
 
     using operator_type = std::function<bool(const xson::value&,const xson::value&)>;
 
-    // TODO: Fixme specialise comparison functions for std::variant or nullptr_t
     const std::map<string_type,operator_type> operators = std::map<string_type,operator_type>{
-        // { "$eq"s,  std::equal_to<xson::value>{}      },
-        // { "$ne"s,  std::not_equal_to<xson::value>{}  },
-        // { "$lt"s,  std::less<xson::value>{}          },
-        // { "$lte"s, std::less_equal<xson::value>{}    },
-        // { "$gt"s,  std::greater<xson::value>{}       },
-        // { "$gte"s, std::greater_equal<xson::value>{} }
+        { "$eq"s,  std::equal_to<xson::value>{}      },
+        { "$ne"s,  std::not_equal_to<xson::value>{}  },
+        { "$lt"s,  std::less<xson::value>{}          },
+        { "$lte"s, std::less_equal<xson::value>{}    },
+        { "$gt"s,  std::greater<xson::value>{}       },
+        { "$gte"s, std::greater_equal<xson::value>{} }
     };
 
     xson::type m_type;

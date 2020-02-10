@@ -7,6 +7,7 @@
 #include <iterator>
 #include <string_view>
 #include <algorithm>
+#include <variant>
 #include <cctype>
 
 namespace ext {
@@ -198,28 +199,28 @@ bool isnumeric(const T& str)
     return str.find_first_not_of("0123456789") == str.npos;
 }
 
-static const std::string bool2string[] = {"false", "true"};
-
-static const std::string null2string = {"null"};
-
-
 template<typename T>
 std::string to_string(const std::chrono::time_point<T>& point) noexcept
 {
     return ext::to_iso8601(point);
 }
 
-constexpr const std::string& to_string(bool b) noexcept
+inline std::string to_string(bool b) noexcept
 {
-    return ext::bool2string[b];
+    return (b ? "true" : "false");
 }
 
-constexpr const std::string& to_string(std::nullptr_t) noexcept
+inline std::string to_string(std::nullptr_t) noexcept
 {
-    return ext::null2string;
+    return "null";
 }
 
-constexpr const std::string& to_string(const std::string& str) noexcept
+inline std::string to_string(std::monostate) noexcept
+{
+    return "null";
+}
+
+inline std::string to_string(const std::string& str) noexcept
 {
     return str;
 }

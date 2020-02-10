@@ -4,7 +4,7 @@
 #include "xson/json.hpp"
 
 using namespace std;
-using namespace string_literals;
+using namespace string_view_literals;
 using namespace ext;
 using namespace net;
 using namespace xson;
@@ -31,7 +31,7 @@ int main(int argc, char** argv)
 try
 {
     const auto arguments = span(argv,argc).subspan(1);
-    auto url = "http://localhost:2112"s;
+    auto url = "http://localhost:2112"sv;
 
     for(const string_view option : arguments)
     {

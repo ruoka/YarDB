@@ -31,7 +31,7 @@ try
         }
         else if(option.starts_with("--slog_tag="))
         {
-            const auto name = string(option.substr(option.find('=')+1));
+            const auto name = option.substr(option.find('=')+1);
             slog.tag(name);
         }
         else if(option.starts_with("--slog_level="))

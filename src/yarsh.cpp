@@ -80,7 +80,7 @@ try
         cin >> uri;
 
         if(method == "POST" || method == "PUT" || method == "PATCH")
-            content = json::stringify(json::parse(cin));
+            content = json::stringify(json::parse(cin),0);
 
         clog << newl;
 

@@ -5,10 +5,13 @@
 #include "xson/json.hpp"
 #include "std/lockable.hpp"
 
+// https://www.odata.org/odata-services/
+
 namespace db {
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
+using namespace net;
 
 void restful_web_server(std::string_view file, const std::string_view port_or_service)
 {
@@ -21,6 +24,8 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "GET /: "<< request << flush;
+
                 const auto guard = std::lock_guard(engine);
                 return xson::json::stringify({"collections", engine.collections()});
             });
@@ -30,6 +35,8 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "POST /[a-z]+: "<< request << " <- " << body << flush;
+
                 auto uri = http::uri{request};
                 auto document = xson::json::parse(body);
 
@@ -39,11 +46,31 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 return xson::json::stringify(document);
             });
 
-    // Read all
+    // Read _id
+    server.get("/[a-z]+/[0-9]+"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
+            {
+                slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
+
+                auto uri = http::uri{request};
+                auto document = db::object{};
+                auto selector = db::object{"_id", ext::stoll(uri.path[2])};
+
+                const auto guard = std::lock_guard(engine);
+                engine.collection(uri.path[1]);
+                engine.read(selector, document);
+                return xson::json::stringify(document);
+            });
+
+
+    // Read all is ascending order
     server.get("/[a-z]+"s).response(
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "GET /[a-z]+: " << request << flush;
+
                 auto uri = http::uri{request};
                 auto document = db::object{};
                 auto selector = db::object{};
@@ -54,14 +81,16 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 return xson::json::stringify(document);
             });
 
-    // Read all in descending order
-    server.get("/[a-z]+\\?desc"s).response(
+    // Read first
+    server.get("/[a-z]+\\?\\$top"s).response(
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "GET /[a-z]+\\?\\$top: "<< request << flush;
+
                 auto uri = http::uri{request};
                 auto document = db::object{};
-                auto selector = db::object{"$desc", true};
+                auto selector = db::object{"$top",1ll};
 
                 const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
@@ -69,14 +98,33 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 return xson::json::stringify(document);
             });
 
-    // Read _id
-    server.get("/[a-z]+/[0-9]+"s).response(
+    // Read all in descending order
+    server.get("/[a-z]+\\?\\$desc"s).response(
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "GET /[a-z]+\\?\\$desc: "<< request << flush;
+
                 auto uri = http::uri{request};
                 auto document = db::object{};
-                auto selector = db::object{"_id", ext::stoll(uri.path[2])};
+                auto selector = db::object{"$desc",true};
+
+                const auto guard = std::lock_guard(engine);
+                engine.collection(uri.path[1]);
+                engine.read(selector, document);
+                return xson::json::stringify(document);
+            });
+
+    // Read last
+    server.get("/[a-z]+\\?\\$desc&\\$top"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
+            {
+                slog << debug << "GET /[a-z]+\\$desc&\\$top: "<< request << flush;
+
+                auto uri = http::uri{request};
+                auto document = db::object{};
+                auto selector = db::object{{"$desc",true},{"$top",1ll}};
 
                 const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);
@@ -89,6 +137,8 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
+
                 auto uri = http::uri{request};
                 auto document = xson::json::parse(body);
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
@@ -104,6 +154,8 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
+
                 auto uri = http::uri{request};
                 auto updates = xson::json::parse(body);
                 auto documents = db::object{};
@@ -120,9 +172,28 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
         "application/json"sv,
         [&engine](std::string_view request, std::string_view body)
             {
+                slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
+
                 auto uri = http::uri{request};
                 auto documents = db::object{};
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
+
+                const auto guard = std::lock_guard(engine);
+                engine.collection(uri.path[1]);
+                engine.destroy(selector,documents);
+                return xson::json::stringify(documents);
+            });
+
+    // Delete first
+    server.destroy("/[a-z]+\\?\\$top"s).response(
+        "application/json"sv,
+        [&engine](std::string_view request, std::string_view body)
+            {
+                slog << debug << "DELETE /[a-z]+?\\$top: " << request << flush;
+
+                auto uri = http::uri{request};
+                auto documents = db::object{};
+                auto selector = db::object{"$top",1ll};
 
                 const auto guard = std::lock_guard(engine);
                 engine.collection(uri.path[1]);

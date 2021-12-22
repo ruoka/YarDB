@@ -201,6 +201,10 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
 {
     documents.type(xson::type::array);
 
+    auto top = std::numeric_limits<sequence_type>::max();
+    if(selector.has("$top"s))
+        top = selector["$top"s];
+
     auto success = false;
     auto& index = m_index[m_collection];
 
@@ -218,6 +222,8 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
             m_storage << deleted;
             documents += std::move(document);
             success = true;
+
+            if(--top == 0) break;
         }
     }
 

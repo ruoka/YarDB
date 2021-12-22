@@ -1,7 +1,7 @@
-#include <sys/types.h>
-#include <unistd.h>
 #include "net/network.hpp"
-#include "syslogstream.hpp"
+#include "net/sender.hpp"
+#include "net/connector.hpp"
+#include "net/syslogstream.hpp"
 
 namespace net::syslog {
 
@@ -17,4 +17,36 @@ namespace net::syslog {
         return buffer;
     }
 
-} // namespace net::global
+} // namespace net::syslog
+
+namespace {
+
+    auto syslogstream_builder()
+    {
+        try
+        {
+            return net::distribute("","syslog");
+        }
+        catch(...) {}
+        try
+        {
+            return net::distribute("","514");
+        }
+        catch(...) {}
+        try
+        {
+            auto fallback = net::oendpointstream{nullptr};
+            fallback.rdbuf(std::clog.rdbuf());
+            return fallback;
+        }
+        catch(...) {}
+        std::terminate();
+    }
+
+}
+
+namespace net {
+
+    syslogstream slog = syslogstream{syslogstream_builder()};
+
+} // namespace net

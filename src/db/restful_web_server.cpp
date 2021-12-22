@@ -26,7 +26,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
             {
                 slog << debug << "GET /: "<< request << flush;
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 return xson::json::stringify({"collections", engine.collections()});
             });
 
@@ -40,7 +40,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto uri = http::uri{request};
                 auto document = xson::json::parse(body);
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.create(document);
                 return xson::json::stringify(document);
@@ -57,7 +57,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto document = db::object{};
                 auto selector = db::object{"_id", ext::stoll(uri.path[2])};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
@@ -75,7 +75,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto document = db::object{};
                 auto selector = db::object{};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
@@ -92,7 +92,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto document = db::object{};
                 auto selector = db::object{"$top",1ll};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
@@ -109,7 +109,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto document = db::object{};
                 auto selector = db::object{"$desc",true};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
@@ -126,7 +126,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto document = db::object{};
                 auto selector = db::object{{"$desc",true},{"$top",1ll}};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
                 return xson::json::stringify(document);
@@ -143,7 +143,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto document = xson::json::parse(body);
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.replace(selector,document);
                 return xson::json::stringify(document);
@@ -161,7 +161,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto documents = db::object{};
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.upsert(selector,updates,documents);
                 return xson::json::stringify(documents);
@@ -178,7 +178,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto documents = db::object{};
                 auto selector = db::object{"_id",ext::stoll(uri.path[2])};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.destroy(selector,documents);
                 return xson::json::stringify(documents);
@@ -195,7 +195,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto documents = db::object{};
                 auto selector = db::object{"$top",1ll};
 
-                const auto guard = std::lock_guard(engine);
+                const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.destroy(selector,documents);
                 return xson::json::stringify(documents);

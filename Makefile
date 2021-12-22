@@ -21,7 +21,7 @@ LDFLAGS +=
 
 ############
 
-SRCDIR = src
+SRCDIR = yar
 
 TESTDIR = test
 

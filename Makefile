@@ -1,4 +1,4 @@
-CXX = clang++
+.DEFAULT_GOAL := all
 
 OS := $(shell uname -s)
 

@@ -25,11 +25,8 @@ public:
 
 private:
 
-<<<<<<< HEAD
-=======
     iendpointstream() = delete;
 
->>>>>>> Refactor
     iendpointstream(const iendpointstream&) = delete;
 
     iendpointstream& operator = (const iendpointstream&) = delete;
@@ -51,11 +48,8 @@ public:
 
 private:
 
-<<<<<<< HEAD
-=======
     oendpointstream() = delete;
 
->>>>>>> Refactor
     oendpointstream(const oendpointstream&) = delete;
 
     oendpointstream& operator = (const oendpointstream&) = delete;
@@ -79,11 +73,8 @@ public:
 
 private:
 
-<<<<<<< HEAD
-=======
     endpointstream() = delete;
 
->>>>>>> Refactor
     endpointstream(const endpointstream&) = delete;
 
     endpointstream& operator = (const endpointstream&) = delete;

@@ -50,7 +50,7 @@ $(INCDIR)/%.hpp: $(SRCDIR)/%.hpp
 	cp $< $@
 
 
-GTESTDIR = ../googletest/googletest
+GTESTDIR = ./googletest/googletest
 
 GTEST_TARGET = $(BINDIR)/test
 

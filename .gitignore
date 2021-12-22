@@ -2,13 +2,3 @@ bin
 obj
 lib
 include
-yar.db
-yar.db.pid
-primary.db
-primary.log
-secondary.db
-secondary.log
-tertiary.db
-tertiary.log
-spike.cpp
-spike

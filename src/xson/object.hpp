@@ -14,9 +14,10 @@ using namespace std::chrono_literals;
 
 using std::monostate;
 using std::variant;
-using std::monostate;
 using std::holds_alternative;
 using std::get;
+using std::to_string;
+using ext::to_string;
 
 using value = variant<monostate,    // \x0A
                       number_type,  // \x01
@@ -29,8 +30,6 @@ using value = variant<monostate,    // \x0A
 
 inline std::string to_string(const value& val)
 {
-    using std::to_string;
-    using ext::to_string;
     return visit([](const auto& arg){return to_string(arg);}, val);
 }
 
@@ -119,11 +118,11 @@ public:
     }
 
     object(const object& obj) :
-    m_value{obj.m_value}, m_type{obj.m_type}, m_objects{obj.m_objects}
+    m_type{obj.m_type}, m_value{obj.m_value}, m_objects{obj.m_objects}
     {}
 
     object(object&& obj) :
-    m_value{std::move(obj.m_value)}, m_type{obj.m_type}, m_objects{std::move(obj.m_objects)}
+    m_type{obj.m_type}, m_value{std::move(obj.m_value)}, m_objects{std::move(obj.m_objects)}
     {}
 
     object& operator = (const object& obj)

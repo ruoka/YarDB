@@ -41,6 +41,8 @@ m_sockets{}
 
 acceptor::acceptor(std::string_view service) : acceptor("localhost", service) {}
 
+acceptor::acceptor(net::uri uri) : acceptor(uri.host, uri.port == "" ? uri.scheme : uri.port) {}
+
 endpointstream acceptor::accept()
 {
     const auto fd = wait();
@@ -49,10 +51,12 @@ endpointstream acceptor::accept()
     if(!s)
         throw std::system_error{errno, std::system_category()};
 
+    #ifdef NET_USE_SO_NOSIGPIPE
     auto yes = 1;
     const auto status = net::setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof yes);
     if(status)
         throw std::system_error{errno, std::system_category()};
+    #endif
 
     return new endpointbuf<tcp_buffer_size>{std::move(s)};
 }
@@ -67,15 +71,17 @@ endpointstream acceptor::accept(std::string& peer, std::string& port)
     if(!s)
         throw std::system_error{errno, std::system_category()};
 
+    #ifdef NET_USE_SO_NOSIGPIPE
     auto yes = 1;
-    auto status = net::setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof yes);
-    if(status)
+    const auto status1 = net::setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof yes);
+    if(status1)
         throw std::system_error{errno, std::system_category()};
+    #endif
 
     char hbuf[NI_MAXHOST];
     char sbuf[NI_MAXSERV];
-    status = net::getnameinfo(reinterpret_cast<net::sockaddr*>(&sas), saslen, hbuf, sizeof hbuf, sbuf, sizeof sbuf, 0);
-    if(status)
+    const auto status2 = net::getnameinfo(reinterpret_cast<net::sockaddr*>(&sas), saslen, hbuf, sizeof hbuf, sbuf, sizeof sbuf, 0);
+    if(status2)
         throw std::system_error{errno, std::system_category()};
 
     peer.assign(hbuf);

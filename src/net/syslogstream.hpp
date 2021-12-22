@@ -1,9 +1,11 @@
 #pragma once
 
 #include <mutex>
+#include <iomanip>
+#include <array>
 #include <type_traits>
+#include "net/endpointstream.hpp"
 #include "std/extension.hpp"
-#include "net/sender.hpp"
 
 namespace net {
 namespace syslog {
@@ -37,17 +39,14 @@ namespace syslog {
 
     int getpid();
 
-    const auto hostname = gethostname();
-
-    const auto pid = getpid();
-
 } // namespace syslog
 
 class syslogstream : public oendpointstream
 {
 public:
 
-    syslogstream(oendpointstream&& s) :
+    syslogstream(oendpointstream&& s)
+    try :
         oendpointstream{std::move(s)},
         m_facility{syslog::facility::user},
         m_severity{syslog::severity::debug},
@@ -55,6 +54,10 @@ public:
         m_tag{"syslogstream"},
         m_mutex{}
     {}
+    catch(...)
+    {
+        std::cerr << "failed to create datagram socket for syslog" << std::endl;
+    }
 
     void redirect(std::ostream& os)
     {
@@ -96,28 +99,28 @@ public:
 
     void header()
     {
+        using namespace std;
+        static const auto hostname = syslog::gethostname();
+        static const auto pid = syslog::getpid();
+
         if(m_level >= m_severity)
         {
-            const auto current_point = std::chrono::system_clock::now();
-            const auto current_day = std::chrono::floor<std::chrono::days>(current_point);
-            const auto date = std::chrono::year_month_day{current_day};
-            const auto time = ext::time_of_day{current_point - current_day};
-
+            const auto current_time = std::chrono::system_clock::now();
+            const auto midnight = std::chrono::floor<std::chrono::days>(current_time);
+            const auto date = std::chrono::year_month_day{midnight};
+            const auto time = std::chrono::hh_mm_ss{current_time - midnight};
             const auto formatting = flags();
-
             // <PRI> Feb 22 21:12 localhost syslog[2112]:
             static_cast<oendpointstream&>(*this)
-                    << std::dec
-                    << '<' << priority(m_facility, m_severity)     << '>'  // <PRI>
-                    << std::setw(3) << ext::to_string(date.month())      << ' '  // TIMESTAMP
-                    << std::setw(2) << std::setfill(' ') << date.day()     << ' '
-                    << std::setw(2) << std::setfill('0') << time.hours()   << ':'
-                    << std::setw(2) << std::setfill('0') << time.minutes() << ':'
-                    << std::setw(2) << std::setfill('0') << time.seconds() << ' '
-                    << syslog::hostname                            << ' '  // HOSTNAME
-                    << m_tag << '[' << syslog::pid << ']' << ':'   << ' '; // TAG[PID]:
-
-            flags(formatting);
+                    << std::resetiosflags(formatting)
+                    << '<' << priority(m_facility, m_severity)                   << '>'  // <PRI>
+                    << std::setw(3) << ext::to_string(date.month())              << ' '  // TIMESTAMP
+                    << std::setw(2) << std::setfill(' ') << date.day()           << ' '
+                    << std::setw(2) << std::setfill('0') << time.hours()         << ':'
+                    << std::setw(2) << std::setfill('0') << time.minutes()       << ':'
+                    << std::setw(2) << std::setfill('0') << time.seconds()       << ' '
+                    << hostname << ' ' << m_tag << '[' << pid << ']' << ':'      << ' ' // HOSTNAME TAG[PID]:
+                    << std::setiosflags(formatting);
         }
     }
 
@@ -172,53 +175,47 @@ private:
     std::mutex m_mutex;
 };
 
-inline auto& error(syslogstream& sl)
+inline auto& error(syslogstream& ss)
 {
-    sl.severity(syslog::severity::error);
-    sl.header();
-    return sl;
+    ss.severity(syslog::severity::error);
+    ss.header();
+    return ss;
 }
 
-inline auto& warning(syslogstream& sl)
+inline auto& warning(syslogstream& ss)
 {
-    sl.severity(syslog::severity::warning);
-    sl.header();
-    return sl;
+    ss.severity(syslog::severity::warning);
+    ss.header();
+    return ss;
 }
 
-inline auto& notice(syslogstream& sl)
+inline auto& notice(syslogstream& ss)
 {
-    sl.severity(syslog::severity::notice);
-    sl.header();
-    return sl;
+    ss.severity(syslog::severity::notice);
+    ss.header();
+    return ss;
 }
 
-inline auto& info(syslogstream& sl)
+inline auto& info(syslogstream& ss)
 {
-    sl.severity(syslog::severity::info);
-    sl.header();
-    return sl;
+    ss.severity(syslog::severity::info);
+    ss.header();
+    return ss;
 }
 
-inline auto& debug(syslogstream& sl)
+inline auto& debug(syslogstream& ss)
 {
-    sl.severity(syslog::severity::debug);
-    sl.header();
-    return sl;
+    ss.severity(syslog::severity::debug);
+    ss.header();
+    return ss;
 }
 
-inline auto& flush(syslogstream& sl)
+inline auto& flush(syslogstream& ss)
 {
-    sl.flush();
-    return sl;
+    ss.flush();
+    return ss;
 }
 
-inline auto& initialize_global_syslogstream()
-{
-    static syslogstream log{distribute("localhost","syslog")};
-    return log;
-}
-
-static syslogstream& slog = initialize_global_syslogstream();
+extern syslogstream slog;
 
 } // namespace net

@@ -42,7 +42,7 @@ TEST_F(DbEngineTest, Create1)
     EXPECT_TRUE(engine.create(document));
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
-    ASSERT_EQ(1, documents.size());
+    ASSERT_EQ(1u, documents.size());
     std::clog << json::stringify(documents[0]) << std::endl;
     EXPECT_TRUE(documents[0].match(document));
 }
@@ -51,7 +51,7 @@ TEST_F(DbEngineTest, Create9)
 {
     auto engine = db::engine{test_file};
     engine.collection("Create9"s);
-    for(auto i = 1; i < 10; ++i)
+    for(auto i = 1u; i < 10u; ++i)
     {
         auto document = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
              all = object{},
@@ -71,7 +71,7 @@ TEST_F(DbEngineTest, ReadEmptyCollection)
     engine.collection("ReadEmptyCollection"s);
     EXPECT_FALSE(engine.read(selector, documents));
     dump(engine);
-    EXPECT_EQ(0, documents.size());
+    EXPECT_EQ(0u, documents.size());
 }
 
 TEST_F(DbEngineTest, UpdateEmptyCollection)
@@ -82,7 +82,7 @@ TEST_F(DbEngineTest, UpdateEmptyCollection)
     EXPECT_FALSE(engine.update(selector, document));
     EXPECT_FALSE(engine.read(selector, documents));
     dump(engine);
-    EXPECT_EQ(0, documents.size());
+    EXPECT_EQ(0u, documents.size());
 }
 
 TEST_F(DbEngineTest, Update1ByID)
@@ -98,7 +98,7 @@ TEST_F(DbEngineTest, Update1ByID)
     EXPECT_TRUE(engine.update(selector, document2));
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
-    ASSERT_EQ(1, documents.size());
+    ASSERT_EQ(1u, documents.size());
     std::clog << json::stringify(documents[0]) << std::endl;
     EXPECT_TRUE(documents[0].match(document2));
 }
@@ -118,14 +118,14 @@ TEST_F(DbEngineTest, Update2ByValue)
     EXPECT_TRUE(engine.create(document3));
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
-    EXPECT_EQ(3, documents.size());
+    EXPECT_EQ(3u,documents.size());
     selector = object{"A"s, 1};
     EXPECT_TRUE(engine.update(selector, document4));
     dump(engine);
     selector = {};
     documents = {};
     EXPECT_TRUE(engine.read(selector, documents));
-    ASSERT_EQ(3, documents.size());
+    ASSERT_EQ(3u, documents.size());
     EXPECT_TRUE(documents[0].match(document4));
     EXPECT_FALSE(documents[0].match(document2));
     EXPECT_TRUE(documents[1].match(document4));
@@ -147,14 +147,14 @@ TEST_F(DbEngineTest, Update1ByKey)
     EXPECT_TRUE(engine.create(document3));
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
-    EXPECT_EQ(3, documents.size());
+    EXPECT_EQ(3u, documents.size());
     selector = object{"A"s, 1};
     EXPECT_TRUE(engine.update(selector, document4));
     dump(engine);
     selector = {};
     documents = {};
     EXPECT_TRUE(engine.read(selector, documents));
-    ASSERT_EQ(3, documents.size());
+    ASSERT_EQ(3u, documents.size());
     EXPECT_TRUE(documents[0].match(document4));
     EXPECT_TRUE(documents[0].match(document1));
     EXPECT_FALSE(documents[1].match(document4));
@@ -172,7 +172,7 @@ TEST_F(DbEngineTest, DestroyEmptyCollection)
     EXPECT_FALSE(engine.destroy(selector, documents));
     dump(engine);
     EXPECT_FALSE(engine.read(selector, documents));
-    EXPECT_EQ(0, documents.size());
+    EXPECT_EQ(0u, documents.size());
 }
 
 TEST_F(DbEngineTest, Destroy1ByID)
@@ -189,7 +189,7 @@ TEST_F(DbEngineTest, Destroy1ByID)
     EXPECT_TRUE(engine.create(document3));
     dump(engine);
     EXPECT_TRUE(engine.read(all, documents));
-    EXPECT_EQ(3, documents.size());
+    EXPECT_EQ(3u, documents.size());
     long long id = documents[1]["_id"s];
     auto selector = object{"_id"s, id};
     documents = {};
@@ -197,7 +197,7 @@ TEST_F(DbEngineTest, Destroy1ByID)
     dump(engine);
     documents = {};
     EXPECT_TRUE(engine.read(all, documents));
-    EXPECT_EQ(2, documents.size());
+    EXPECT_EQ(2u, documents.size());
 }
 
 TEST_F(DbEngineTest, Destroy2ByValue)
@@ -214,7 +214,7 @@ TEST_F(DbEngineTest, Destroy2ByValue)
     EXPECT_TRUE(engine.create(document3));
     dump(engine);
     EXPECT_TRUE(engine.read(selector, documents));
-    EXPECT_EQ(3, documents.size());
+    EXPECT_EQ(3u, documents.size());
     selector = object{"A"s, 1};
     documents = {};
     EXPECT_TRUE(engine.destroy(selector, documents));
@@ -222,7 +222,7 @@ TEST_F(DbEngineTest, Destroy2ByValue)
     selector = {};
     documents = {};
     engine.read(selector, documents);
-    EXPECT_EQ(1, documents.size());
+    EXPECT_EQ(1u, documents.size());
     EXPECT_TRUE(documents[0].match(document3));
 }
 
@@ -244,11 +244,11 @@ TEST_F(DbEngineTest, History)
 
     auto documents = object{};
     EXPECT_TRUE(engine.read(all, documents));
-    EXPECT_EQ(1, documents.size());
+    EXPECT_EQ(1u, documents.size());
 
     auto history = object{};
     EXPECT_TRUE(engine.history(selector, history));
-    EXPECT_EQ(3, history.size());
+    EXPECT_EQ(3u, history.size());
 
     clog << "Hstory:"s << xson::json::stringify(history) << endl;
 }

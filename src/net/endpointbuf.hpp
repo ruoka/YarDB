@@ -11,12 +11,18 @@ public:
     explicit endpointbuf_base(socket&& s) : m_socket{std::move(s)}
     {}
 
+    virtual ~endpointbuf_base() = default;
+
     bool wait_for(const std::chrono::milliseconds& timeout) const
     {
         return m_socket.wait_for(timeout);
     }
 
 protected:
+
+    endpointbuf_base(const endpointbuf_base&) = delete;
+
+    endpointbuf_base& operator = (const endpointbuf_base&) = delete;
 
     socket m_socket;
 };
@@ -66,8 +72,8 @@ protected:
         auto retry = 0;
         while(buf < pptr())
         {
-            const auto bytes_written = net::write(m_socket, buf, pptr() - buf);
-            //const auto bytes_written = ::sendto(m_socket, buf, pptr() - buf, 0, nullptr, 0);
+            //const auto bytes_written = net::write(m_socket, buf, pptr() - buf);
+            const auto bytes_written = ::sendto(m_socket, buf, pptr() - buf, 0, nullptr, MSG_NOSIGNAL);
             if(bytes_written < 1)
             {
                 if(++retry < 3) continue;

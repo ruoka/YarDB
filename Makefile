@@ -1,8 +1,25 @@
-CXX = clang
+.DEFAULT_GOAL := all
 
-CXXFLAGS = -I$(SRCDIR) -std=c++2a -MMD # -D DEBUG=1
+OS := $(shell uname -s)
 
-LDFLAGS = -lc++ -lSystem
+CXX := clang++
+
+ifeq ($(OS),Linux)
+CXX := /usr/lib/llvm-13/bin/clang++
+CXXFLAGS = -pthread -I/usr/local/include
+LDFLAGS = -L/usr/local/lib
+endif
+
+ifeq ($(OS),Darwin)
+CXX := /Library/Developer/CommandLineTools/usr/bin/clang++
+CXXFLAGS = -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+endif
+
+CXXFLAGS += -std=c++2b -stdlib=libc++ -Wall -Wextra -I$(SRCDIR)
+
+LDFLAGS +=
+
+############
 
 SRCDIR = src
 
@@ -16,32 +33,30 @@ LIBDIR = lib
 
 INCDIR = include
 
+GTESTDIR = googletest
 
-TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
+############
 
-MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
+# Make does not offer a recursive wildcard function, so here's one:
+rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
 
-SOURCES = $(filter-out $(MAINS), $(wildcard $(SRCDIR)/*.cpp $(SRCDIR)/*/*.cpp $(SRCDIR)/*/*/*.cpp))
+############
+
+SOURCES = $(filter-out $(MAINS), $(call rwildcard,$(SRCDIR)/,*.cpp))
 
 OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -I$(SRCDIR) -c $< -o $@
 
-$(TARGETS): $(OBJECTS)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
-
-
-LIBRARIES = $(addprefix $(LIBDIR)/, libyardb.a)
-
-$(LIBRARIES) : $(OBJECTS)
+$(LIBRARY) : $(OBJECTS)
 	@mkdir -p $(@D)
 	$(AR) $(ARFLAGS) $@ $^
 
+############
 
-HEADERS = $(wildcard $(SRCDIR)/*.hpp $(SRCDIR)/*/*.hpp $(SRCDIR)/*/*/*.hpp)
+HEADERS = $(call rwildcard,$(SRCDIR)/,*.hpp)
 
 INCLUDES = $(HEADERS:$(SRCDIR)/%.hpp=$(INCDIR)/%.hpp)
 
@@ -49,41 +64,54 @@ $(INCDIR)/%.hpp: $(SRCDIR)/%.hpp
 	@mkdir -p $(@D)
 	cp $< $@
 
+############
 
-GTESTDIR = ./googletest/googletest
+TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
 
-GTEST_TARGET = $(BINDIR)/test
+MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 
-GTESTLIB = $(GTESTDIR)/make/gtest_main.a
-
-GTEST_SOURCES = $(wildcard $(TESTDIR)/*.cpp $(TESTDIR)/*/*.cpp $(TESTDIR)/*/*/*.cpp $(TESTDIR)/*/*/*/*.cp)
-
-GTEST_OBJECTS = $(GTEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
-
-$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp
+$(TARGETS): $(OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) -I$(GTESTDIR)/include/ $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
 
-$(GTEST_TARGET): $(OBJECTS) $(GTEST_OBJECTS)
+############
+
+GTESTLIBS = $(addprefix $(LIBDIR)/, libgtest.a libgtest_main.a)
+
+$(GTESTLIBS):
+	cd $(GTESTDIR) && cmake -DCMAKE_CXX_COMPILER="$(CXX)" -DCMAKE_CXX_FLAGS="$(CXXFLAGS)" -DCMAKE_INSTALL_PREFIX=.. . && make install
+
+############
+
+TEST_SOURCES = $(call rwildcard,$(TESTDIR)/,*.cpp)
+
+TEST_OBJECTS = $(TEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
+
+TEST_TARGET = $(BINDIR)/test
+
+$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(INCLUDES)
 	@mkdir -p $(@D)
-	$(CXX) $(LDFLAGS) $(OBJECTS) $(GTEST_OBJECTS) $(GTESTLIB) -o $@
+	$(CXX) $(CXXFLAGS) -I$(INCDIR) -c $< -o $@
 
+$(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY) $(GTESTLIBS) -o $@
 
-DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(OBJECTS:%.o=%.d) $(GTEST_OBJECTS:%.o=%.d)
+############
 
+DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(OBJECTS:%.o=%.d) $(TEST_OBJECTS:%.o=%.d)
 
-.PHONY: bin
-bin: $(TARGETS)
-
-.PHONY: lib
-lib: $(LIBRARIES) $(INCLUDES)
-
-.PHONY: test
-test: $(GTEST_TARGET)
-	$(GTEST_TARGET) --gtest_filter=-*.CommandLine:DbRestServerTest*:HttpServerTest*
+############
 
 .PHONY: all
-all: $(TARGETS) $(LIBRARIES) $(GTEST_TARGET)
+all: $(TARGETS) $(TEST_TARGET)
+
+.PHONY: lib
+lib: $(LIBRARY) $(INCLUDES)
+
+.PHONY: test
+test: $(TEST_TARGET)
+	$(TEST_TARGET) --gtest_filter=-*CommandLine:HttpServerTest*:NetReceiverAndSenderTest*
 
 .PHONY: clean
 clean:
@@ -98,12 +126,13 @@ dump:
 	@echo $(MAINS)
 	@echo $(SOURCES)
 	@echo $(OBJECTS)
-	@echo $(LIBRARIES)
+	@echo $(LIBRARY)
 	@echo $(HEADERS)
 	@echo $(INCLUDES)
-	@echo $(GTEST_TARGET)
-	@echo $(GTEST_SOURCES)
-	@echo $(GTEST_OBJECTS)
+	@echo $(TEST_SOURCES)
+	@echo $(TEST_OBJECTS)
+	@echo $(TEST_TARGET)
+	@echo $(GTESTLIBS)
 	@echo $(DEPENDENCIES)
 
 -include $(DEPENDENCIES)

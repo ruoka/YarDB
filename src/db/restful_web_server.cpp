@@ -22,7 +22,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // List all collections
     server.get("/"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "GET /: "<< request << flush;
 
@@ -49,7 +49,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Read _id
     server.get("/[a-z]+/[0-9]+"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
 
@@ -67,7 +67,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Read all is ascending order
     server.get("/[a-z]+"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "GET /[a-z]+: " << request << flush;
 
@@ -84,7 +84,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Read first
     server.get("/[a-z]+\\?\\$top"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "GET /[a-z]+\\?\\$top: "<< request << flush;
 
@@ -101,7 +101,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Read all in descending order
     server.get("/[a-z]+\\?\\$desc"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "GET /[a-z]+\\?\\$desc: "<< request << flush;
 
@@ -118,7 +118,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Read last
     server.get("/[a-z]+\\?\\$desc&\\$top"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "GET /[a-z]+\\$desc&\\$top: "<< request << flush;
 
@@ -170,7 +170,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Delete _id
     server.destroy("/[a-z]+/[0-9]+"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
 
@@ -187,7 +187,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
     // Delete first
     server.destroy("/[a-z]+\\?\\$top"s).response(
         "application/json"sv,
-        [&engine](std::string_view request, std::string_view body)
+        [&engine](std::string_view request, [[maybe_unused]] std::string_view body)
             {
                 slog << debug << "DELETE /[a-z]+?\\$top: " << request << flush;
 

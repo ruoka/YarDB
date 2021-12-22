@@ -230,7 +230,7 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
     if(success)
         m_storage.flush();
 
-    for(const auto document : documents)
+    for(const auto& document : documents)
         index.erase(document.second);
 
     return success;

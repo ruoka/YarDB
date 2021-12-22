@@ -52,14 +52,14 @@ TEST_F(DbEngineTest2, Create2Collections)
     dump(engine);
     engine.collection("C1");
     engine.read(all, documents);
-    ASSERT_EQ(3, documents.size());
+    ASSERT_EQ(3u, documents.size());
     EXPECT_TRUE(documents[0].match(document1));
     EXPECT_TRUE(documents[1].match(document2));
     EXPECT_TRUE(documents[2].match(document3));
     documents = {};
     engine.collection("C2");
     engine.read(all, documents);
-    ASSERT_EQ(1, documents.size());
+    ASSERT_EQ(1u, documents.size());
     EXPECT_TRUE(documents[0].match(document4));
 }
 

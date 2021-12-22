@@ -79,7 +79,7 @@ public:
     auto collections() const
     {
         auto documents = std::vector<std::string>{};
-        for(const auto idx : m_index)
+        for(const auto& idx : m_index)
             documents.push_back(std::get<0>(idx));
         return documents;
     };

@@ -15,13 +15,13 @@ CXX := /Library/Developer/CommandLineTools/usr/bin/clang++
 CXXFLAGS = -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 endif
 
-CXXFLAGS += -std=c++2b -stdlib=libc++ -Wall -Wextra -I$(SRCDIR)
+CXXFLAGS += -std=c++2b -stdlib=libc++ -Wall -Wextra -I$(SRCDIR) -I$(INCDIR)
 
 LDFLAGS +=
 
 ############
 
-SRCDIR = src
+SRCDIR = yar
 
 TESTDIR = test
 
@@ -33,7 +33,9 @@ LIBDIR = lib
 
 INCDIR = include
 
-GTESTDIR = googletest
+LIBRARY := ./lib/libnet4cpp.a
+
+GTESTDIR = ./googletest
 
 ############
 
@@ -49,10 +51,6 @@ OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(SRCDIR) -c $< -o $@
-
-$(LIBRARY) : $(OBJECTS)
-	@mkdir -p $(@D)
-	$(AR) $(ARFLAGS) $@ $^
 
 ############
 
@@ -70,9 +68,9 @@ TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 
-$(TARGETS): $(OBJECTS)
+$(TARGETS): $(LIBRARY) $(OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) $(LIBRARY) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
 
 ############
 
@@ -93,9 +91,18 @@ $(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(INCLUDES)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(INCDIR) -c $< -o $@
 
-$(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY)
+$(TEST_TARGET): $(GTESTLIBS) $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY) $(GTESTLIBS) -o $@
+
+############
+
+$(LIBRARY):
+	@mkdir -p $(LIBDIR)
+	@mkdir -p $(INCDIR)
+	cd ./cryptic && cp -r ./src/* ../include
+	cd ./json4cpp && cp -r ./src/* ../include
+	cd ./net4cpp && make lib && cp ./lib/libnet4cpp.a ../lib/libnet4cpp.a && cp -r ./include/* ../include
 
 ############
 
@@ -107,7 +114,7 @@ DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(OBJECTS:%.o=%.d) $(TEST_
 all: $(TARGETS) $(TEST_TARGET)
 
 .PHONY: lib
-lib: $(LIBRARY) $(INCLUDES)
+lib: $(GTESTLIBS) $(LIBRARY)
 
 .PHONY: test
 test: $(TEST_TARGET)
@@ -124,9 +131,9 @@ clean:
 dump:
 	@echo $(TARGETS)
 	@echo $(MAINS)
+	@echo $(LIBRARY)
 	@echo $(SOURCES)
 	@echo $(OBJECTS)
-	@echo $(LIBRARY)
 	@echo $(HEADERS)
 	@echo $(INCLUDES)
 	@echo $(TEST_SOURCES)

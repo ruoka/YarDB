@@ -41,7 +41,7 @@ public:
     address_info(std::string_view node, std::string_view service_or_port, int socktype, int flags = AI_ALL, int family = AF_UNSPEC) : m_addrinfo{nullptr}
     {
         const auto hints = net::addrinfo{flags,family,socktype,0,0,nullptr,nullptr,nullptr};
-        const auto error = ::getaddrinfo(node.data(), service_or_port.data(), &hints, &m_addrinfo); // FIXME c_str()
+        const auto error = ::getaddrinfo(node.empty() ? nullptr : node.data(), service_or_port.data(), &hints, &m_addrinfo);
         if(error) throw std::system_error{error, std::system_category(), "address resolution failed"};
     }
 
@@ -70,7 +70,7 @@ public:
         return a.m_addrinfo;
     }
 
-    friend addrinfo_iterator end(const address_info& a)
+    friend addrinfo_iterator end(const address_info&)
     {
         return nullptr;
     }

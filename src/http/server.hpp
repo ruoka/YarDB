@@ -5,6 +5,7 @@
 #include <regex>
 #include <string>
 #include <thread>
+#include <functional>
 #include "net/acceptor.hpp"
 #include "http/headers.hpp"
 

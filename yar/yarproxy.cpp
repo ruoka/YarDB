@@ -150,7 +150,7 @@ try
         return 1;
     }
 
-    slog << notice << "Starting up at "s + service_or_port << flush;
+    slog << notice << "Starting up at " << service_or_port << flush;
     auto endpoint = net::acceptor{service_or_port};
     endpoint.timeout(24h);
     slog << info << "Started up at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
@@ -158,12 +158,9 @@ try
     while(true)
     {
         slog << notice << "Accepting connections" << flush;
-        auto host = ""s, port = ""s;
-        auto client = endpoint.accept(host, port);
-        slog << info << "Accepted connection from "s + host + ":" + port << flush;
-        auto worker = thread{[&client,&replicas](){handle(move(client), replicas);}};
-        sleep_for(1s);
-        worker.detach();
+        auto client = endpoint.accept();
+        slog << notice << "Accepted connection from " << std::get<1>(client) << ":" << std::get<2>(client) << flush;
+        std::thread{[&client,&replicas](){handle(move(std::get<0>(client)),replicas);}}.detach();
     }
 }
 catch(const system_error& e)

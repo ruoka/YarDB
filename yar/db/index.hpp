@@ -8,9 +8,9 @@ using namespace std::string_literals;
 
 namespace db {
 
-using object = xson::fson::object;
+using object = xson::object;
 
-using sequence_type = xson::int64_type;
+using sequence_type = xson::integer_type;
 
 using primary_key_type = sequence_type;
 
@@ -24,8 +24,7 @@ using primary_index_type = std::map<primary_key_type,
                                     position_type>;
 
 using secondary_index_type = std::map<secondary_key_type,
-                                      position_type,
-                                      xson::less>;
+                                      position_type>;
 
 using secondary_index_map = std::map<secondary_index_name,
                                      secondary_index_type>;

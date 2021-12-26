@@ -2,9 +2,9 @@
 
 namespace {
 
-auto make_primary_key   = [](const xson::value& v){return xson::get<xson::int64_type>(v);};
+auto make_primary_key   = [](const xson::object::value& v){return std::get<xson::integer_type>(v);};
 
-auto make_secondary_key = [](const xson::value& v){return xson::to_string(v);};
+auto make_secondary_key = [](const xson::object::value& v){return xson::to_string(v);};
 
 template <typename T, typename F>
 db::index_range query_analysis(const db::object& selector, const T& keys, F make_key)
@@ -41,19 +41,19 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
     }
     else if(selector.has("$head"s))
     {
-        const xson::int64_type n = selector["$head"s];
+        const xson::integer_type n = selector["$head"s];
         auto itr = std::begin(keys);
-        std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
+        std::advance(itr, std::min<xson::integer_type>(n, keys.size()));
         end = itr;
     }
     else if(selector.has("$tail"s))
     {
-        const xson::int64_type n = selector["$tail"s];
+        const xson::integer_type n = selector["$tail"s];
         auto itr = std::rbegin(keys);
-        std::advance(itr, std::min<xson::int64_type>(n, keys.size()));
+        std::advance(itr, std::min<xson::integer_type>(n, keys.size()));
         begin = itr.base();
     }
-    else if(xson::holds_alternative<typename T::mapped_type>(selector.value())) // FIXME
+    else if(std::holds_alternative<typename T::mapped_type>((db::object::value)selector)) // FIXME
     {
         const auto key = make_key(selector);
         std::tie(begin,end) = keys.equal_range(key);

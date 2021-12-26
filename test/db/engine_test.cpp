@@ -1,7 +1,8 @@
 #include <cstdio>
 #include <gtest/gtest.h>
-#include "xson/json.hpp"
 #include "db/engine.hpp"
+#define XSON_JSON_HIDE_IOSTREAM
+#include "xson/json.hpp"
 
 using namespace std;
 using namespace xson;
@@ -122,8 +123,8 @@ TEST_F(DbEngineTest, Update2ByValue)
     selector = object{"A"s, 1};
     EXPECT_TRUE(engine.update(selector, document4));
     dump(engine);
-    selector = {};
-    documents = {};
+    selector = object{};
+    documents = object{};
     EXPECT_TRUE(engine.read(selector, documents));
     ASSERT_EQ(3u, documents.size());
     EXPECT_TRUE(documents[0].match(document4));
@@ -151,8 +152,8 @@ TEST_F(DbEngineTest, Update1ByKey)
     selector = object{"A"s, 1};
     EXPECT_TRUE(engine.update(selector, document4));
     dump(engine);
-    selector = {};
-    documents = {};
+    selector = object{};
+    documents = object{};
     EXPECT_TRUE(engine.read(selector, documents));
     ASSERT_EQ(3u, documents.size());
     EXPECT_TRUE(documents[0].match(document4));
@@ -192,10 +193,10 @@ TEST_F(DbEngineTest, Destroy1ByID)
     EXPECT_EQ(3u, documents.size());
     long long id = documents[1]["_id"s];
     auto selector = object{"_id"s, id};
-    documents = {};
+    documents = object{};
     EXPECT_TRUE(engine.destroy(selector, documents));
     dump(engine);
-    documents = {};
+    documents = object{};
     EXPECT_TRUE(engine.read(all, documents));
     EXPECT_EQ(2u, documents.size());
 }
@@ -216,11 +217,11 @@ TEST_F(DbEngineTest, Destroy2ByValue)
     EXPECT_TRUE(engine.read(selector, documents));
     EXPECT_EQ(3u, documents.size());
     selector = object{"A"s, 1};
-    documents = {};
+    documents = object{};
     EXPECT_TRUE(engine.destroy(selector, documents));
     dump(engine);
-    selector = {};
-    documents = {};
+    selector = object{};
+    documents = object{};
     engine.read(selector, documents);
     EXPECT_EQ(1u, documents.size());
     EXPECT_TRUE(documents[0].match(document3));

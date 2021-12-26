@@ -1,11 +1,12 @@
 #include <set>
 #include "net/syslogstream.hpp"
+#include "xson/fson.hpp"
 #include "db/metadata.hpp"
 #include "db/engine.hpp"
 
-using namespace std::string_literals;
-
 namespace {
+
+using namespace std::string_literals;
 
 auto locks = std::set<std::string>{};
 
@@ -73,6 +74,8 @@ db::engine::~engine()
 
 void db::engine::reindex()
 {
+    using namespace xson::fson;
+
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
 
@@ -98,8 +101,12 @@ void db::engine::reindex()
             continue;
 
         auto collection = document["collection"s];
-        std::vector<std::string> keys = document["keys"s];
-        m_index[collection].add(keys);
+        auto keys = document["keys"s];
+        auto temp = std::vector<std::string>{};
+        for(const auto& k : keys.get<object::array>())
+            temp.push_back(k);
+
+        m_index[collection].add(temp);
     }
 }
 
@@ -130,7 +137,7 @@ bool db::engine::create(db::object& document)
 
 bool db::engine::read(const db::object& selector, db::object& documents)
 {
-    documents.type(xson::type::array);
+    documents = db::object::array{};
 
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has("$top"s))
@@ -159,13 +166,15 @@ bool db::engine::read(const db::object& selector, db::object& documents)
 
 bool db::engine::update(const db::object& selector, const db::object& updates, db::object& documents)
 {
-    documents.type(xson::type::array);
+    documents = db::object::array{};
 
     auto success = false;
     auto& index = m_index[m_collection];
 
     for(const auto position : index.range(selector))
     {
+        using namespace xson::fson;
+
         auto metadata = db::metadata{};
         auto old_document = db::object{};
         m_storage.clear();
@@ -199,7 +208,7 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
 
 bool db::engine::destroy(const db::object& selector, db::object& documents)
 {
-    documents.type(xson::type::array);
+    documents = db::object::array{};
 
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has("$top"s))
@@ -230,15 +239,15 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
     if(success)
         m_storage.flush();
 
-    for(const auto& document : documents)
-        index.erase(document.second);
+    for(const auto& document : documents.get<object::array>())
+        index.erase(document);
 
     return success;
 }
 
 bool db::engine::history(const db::object& selector, db::object& documents)
 {
-    documents.type(xson::type::array);
+    documents = db::object::array{};
 
     auto success = false;
     const auto& index = m_index[m_collection];

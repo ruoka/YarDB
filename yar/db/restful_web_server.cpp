@@ -2,8 +2,9 @@
 #include "db/engine.hpp"
 #include "http/server.hpp"
 #include "http/uri.hpp"
-#include "xson/json.hpp"
 #include "std/lockable.hpp"
+#define XSON_JSON_HIDE_IOSTREAM
+#include "xson/json.hpp"
 
 // https://www.odata.org/odata-services/
 

@@ -1,13 +1,16 @@
 #pragma once
 
 #include <iosfwd>
-#include "xson/fson.hpp"
+#include <cmath>
+#include "xson/object.hpp"
+#include "xson/fast/encoder.hpp"
+#include "xson/fast/decoder.hpp"
 
 namespace db
 {
 using namespace std::string_literals;
 
-using xson::fson::object;
+using xson::object;
 
 struct metadata
 {
@@ -34,7 +37,7 @@ inline auto& operator << (std::ostream& os, metadata& data)
     data.timestamp = std::chrono::system_clock::now();
     data.previous = data.position;
     data.position = os.tellp();
-    auto encoder = xson::fson::encoder{os};
+    auto encoder = xson::fast::encoder{os};
     encoder.encode(data.status);
     encoder.encode(data.collection);
     encoder.encode(data.timestamp);
@@ -45,14 +48,14 @@ inline auto& operator << (std::ostream& os, metadata& data)
 
 inline auto& operator << (std::ostream& os, const metadata& data)
 {
-    auto encoder = xson::fson::encoder{os};
+    auto encoder = xson::fast::encoder{os};
     encoder.encode(data.status);
     return os;
 }
 
 inline auto& operator >> (std::istream& is, metadata& data)
 {
-    auto decoder = xson::fson::decoder{is};
+    auto decoder = xson::fast::decoder{is};
     decoder.decode(data.status);
     decoder.decode(data.collection);
     decoder.decode(data.timestamp);

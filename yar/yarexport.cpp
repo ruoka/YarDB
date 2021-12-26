@@ -2,6 +2,8 @@
 #include <iostream>
 #include <fstream>
 #include "db/metadata.hpp"
+#define XSON_JSON_HIDE_IOSTREAM
+#include "xson/fson.hpp"
 #include "xson/json.hpp"
 
 using namespace std;

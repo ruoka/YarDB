@@ -22,19 +22,13 @@ inline auto& operator >> (istream& is, ostream& os)
     auto request_line = ""s;
     auto headers = http::headers{};
 
-    getline(is,request_line) >> ws >> headers >> crlf;
-
-    slog << info << "Received \"" << request_line << "\"" << flush;
-
+    getline(is,request_line,'\r') >> ws >> headers >> crlf;
     os << request_line << crlf << headers << crlf;
-
-    slog << info << "Forwarded \"" << request_line << "\"" << flush;
 
     auto content_length = headers.contains("content-length") ? std::stoll(headers["content-length"]) : 0ull;
 
     while(content_length && is && os)
     {
-        slog << debug << "Body \"" << static_cast<char>(is.peek()) << "\"" << flush;
         os.put(is.get());
         --content_length;
     }
@@ -43,31 +37,35 @@ inline auto& operator >> (istream& is, ostream& os)
     return is;
 }
 
-void handle(endpointstream client, replica_set& replicas)
+inline void handle(auto& client, auto& replicas)
 {
+    auto& [stream,endpoint,port] = client;
+
+    slog << notice << "Accepted connection from " << endpoint << ":" << port << flush;
+
     auto buffer = stringstream{};
 
-    auto request = [&buffer](auto& replica)->bool {
+    auto request = [&buffer](auto& replica) {
         buffer.seekg(0) >> replica;
         return replica.good();
     };
 
-    auto response = [&buffer](auto& replica)->bool {
+    auto response = [&buffer](auto& replica) {
         replica >> buffer.seekp(0);
         return replica.good();
     };
 
-    auto request_and_response = [&buffer](auto& replica)->bool {
+    auto request_and_response = [&buffer](auto& replica) {
         buffer.seekg(0) >> replica;
         replica >> buffer.seekp(0);
         return replica.good();
     };
 
-    auto disconnected = [](auto& replica)->bool {
+    auto disconnected = [](auto& replica) {
         return !replica.good();
     };
 
-    while(client >> buffer)
+    while(stream >> buffer)
     {
         auto method = ""s;
         buffer.seekg(0) >> method;
@@ -84,7 +82,8 @@ void handle(endpointstream client, replica_set& replicas)
             all_of(begin(replicas), end(replicas), request);
             all_of(begin(replicas), end(replicas), response);
         }
-        buffer.seekg(0) >> client;
+
+        buffer.seekg(0) >> stream;
         buffer.seekp(0);
     }
 
@@ -144,18 +143,16 @@ try
         return 1;
     }
 
-    slog << notice << "Starting up at " << service_or_port << flush;
+    slog << info << "Starting up at "s << service_or_port << flush;
     auto endpoint = net::acceptor{service_or_port};
     endpoint.timeout(24h);
-    slog << info << "Started up at "s + endpoint.host() + ":" + endpoint.service_or_port() << flush;
+    slog << info << "Started up at "s << endpoint.host() << ":" << endpoint.service_or_port() << flush;
 
     while(true)
     {
         slog << notice << "Accepting connections" << flush;
         auto client = endpoint.accept();
-        slog << notice << "Accepted connection from " << std::get<1>(client) << ":" << std::get<2>(client) << flush;
-        std::thread{[&client,&replicas](){handle(move(std::get<0>(client)),replicas);}}.detach();
-        std::this_thread::sleep_for(1ms);
+        std::thread{[client = std::move(client), &replicas]() mutable {handle(client,replicas);}}.detach();
     }
 }
 catch(const system_error& e)

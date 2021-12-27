@@ -59,6 +59,7 @@ try
     while(cin && server)
     {
         auto method = ""s, uri = ""s, version = "HTTP/1.1"s, content = ""s, reason = ""s;
+        auto headers = http::headers{};
         auto status = 0u;
 
         clog << "Enter restful request: ";
@@ -106,14 +107,9 @@ try
                << flush;
 
         server >> version >> status;
-        getline(server,reason);
-        trim(reason);
+        getline(server,reason,'\r') >> ws >> headers >> crlf;
 
         clog << version << sp << status << sp << reason << newl;
-
-        auto request_line = ""s;
-        auto headers = http::headers{};
-        getline(server,request_line) >> ws >> headers >> crlf;
 
         auto content_length = headers.contains("content-length") ? std::stoll(headers["content-length"]) : 0ull;
 

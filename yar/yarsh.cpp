@@ -106,7 +106,7 @@ try
                << content
                << flush;
 
-        server >> version >> status;
+        server >> version >> status >> ws;
         getline(server,reason,'\r') >> ws >> headers >> crlf;
 
         clog << version << sp << status << sp << reason << newl;

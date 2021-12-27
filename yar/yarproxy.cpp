@@ -4,47 +4,41 @@
 #include "net/connector.hpp"
 #include "net/acceptor.hpp"
 #include "net/syslogstream.hpp"
+#include "http/headers.hpp"
 #include "std/lockable.hpp"
 
 using namespace std;
 using namespace string_literals;
 using namespace chrono_literals;
-using namespace this_thread;
 using namespace ext;
 using namespace net;
 
-const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port])";
+const auto usage = R"(yarproxy [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port])";
 
 using replica_set = lockable<list<endpointstream>>;
 
 inline auto& operator >> (istream& is, ostream& os)
 {
-    auto line = ""s;
-    auto content_length = 0u;
-    getline(is, line);
-    trim(line);
-    slog << debug << line << flush;
-    os << line << crlf;
-    is >> ws;
-    while(is && is.peek() != '\r')
-    {
-        auto header = ""s, value = ""s;
-        getline(is, header, ':');
-        trim(header);
-        getline(is, value);
-        trim(value);
-        slog << debug << header << ": " << value << flush;
-        os << header << ": " << value << crlf;
-        if(header == "Content-Length"s)
-            content_length = stoul(value);
-    }
-    is.ignore(2);
-    os << crlf;
+    auto request_line = ""s;
+    auto headers = http::headers{};
+
+    getline(is,request_line) >> ws >> headers >> crlf;
+
+    slog << info << "Received \"" << request_line << "\"" << flush;
+
+    os << request_line << crlf << headers << crlf;
+
+    slog << info << "Forwarded \"" << request_line << "\"" << flush;
+
+    auto content_length = headers.contains("content-length") ? std::stoll(headers["content-length"]) : 0ull;
+
     while(content_length && is && os)
     {
+        slog << debug << "Body \"" << static_cast<char>(is.peek()) << "\"" << flush;
         os.put(is.get());
         --content_length;
     }
+
     os << flush;
     return is;
 }
@@ -161,6 +155,7 @@ try
         auto client = endpoint.accept();
         slog << notice << "Accepted connection from " << std::get<1>(client) << ":" << std::get<2>(client) << flush;
         std::thread{[&client,&replicas](){handle(move(std::get<0>(client)),replicas);}}.detach();
+        std::this_thread::sleep_for(1ms);
     }
 }
 catch(const system_error& e)

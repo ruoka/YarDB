@@ -3,6 +3,7 @@
 #include "xson/fson.hpp"
 #include "db/metadata.hpp"
 #include "db/engine.hpp"
+#include "net/syslogstream.hpp"
 
 namespace {
 

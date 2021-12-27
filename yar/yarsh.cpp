@@ -2,6 +2,7 @@
 #include <string_view>
 #include "net/connector.hpp"
 #include "xson/json.hpp"
+#include "http/headers.hpp"
 
 using namespace std;
 using namespace string_view_literals;
@@ -105,30 +106,17 @@ try
                << flush;
 
         server >> version >> status;
-        getline(server, reason);
+        getline(server,reason);
         trim(reason);
 
         clog << version << sp << status << sp << reason << newl;
 
-        auto content_length = 0ll;
+        auto request_line = ""s;
+        auto headers = http::headers{};
+        getline(server,request_line) >> ws >> headers >> crlf;
 
-        server >> ws;  // Skip all whitespaces
+        auto content_length = headers.contains("content-length") ? std::stoll(headers["content-length"]) : 0ull;
 
-        while(server && server.peek() != '\r')
-        {
-            auto header = ""s, value = ""s;
-            getline(server, header, ':');
-            trim(header);
-            getline(server, value);
-            trim(value);
-            clog << header << ": " << value << newl;
-
-            if(header == "Content-Length")
-                content_length = stoll(value);
-        }
-        // assert(server.get() == '\r');
-        // assert(server.get() == '\n');
-        server.ignore(2);
         clog << newl;
 
         // only {} and [] are valid, complete JSON strings in parsers and stringifiers

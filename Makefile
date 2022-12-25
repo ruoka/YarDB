@@ -27,7 +27,7 @@ OBJDIR = obj
 BINDIR = bin
 LIBDIR = lib
 INCDIR = include
-LIBRARY := ./lib/libnet4cpp.a
+MODULE := ./lib/libnet4cpp.a
 GTESTDIR = ./googletest
 
 ############
@@ -51,9 +51,23 @@ TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
 
-$(TARGETS): $(LIBRARY) $(OBJECTS)
+$(TARGETS): $(MODULE) $(OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) $(LIBRARY) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) $(MODULE) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
+
+LIBRARIES = $(addprefix $(LIBDIR)/, libyardb.a)
+
+$(LIBRARIES): $(MODULE) $(OBJECTS)
+	@mkdir -p $(@D)
+	$(AR) $(ARFLAGS) $@ $^
+
+HEADERS = $(wildcard $(SRCDIR)/*.hpp $(SRCDIR)/*/*.hpp $(SRCDIR)/*/*/*.hpp)
+
+INCLUDES = $(HEADERS:$(SRCDIR)/%.hpp=$(INCDIR)/%.hpp)
+
+$(INCDIR)/%.hpp: $(SRCDIR)/%.hpp
+	@mkdir -p $(@D)
+	cp $< $@
 
 ############
 
@@ -71,22 +85,22 @@ TEST_OBJECTS = $(TEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
 
 TEST_TARGET = $(BINDIR)/test
 
-$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(LIBRARY)
+$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(MODULE)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(INCDIR) -c $< -o $@
 
-$(TEST_TARGET): $(LIBRARY) $(GTESTLIBS) $(OBJECTS) $(TEST_OBJECTS)
+$(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY) $(GTESTLIBS) -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(MODULE) $(GTESTLIBS) -o $@
 
 ############
 
-$(LIBRARY):
+$(MODULE):
 	@mkdir -p $(LIBDIR)
 	@mkdir -p $(INCDIR)
+	cd ./net4cpp && make lib && cp ./lib/libnet4cpp.a ../lib/libnet4cpp.a && cp -r ./include/* ../include
 	cd ./cryptic && cp -r ./src/* ../include
 	cd ./json4cpp && cp -r ./src/* ../include
-	cd ./net4cpp && make lib && cp ./lib/libnet4cpp.a ../lib/libnet4cpp.a && cp -r ./include/* ../include
 
 ############
 
@@ -95,13 +109,16 @@ DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(OBJECTS:%.o=%.d) $(TEST_
 ############
 
 .PHONY: all
-all: $(TARGETS) $(TEST_TARGET)
+all: bin
+
+.PHONY: bin
+bin: $(TARGETS)
 
 .PHONY: lib
-lib: $(GTESTLIBS) $(LIBRARY)
+lib: $(LIBRARIES) $(INCLUDES)
 
 .PHONY: test
-test: $(TEST_TARGET)
+test: $(TEST_TARGET) $(GTESTLIBS)
 	$(TEST_TARGET) --gtest_filter=-*CommandLine:HttpServerTest*:NetReceiverAndSenderTest*
 
 .PHONY: clean

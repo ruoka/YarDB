@@ -29,7 +29,7 @@ using secondary_index_type = std::map<secondary_key_type,
 using secondary_index_map = std::map<secondary_index_name,
                                      secondary_index_type>;
 
-class index_iterator : public std::iterator<std::forward_iterator_tag,position_type>
+class index_iterator
 {
 public:
 

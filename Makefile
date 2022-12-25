@@ -1,40 +1,33 @@
 .DEFAULT_GOAL := all
 
 OS := $(shell uname -s)
-
 CXX := clang++
 
 ifeq ($(OS),Linux)
-CXX := /usr/lib/llvm-13/bin/clang++
+CC :=  /usr/lib/llvm-15/bin/clang
+CXX := /usr/lib/llvm-15/bin/clang++
 CXXFLAGS = -pthread -I/usr/local/include
 LDFLAGS = -L/usr/local/lib
 endif
 
 ifeq ($(OS),Darwin)
+CC := /Library/Developer/CommandLineTools/usr/bin/clang
 CXX := /Library/Developer/CommandLineTools/usr/bin/clang++
 CXXFLAGS = -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 endif
 
-CXXFLAGS += -std=c++2b -stdlib=libc++ -Wall -Wextra -I$(SRCDIR) -I$(INCDIR)
-
+CXXFLAGS += -std=c++20 -stdlib=libc++ -MMD -Wall -Wextra -I$(SRCDIR) -I$(INCDIR)
 LDFLAGS +=
 
 ############
 
 SRCDIR = yar
-
 TESTDIR = test
-
 OBJDIR = obj
-
 BINDIR = bin
-
 LIBDIR = lib
-
 INCDIR = include
-
 LIBRARY := ./lib/libnet4cpp.a
-
 GTESTDIR = ./googletest
 
 ############
@@ -54,16 +47,6 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
 
 ############
 
-HEADERS = $(call rwildcard,$(SRCDIR)/,*.hpp)
-
-INCLUDES = $(HEADERS:$(SRCDIR)/%.hpp=$(INCDIR)/%.hpp)
-
-$(INCDIR)/%.hpp: $(SRCDIR)/%.hpp
-	@mkdir -p $(@D)
-	cp $< $@
-
-############
-
 TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
 
 MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
@@ -77,7 +60,8 @@ $(TARGETS): $(LIBRARY) $(OBJECTS)
 GTESTLIBS = $(addprefix $(LIBDIR)/, libgtest.a libgtest_main.a)
 
 $(GTESTLIBS):
-	cd $(GTESTDIR) && cmake -DCMAKE_CXX_COMPILER="$(CXX)" -DCMAKE_CXX_FLAGS="$(CXXFLAGS)" -DCMAKE_INSTALL_PREFIX=.. . && make install
+	git submodule update --init --recursive --depth 1
+	cd $(GTESTDIR) && cmake -DCMAKE_C_COMPILER="$(CC)" -DCMAKE_CXX_COMPILER="$(CXX)" -DCMAKE_CXX_FLAGS="$(CXXFLAGS)" -DCMAKE_INSTALL_PREFIX=.. . && make install
 
 ############
 
@@ -87,11 +71,11 @@ TEST_OBJECTS = $(TEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
 
 TEST_TARGET = $(BINDIR)/test
 
-$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(INCLUDES)
+$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(LIBRARY)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -I$(INCDIR) -c $< -o $@
 
-$(TEST_TARGET): $(GTESTLIBS) $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY)
+$(TEST_TARGET): $(LIBRARY) $(GTESTLIBS) $(OBJECTS) $(TEST_OBJECTS)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(LIBRARY) $(GTESTLIBS) -o $@
 
@@ -122,24 +106,11 @@ test: $(TEST_TARGET)
 
 .PHONY: clean
 clean:
-	@rm -rf $(OBJDIR)
-	@rm -rf $(BINDIR)
-	@rm -rf $(LIBDIR)
-	@rm -rf $(INCDIR)
+	@rm -rf $(OBJDIR) $(BINDIR) $(LIBDIR) $(INCDIR)
 
 .PHONY: dump
 dump:
-	@echo $(TARGETS)
-	@echo $(MAINS)
-	@echo $(LIBRARY)
-	@echo $(SOURCES)
-	@echo $(OBJECTS)
-	@echo $(HEADERS)
-	@echo $(INCLUDES)
-	@echo $(TEST_SOURCES)
-	@echo $(TEST_OBJECTS)
-	@echo $(TEST_TARGET)
-	@echo $(GTESTLIBS)
-	@echo $(DEPENDENCIES)
+	$(foreach v, $(sort $(.VARIABLES)), $(if $(filter file,$(origin $(v))), $(info $(v)=$($(v)))))
+	@echo ''
 
 -include $(DEPENDENCIES)

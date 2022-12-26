@@ -57,7 +57,7 @@ $(TARGETS): $(MODULE) $(OBJECTS)
 
 LIBRARIES = $(addprefix $(LIBDIR)/, libyardb.a)
 
-$(LIBRARIES): $(MODULE) $(OBJECTS)
+$(LIBRARIES): $(OBJECTS)
 	@mkdir -p $(@D)
 	$(AR) $(ARFLAGS) $@ $^
 
@@ -115,10 +115,10 @@ all: bin
 bin: $(TARGETS)
 
 .PHONY: lib
-lib: $(LIBRARIES) $(INCLUDES)
+lib: $(MODULE) $(LIBRARIES)
 
 .PHONY: test
-test: $(TEST_TARGET) $(GTESTLIBS)
+test: $(TEST_TARGET)
 	$(TEST_TARGET) --gtest_filter=-*CommandLine:HttpServerTest*:NetReceiverAndSenderTest*
 
 .PHONY: clean

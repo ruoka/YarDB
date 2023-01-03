@@ -15,6 +15,8 @@ const auto usage = R"(yarexport [--help] [--file=<name>])";
 int main(int argc, char** argv)
 try
 {
+    using xson::fson::operator >>;
+
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;
 
@@ -48,12 +50,12 @@ try
         storage >> metadata >> document;
         if(storage)
             clog << json::stringify(
-                            {{"collection"s, metadata.collection            },
-                             {"status"s,     to_string(metadata.status)     },
-                             {"timestamp"s,  to_iso8601(metadata.timestamp) },
-                             {"position"s,   metadata.position              },
-                             {"previous"s,   metadata.previous              },
-                             {"document"s,   document                       }})
+                            {{"collection"s, metadata.collection                  },
+                             {"status"s,     to_string(metadata.status)           },
+                             {"timestamp"s,  xson::to_iso8601(metadata.timestamp) },
+                             {"position"s,   metadata.position                    },
+                             {"previous"s,   metadata.previous                    },
+                             {"document"s,   document                             }})
                       << ",\n";
     }
 }

@@ -75,7 +75,7 @@ db::engine::~engine()
 
 void db::engine::reindex()
 {
-    using namespace xson::fson;
+    using xson::fson::operator >>;
 
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
@@ -125,6 +125,8 @@ void db::engine::index(std::vector<std::string> keys)
 
 bool db::engine::create(db::object& document)
 {
+    using xson::fson::operator <<;
+
     auto& index = m_index[m_collection];
     auto metadata = db::metadata{m_collection};
     m_storage.clear();
@@ -138,8 +140,9 @@ bool db::engine::create(db::object& document)
 
 bool db::engine::read(const db::object& selector, db::object& documents)
 {
-    documents = db::object::array{};
+    using xson::fson::operator >>;
 
+    documents = db::object::array{};
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
@@ -167,8 +170,10 @@ bool db::engine::read(const db::object& selector, db::object& documents)
 
 bool db::engine::update(const db::object& selector, const db::object& updates, db::object& documents)
 {
-    documents = db::object::array{};
+    using xson::fson::operator >>;
+    using xson::fson::operator <<;
 
+    documents = db::object::array{};
     auto success = false;
     auto& index = m_index[m_collection];
 
@@ -209,8 +214,9 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
 
 bool db::engine::destroy(const db::object& selector, db::object& documents)
 {
-    documents = db::object::array{};
+    using xson::fson::operator >>;
 
+    documents = db::object::array{};
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
@@ -248,8 +254,9 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
 
 bool db::engine::history(const db::object& selector, db::object& documents)
 {
-    documents = db::object::array{};
+    using xson::fson::operator >>;
 
+    documents = db::object::array{};
     auto success = false;
     const auto& index = m_index[m_collection];
 

@@ -1,9 +1,9 @@
 #include <mutex>
+#include <charconv>
 #include "db/engine.hpp"
 #include "http/server.hpp"
 #include "http/uri.hpp"
 #include "std/lockable.hpp"
-#define XSON_JSON_HIDE_IOSTREAM
 #include "xson/json.hpp"
 
 // https://www.odata.org/odata-services/
@@ -13,6 +13,13 @@ namespace db {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
+
+inline auto stoll(std::string_view sv)
+{
+    auto ll = 0ll;
+    std::from_chars(sv.begin(),sv.end(),ll);
+    return ll;
+}
 
 void restful_web_server(std::string_view file, const std::string_view port_or_service)
 {
@@ -56,7 +63,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
 
                 auto uri = http::uri{request};
                 auto document = db::object{};
-                auto selector = db::object{"_id", ext::stoll(uri.path[2])};
+                auto selector = db::object{"_id", stoll(uri.path[2])};
 
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
@@ -142,7 +149,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
 
                 auto uri = http::uri{request};
                 auto document = xson::json::parse(body);
-                auto selector = db::object{"_id",ext::stoll(uri.path[2])};
+                auto selector = db::object{"_id",stoll(uri.path[2])};
 
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
@@ -160,7 +167,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
                 auto uri = http::uri{request};
                 auto updates = xson::json::parse(body);
                 auto documents = db::object{};
-                auto selector = db::object{"_id",ext::stoll(uri.path[2])};
+                auto selector = db::object{"_id",stoll(uri.path[2])};
 
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
@@ -177,7 +184,7 @@ void restful_web_server(std::string_view file, const std::string_view port_or_se
 
                 auto uri = http::uri{request};
                 auto documents = db::object{};
-                auto selector = db::object{"_id",ext::stoll(uri.path[2])};
+                auto selector = db::object{"_id",stoll(uri.path[2])};
 
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);

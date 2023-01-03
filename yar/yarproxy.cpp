@@ -100,7 +100,7 @@ try
     slog.tag("YarPROXY");
     slog.level(net::syslog::severity::debug);
 
-    for(const string_view option : arguments)
+    for(string_view option : arguments)
     {
         if(option.starts_with("--clog"))
         {
@@ -108,18 +108,25 @@ try
         }
         else if(option.starts_with("--slog_tag="))
         {
-            const auto name = option.substr(option.find('=')+1);
-            slog.tag(name);
+            option.remove_prefix(option.find_first_not_of("--slog_tag="));
+            slog.tag(option);
         }
         else if(option.starts_with("--slog_level="))
         {
-            const auto mask = stol(option.substr(option.find('=')+1));
+            option.remove_prefix(option.find_first_not_of("--slog_level="));
+            auto mask = 0;
+            auto [ptr,ec] = std::from_chars(option.begin(),option.end(),mask);
+            if(ec != std::errc() or ptr != option.end())
+            {
+                slog << error << " invalid syslog mask --slog_level=" << option << flush;
+                return 1;
+            }
             slog.level(mask);
         }
-        else if(option.starts_with("--replica"))
+        else if(option.starts_with("--replica="))
         {
-            const auto url = option.substr(option.find('=')+1);
-            replicas.emplace_back(connect(url));
+            option.remove_prefix(option.find_first_not_of("--replica="));
+            replicas.emplace_back(connect(option));
         }
         else if(option.starts_with("--help"))
         {

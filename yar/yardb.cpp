@@ -23,7 +23,7 @@ try
     slog.tag("YarDB");
     slog.level(net::syslog::severity::debug);
 
-    for(const string_view option : arguments)
+    for(string_view option : arguments)
     {
         if(option.starts_with("--clog"))
         {
@@ -31,17 +31,25 @@ try
         }
         else if(option.starts_with("--slog_tag="))
         {
-            const auto name = option.substr(option.find('=')+1);
-            slog.tag(name);
+            option.remove_prefix(option.find_first_not_of("--slog_tag="));
+            slog.tag(option);
         }
         else if(option.starts_with("--slog_level="))
         {
-            const auto mask = stol(option.substr(option.find('=')+1));
+            option.remove_prefix(option.find_first_not_of("--slog_level="));
+            auto mask = 0;
+            auto [ptr,ec] = std::from_chars(option.begin(),option.end(),mask);
+            if(ec != std::errc() or ptr != option.end())
+            {
+                slog << error << " invalid syslog mask --slog_level=" << option << flush;
+                return 1;
+            }
             slog.level(mask);
         }
-        else if(option.starts_with("--file"))
+        else if(option.starts_with("--file="))
         {
-            file = option.substr(option.find('=')+1);
+            option.remove_prefix(option.find_first_not_of("--file="));
+            file = option;
         }
         else if(option.starts_with("--help"))
         {

@@ -118,7 +118,10 @@ bin: $(TARGETS)
 lib: $(MODULE) $(LIBRARIES)
 
 .PHONY: test
-test: $(TEST_TARGET)
+test: $(MODULE) $(TEST_TARGET)
+	$(MAKE) -C net4cpp test PREFIX=..
+	$(MAKE) -C json4cpp test PREFIX=..
+	$(MAKE) -C cryptic test PREFIX=..
 	$(TEST_TARGET) --gtest_filter=-*CommandLine:HttpServerTest*:NetReceiverAndSenderTest*
 
 .PHONY: clean

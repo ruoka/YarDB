@@ -98,9 +98,9 @@ $(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS)
 $(MODULE):
 	@mkdir -p $(LIBDIR)
 	@mkdir -p $(INCDIR)
-	cd ./net4cpp && make lib && cp ./lib/libnet4cpp.a ../lib/libnet4cpp.a && cp -r ./include/* ../include
-	cd ./cryptic && cp -r ./src/* ../include
-	cd ./json4cpp && cp -r ./src/* ../include
+	$(MAKE) -C net4cpp all lib PREFIX=..
+	$(MAKE) -C json4cpp all PREFIX=..
+	$(MAKE) -C cryptic all PREFIX=..
 
 ############
 

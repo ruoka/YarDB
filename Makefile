@@ -14,14 +14,14 @@ LDFLAGS = -lc++ -lc++experimental -L/usr/lib/llvm-15/lib/c++
 endif
 
 ifeq ($(OS),Darwin)
-CCC = /opt/homebrew/opt/llvm/bin/clang
+CC = /opt/homebrew/opt/llvm/bin/clang
 CXX = /opt/homebrew/opt/llvm/bin/clang++
 CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1
 LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++
 endif
 
 ifeq ($(OS),Github)
-CCC = /usr/local/opt/llvm/bin/clang
+CC = /usr/local/opt/llvm/bin/clang
 CXX = /usr/local/opt/llvm/bin/clang++
 CXXFLAGS = -I/usr/local/opt/llvm/include/ -I/usr/local/opt/llvm/include/c++/v1
 LDFLAGS = -L/usr/local/opt/llvm/lib/c++ -Wl,-rpath,/usr/local/opt/llvm/lib/c++
@@ -119,6 +119,12 @@ all: $(libraries) $(dependencies) $(targets)
 
 .PHONY: test
 test: $(libraries) $(dependencies) $(test-target)
+	$(test-target) $(UNITTEST)
+
+.PHONY: tests
+tests: $(libraries)
+	$(MAKE) -C net4cpp test PREFIX=..
+	$(MAKE) -C json4cpp test PREFIX=..
 	$(test-target) $(UNITTEST)
 
 .PHONY: clean

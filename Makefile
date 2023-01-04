@@ -1,8 +1,10 @@
 .SUFFIXES:
 .SUFFIXES:  .cpp .hpp .c++ .c++m .impl.c++  .test.c++ .o .impl.o .test.o
 .DEFAULT_GOAL = all
+
+ifndef OS
 OS = $(shell uname -s)
-UNITTEST = -s
+endif
 
 ifeq ($(OS),Linux)
 CXX = /usr/lib/llvm-15/bin/clang++
@@ -13,7 +15,13 @@ endif
 ifeq ($(OS),Darwin)
 CXX = /opt/homebrew/opt/llvm/bin/clang++
 CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1
-LDFLAGS += -L/opt/homebrew/opt/llvm/lib/c++
+LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++
+endif
+
+ifeq ($(OS),Github)
+CXX = /usr/local/opt/llvm/bin/clang++
+CXXFLAGS = -I/usr/local/opt/llvm/include/ -I/usr/local/opt/llvm/include/c++/v1
+LDFLAGS = -L/usr/local/opt/llvm/lib/c++ -Wl,-rpath,/usr/local/opt/llvm/lib/c++
 endif
 
 CXXFLAGS += -std=c++20 -stdlib=libc++ -fexperimental-library
@@ -21,6 +29,8 @@ CXXFLAGS += -fprebuilt-module-path=$(objectdir)
 CXXFLAGS += -Wall -Wextra
 CXXFLAGS += -I$(sourcedir) -I$(includedir)
 LDFLAGS += -fuse-ld=lld -fexperimental-library
+
+UNITTEST = -s
 
 sourcedir = yar
 includedir = include

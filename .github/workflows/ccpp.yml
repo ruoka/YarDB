@@ -19,8 +19,7 @@ jobs:
     - name: Install Clang 15
       run: |
         export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
-        brew update
-        brew install llvm
+        brew install --force llvm
     - name: make
       run: make
     - name: make test

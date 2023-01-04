@@ -19,7 +19,7 @@ jobs:
     - name: Install Clang 15
       run: |
         brew update
-        brew install --with-toolchain llvm
+        brew install llvm
     - name: make
       run: make
     - name: make test

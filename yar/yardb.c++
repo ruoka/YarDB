@@ -1,8 +1,6 @@
-#include <span>
-#include <csignal>
-#include <string_view>
-#include "net/syslogstream.hpp"
-#include "db/restful_web_server.hpp"
+import yar;
+import net;
+import std;
 
 using namespace std;
 using namespace string_literals;
@@ -14,8 +12,8 @@ const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<
 int main(int argc, char** argv)
 try
 {
-    std::signal(SIGTERM, std::exit); // Handle kill
-    std::signal(SIGINT,  std::exit); // Handle ctrl-c
+    std::signal(std::sigterm, std::exit); // Handle kill
+    std::signal(std::sigint,  std::exit); // Handle ctrl-c
 
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;

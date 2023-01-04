@@ -1,4 +1,6 @@
-#include "db/index.hpp"
+module yar;
+import std;
+import xson;
 
 namespace {
 

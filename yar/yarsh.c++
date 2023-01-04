@@ -1,8 +1,7 @@
-#include <span>
-#include <string_view>
-#include "net/connector.hpp"
-#include "xson/json.hpp"
-#include "http/headers.hpp"
+import yar;
+import net;
+import std;
+import xson;
 
 using namespace std;
 using namespace string_view_literals;

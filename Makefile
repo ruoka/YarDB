@@ -7,18 +7,21 @@ OS = $(shell uname -s)
 endif
 
 ifeq ($(OS),Linux)
+CC = /usr/lib/llvm-15/bin/clang
 CXX = /usr/lib/llvm-15/bin/clang++
 CXXFLAGS = -pthread -I/usr/lib/llvm-15/include/c++/v1
 LDFLAGS = -lc++ -lc++experimental -L/usr/lib/llvm-15/lib/c++
 endif
 
 ifeq ($(OS),Darwin)
+CCC = /opt/homebrew/opt/llvm/bin/clang
 CXX = /opt/homebrew/opt/llvm/bin/clang++
 CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1
 LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++
 endif
 
 ifeq ($(OS),Github)
+CCC = /usr/local/opt/llvm/bin/clang
 CXX = /usr/local/opt/llvm/bin/clang++
 CXXFLAGS = -I/usr/local/opt/llvm/include/ -I/usr/local/opt/llvm/include/c++/v1
 LDFLAGS = -L/usr/local/opt/llvm/lib/c++ -Wl,-rpath,/usr/local/opt/llvm/lib/c++
@@ -29,6 +32,11 @@ CXXFLAGS += -fprebuilt-module-path=$(objectdir)
 CXXFLAGS += -Wall -Wextra
 CXXFLAGS += -I$(sourcedir) -I$(includedir)
 LDFLAGS += -fuse-ld=lld -fexperimental-library
+
+export CC
+export CXX
+export CXXFLAGS
+export LDFLAGS
 
 UNITTEST = -s
 

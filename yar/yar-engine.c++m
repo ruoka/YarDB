@@ -1,9 +1,11 @@
-#pragma once
+export module yar:engine;
+import :index;
+import std;
+import xson;
 
-#include <fstream>
-#include "db/index.hpp"
+export namespace db {
 
-namespace db {
+using object = xson::object;
 
 class engine
 {

@@ -1,136 +1,117 @@
-.DEFAULT_GOAL := all
-
-OS := $(shell uname -s)
-CXX := clang++
+.SUFFIXES:
+.SUFFIXES:  .cpp .hpp .c++ .c++m .impl.c++  .test.c++ .o .impl.o .test.o
+.DEFAULT_GOAL = all
+OS = $(shell uname -s)
+UNITTEST = -s
 
 ifeq ($(OS),Linux)
-CC :=  /usr/lib/llvm-15/bin/clang
-CXX := /usr/lib/llvm-15/bin/clang++
-CXXFLAGS = -pthread -I/usr/local/include
-LDFLAGS = -L/usr/local/lib
+CXX = /usr/lib/llvm-15/bin/clang++
+CXXFLAGS = -pthread -I/usr/lib/llvm-15/include/c++/v1
+LDFLAGS = -lc++ -lc++experimental -L/usr/lib/llvm-15/lib/c++
 endif
 
 ifeq ($(OS),Darwin)
-CC := /Library/Developer/CommandLineTools/usr/bin/clang
-CXX := /Library/Developer/CommandLineTools/usr/bin/clang++
-CXXFLAGS = -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+CXX = /opt/homebrew/opt/llvm/bin/clang++
+CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1
+LDFLAGS += -L/opt/homebrew/opt/llvm/lib/c++
 endif
 
-CXXFLAGS += -std=c++20 -stdlib=libc++ -MMD -Wall -Wextra -I$(SRCDIR) -I$(INCDIR)
-LDFLAGS +=
+CXXFLAGS += -std=c++20 -stdlib=libc++ -fexperimental-library
+CXXFLAGS += -fprebuilt-module-path=$(objectdir)
+CXXFLAGS += -Wall -Wextra
+CXXFLAGS += -I$(sourcedir) -I$(includedir)
+LDFLAGS += -fuse-ld=lld -fexperimental-library
 
-############
+sourcedir = yar
+includedir = include
+objectdir = obj
+librarydir = lib
+binarydir = bin
 
-SRCDIR = yar
-TESTDIR = test
-OBJDIR = obj
-BINDIR = bin
-LIBDIR = lib
-INCDIR = include
-MODULE := ./lib/libnet4cpp.a
-GTESTDIR = ./googletest
+test-program = catch_amalgamated
+test-target = $(test-program:%=$(binarydir)/%)
+test-sources = $(wildcard $(sourcedir)/*test.c++)
+test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o) $(test-program:%=$(objectdir)/%.o)
 
-############
+programs = yardb yarexport yarproxy yarsh
+libraries = $(librarydir)/libnet4cpp.a
+targets = $(programs:%=$(binarydir)/%)
+sources = $(filter-out $(programs:%=$(sourcedir)/%.c++) $(test-sources), $(wildcard $(sourcedir)/*.c++))
+modules = $(wildcard $(sourcedir)/*.c++m)
+objects = $(modules:$(sourcedir)%.c++m=$(objectdir)%.o) $(sources:$(sourcedir)%.c++=$(objectdir)%.o)
 
-# Make does not offer a recursive wildcard function, so here's one:
-rwildcard = $(wildcard $1$2) $(foreach d,$(wildcard $1*),$(call rwildcard,$d/,$2))
+dependencies = $(objectdir)/Makefile.deps
 
-############
-
-SOURCES = $(filter-out $(MAINS), $(call rwildcard,$(SRCDIR)/,*.cpp))
-
-OBJECTS = $(SOURCES:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)
-
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
+$(objectdir)/%.pcm: $(sourcedir)/%.c++m
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -I$(SRCDIR) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $< --precompile -c -o $@
 
-############
-
-TARGETS = $(addprefix $(BINDIR)/, yardb yarsh yarexport yarproxy)
-
-MAINS	= $(TARGETS:$(BINDIR)/%=$(SRCDIR)/%.cpp)
-
-$(TARGETS): $(MODULE) $(OBJECTS)
+$(objectdir)/%.o: $(objectdir)/%.pcm
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(@:$(BINDIR)/%=$(SRCDIR)/%.cpp) $(OBJECTS) $(MODULE) -MF $(@:$(BINDIR)/%=$(OBJDIR)/%.d) -o $@
+	$(CXX) $< -c -o $@
 
-LIBRARIES = $(addprefix $(LIBDIR)/, libyardb.a)
-
-$(LIBRARIES): $(OBJECTS)
+$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
 	@mkdir -p $(@D)
-	$(AR) $(ARFLAGS) $@ $^
+	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(objectdir)/yar.pcm -c -o $@
+#	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(objectdir)/$(basename $(basename $(@F))).pcm -c -o $@
 
-HEADERS = $(wildcard $(SRCDIR)/*.hpp $(SRCDIR)/*/*.hpp $(SRCDIR)/*/*/*.hpp)
-
-INCLUDES = $(HEADERS:$(SRCDIR)/%.hpp=$(INCDIR)/%.hpp)
-
-$(INCDIR)/%.hpp: $(SRCDIR)/%.hpp
+$(objectdir)/%.test.o: $(sourcedir)/%.test.c++
 	@mkdir -p $(@D)
-	cp $< $@
+	$(CXX) $(CXXFLAGS) $< -c -o $@
 
-############
-
-GTESTLIBS = $(addprefix $(LIBDIR)/, libgtest.a libgtest_main.a)
-
-$(GTESTLIBS):
-	git submodule update --init --recursive --depth 1
-	cd $(GTESTDIR) && cmake -DCMAKE_C_COMPILER="$(CC)" -DCMAKE_CXX_COMPILER="$(CXX)" -DCMAKE_CXX_FLAGS="$(CXXFLAGS)" -DCMAKE_INSTALL_PREFIX=.. . && make install
-
-############
-
-TEST_SOURCES = $(call rwildcard,$(TESTDIR)/,*.cpp)
-
-TEST_OBJECTS = $(TEST_SOURCES:$(TESTDIR)/%.cpp=$(OBJDIR)/$(TESTDIR)/%.o)
-
-TEST_TARGET = $(BINDIR)/test
-
-$(OBJDIR)/$(TESTDIR)/%.o: $(TESTDIR)/%.cpp $(GTESTLIBS) $(MODULE)
+$(objectdir)/%.o: $(sourcedir)/%.c++
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -I$(INCDIR) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $< -c -o $@
 
-$(TEST_TARGET): $(OBJECTS) $(TEST_OBJECTS)
+$(objectdir)/%.o: $(sourcedir)/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJECTS) $(TEST_OBJECTS) $(MODULE) $(GTESTLIBS) -o $@
+	$(CXX) $(CXXFLAGS) $< -c -o $@
 
-############
+$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
-$(MODULE):
-	@mkdir -p $(LIBDIR)
-	@mkdir -p $(INCDIR)
-	$(MAKE) -C net4cpp all lib PREFIX=..
+$(test-target): $(objects) $(test-objects) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(LDFLAGS) $^ -o $@
+
+$(librarydir)/%.a:
+#	git submodule update --init --depth 10
+#	$(MAKE) -C $(subst lib,,$(basename $(@F))) lib PREFIX=..
+	$(MAKE) -C net4cpp lib PREFIX=..
 	$(MAKE) -C json4cpp all PREFIX=..
-	$(MAKE) -C cryptic all PREFIX=..
 
-############
+$(dependencies): $(sources) $(modules) $(test-sources)
+	@mkdir -p $(@D)
+#c++m module wrapping headers etc.
+	grep -HE '[ ]*export[ ]+module' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m.+/$(objectdir)\/\1.o: $(objectdir)\/\1.pcm/' > $(dependencies)
+#c++m module interface unit
+	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.pcm: $(objectdir)\/\2.pcm/' >> $(dependencies)
+#c++m module partition unit
+	grep -HE '[ ]*import[ ]+:([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9]+)[ ]*;/$(objectdir)\/\1\2\3.pcm: $(objectdir)\/\1\-\4.pcm/' >> $(dependencies)
+#c++m module impl unit
+	grep -HE '[ ]*module[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*module[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(objectdir)\/\2.pcm/' >> $(dependencies)
+#c++ source code
+	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(objectdir)\/\2.pcm/' >> $(dependencies)
 
-DEPENDENCIES = $(MAINS:$(SRCDIR)/%.cpp=$(OBJDIR)/%.d) $(OBJECTS:%.o=%.d) $(TEST_OBJECTS:%.o=%.d)
-
-############
+-include $(dependencies)
 
 .PHONY: all
-all: bin
-
-.PHONY: bin
-bin: $(TARGETS)
-
-.PHONY: lib
-lib: $(MODULE) $(LIBRARIES)
+all: $(libraries) $(dependencies) $(targets)
 
 .PHONY: test
-test: $(MODULE) $(TEST_TARGET)
-	$(MAKE) -C net4cpp test PREFIX=..
-	$(MAKE) -C json4cpp test PREFIX=..
-	$(MAKE) -C cryptic test PREFIX=..
-	$(TEST_TARGET) --gtest_filter=-*CommandLine:HttpServerTest*:NetReceiverAndSenderTest*
+test: $(libraries) $(dependencies) $(test-target)
+	$(test-target) $(UNITTEST)
 
 .PHONY: clean
-clean:
-	@rm -rf $(OBJDIR) $(BINDIR) $(LIBDIR) $(INCDIR)
+clean: mostlyclean
+	rm -rf $(librarydir) $(includedir)
+
+.PHONY: mostlyclean
+mostlyclean:
+	rm -rf $(objectdir) $(binarydir)
 
 .PHONY: dump
 dump:
 	$(foreach v, $(sort $(.VARIABLES)), $(if $(filter file,$(origin $(v))), $(info $(v)=$($(v)))))
 	@echo ''
-
--include $(DEPENDENCIES)

@@ -1,16 +1,13 @@
-#pragma once
+export module yar:metadata;
+import std;
+import xson;
 
-#include <iosfwd>
-#include <cmath>
-#include "xson/object.hpp"
-#include "xson/fast/encoder.hpp"
-#include "xson/fast/decoder.hpp"
-
-namespace db
-{
 using namespace std::string_literals;
 
-using xson::object;
+export namespace db
+{
+
+using object = xson::object;
 
 struct metadata
 {
@@ -28,9 +25,9 @@ struct metadata
     std::streamoff previous = -1;
 };
 
-static const metadata updated{metadata::updated};
+const auto updated = metadata{metadata::updated};
 
-static const metadata deleted{metadata::deleted};
+const auto deleted = metadata{metadata::deleted};
 
 inline auto& operator << (std::ostream& os, metadata& data)
 {

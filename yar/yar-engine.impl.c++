@@ -1,9 +1,8 @@
-#include <set>
-#include "net/syslogstream.hpp"
-#include "xson/fson.hpp"
-#include "db/metadata.hpp"
-#include "db/engine.hpp"
-#include "net/syslogstream.hpp"
+module yar;
+import :metadata;
+import std;
+import net;
+import xson;
 
 namespace {
 

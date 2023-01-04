@@ -1,11 +1,6 @@
-#include <thread>
-#include <mutex>
-#include <span>
-#include "net/connector.hpp"
-#include "net/acceptor.hpp"
-#include "net/syslogstream.hpp"
-#include "http/headers.hpp"
-#include "std/lockable.hpp"
+import yar;
+import net;
+import std;
 
 using namespace std;
 using namespace string_literals;
@@ -72,13 +67,13 @@ inline void handle(auto& client, auto& replicas)
 
         if(method == "GET"s || method == "HEAD"s)
         {
-            const auto lock = lock_guard(replicas);
+            const auto lock = ext::make_lock(replicas);
             any_of(begin(replicas), end(replicas), request_and_response);
             rotate(begin(replicas), ++begin(replicas), end(replicas));
         }
         else
         {
-            const auto lock = lock_guard(replicas);
+            const auto lock = ext::make_lock(replicas);
             all_of(begin(replicas), end(replicas), request);
             all_of(begin(replicas), end(replicas), response);
         }
@@ -87,7 +82,7 @@ inline void handle(auto& client, auto& replicas)
         buffer.seekp(0);
     }
 
-    const auto lock = lock_guard(replicas);
+    const auto lock = ext::make_lock(replicas);
     replicas.remove_if(disconnected);
 }
 

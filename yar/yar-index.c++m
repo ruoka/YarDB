@@ -1,8 +1,6 @@
-#pragma once
-
-#include <map>
-#include <string>
-#include "xson/fson.hpp"
+export module yar:index;
+import std;
+import xson;
 
 using namespace std::string_literals;
 

@@ -2,5 +2,6 @@ bin
 obj
 lib
 include
+pcm
 *.db
 *.log

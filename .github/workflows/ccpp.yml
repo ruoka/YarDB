@@ -21,6 +21,6 @@ jobs:
         export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
         brew install --force llvm
     - name: make
-      run: make
+      run: make OS=Github
     - name: make test
-      run: make test
+      run: make test OS=Github

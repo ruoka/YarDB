@@ -28,7 +28,7 @@ LDFLAGS = -L/usr/local/opt/llvm/lib/c++ -Wl,-rpath,/usr/local/opt/llvm/lib/c++
 endif
 
 CXXFLAGS += -std=c++20 -stdlib=libc++ -fexperimental-library
-CXXFLAGS += -fprebuilt-module-path=$(objectdir)
+CXXFLAGS += -fprebuilt-module-path=$(moduledir)
 CXXFLAGS += -Wall -Wextra
 CXXFLAGS += -I$(sourcedir) -I$(includedir)
 LDFLAGS += -fuse-ld=lld -fexperimental-library
@@ -45,6 +45,7 @@ includedir = include
 objectdir = obj
 librarydir = lib
 binarydir = bin
+moduledir = pcm
 
 test-program = catch_amalgamated
 test-target = $(test-program:%=$(binarydir)/%)
@@ -52,7 +53,7 @@ test-sources = $(wildcard $(sourcedir)/*test.c++)
 test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o) $(test-program:%=$(objectdir)/%.o)
 
 programs = yardb yarexport yarproxy yarsh
-libraries = $(librarydir)/libnet4cpp.a
+libraries = $(librarydir)/libnet4cpp.a $(librarydir)/libjson4cpp.a
 targets = $(programs:%=$(binarydir)/%)
 sources = $(filter-out $(programs:%=$(sourcedir)/%.c++) $(test-sources), $(wildcard $(sourcedir)/*.c++))
 modules = $(wildcard $(sourcedir)/*.c++m)
@@ -60,17 +61,17 @@ objects = $(modules:$(sourcedir)%.c++m=$(objectdir)%.o) $(sources:$(sourcedir)%.
 
 dependencies = $(objectdir)/Makefile.deps
 
-$(objectdir)/%.pcm: $(sourcedir)/%.c++m
+$(moduledir)/%.pcm: $(sourcedir)/%.c++m
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $< --precompile -c -o $@
 
-$(objectdir)/%.o: $(objectdir)/%.pcm
+$(objectdir)/%.o: $(moduledir)/%.pcm
 	@mkdir -p $(@D)
 	$(CXX) $< -c -o $@
 
 $(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(objectdir)/yar.pcm -c -o $@
+	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(moduledir)/yar.pcm -c -o $@
 #	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(objectdir)/$(basename $(basename $(@F))).pcm -c -o $@
 
 $(objectdir)/%.test.o: $(sourcedir)/%.test.c++
@@ -95,22 +96,20 @@ $(test-target): $(objects) $(test-objects) $(libraries)
 
 $(librarydir)/%.a:
 #	git submodule update --init --depth 10
-#	$(MAKE) -C $(subst lib,,$(basename $(@F))) lib PREFIX=..
-	$(MAKE) -C net4cpp lib PREFIX=..
-	$(MAKE) -C json4cpp all PREFIX=..
+	$(MAKE) -C $(subst lib,,$(basename $(@F))) module PREFIX=..
 
 $(dependencies): $(sources) $(modules) $(test-sources)
 	@mkdir -p $(@D)
 #c++m module wrapping headers etc.
-	grep -HE '[ ]*export[ ]+module' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m.+/$(objectdir)\/\1.o: $(objectdir)\/\1.pcm/' > $(dependencies)
+	grep -HE '[ ]*export[ ]+module' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m.+/$(objectdir)\/\1.o: $(moduledir)\/\1.pcm/' > $(dependencies)
 #c++m module interface unit
-	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.pcm: $(objectdir)\/\2.pcm/' >> $(dependencies)
+	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(moduledir)\/\1.pcm: $(moduledir)\/\2.pcm/' >> $(dependencies)
 #c++m module partition unit
-	grep -HE '[ ]*import[ ]+:([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9]+)[ ]*;/$(objectdir)\/\1\2\3.pcm: $(objectdir)\/\1\-\4.pcm/' >> $(dependencies)
+	grep -HE '[ ]*import[ ]+:([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9]+)[ ]*;/$(moduledir)\/\1\2\3.pcm: $(moduledir)\/\1\-\4.pcm/' >> $(dependencies)
 #c++m module impl unit
-	grep -HE '[ ]*module[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*module[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(objectdir)\/\2.pcm/' >> $(dependencies)
+	grep -HE '[ ]*module[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*module[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(moduledir)\/\2.pcm/' >> $(dependencies)
 #c++ source code
-	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(objectdir)\/\2.pcm/' >> $(dependencies)
+	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(moduledir)\/\2.pcm/' >> $(dependencies)
 
 -include $(dependencies)
 
@@ -129,11 +128,13 @@ tests: $(libraries)
 
 .PHONY: clean
 clean: mostlyclean
+	$(MAKE) -C net4cpp clean
+	$(MAKE) -C json4cpp clean
 	rm -rf $(librarydir) $(includedir)
 
 .PHONY: mostlyclean
 mostlyclean:
-	rm -rf $(objectdir) $(binarydir)
+	rm -rf $(objectdir) $(binarydir) $(moduledir)
 
 .PHONY: dump
 dump:

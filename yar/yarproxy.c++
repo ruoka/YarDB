@@ -56,7 +56,7 @@ inline void handle(auto& client, auto& replicas)
         return replica.good();
     };
 
-    auto disconnected = [](auto& replica) {
+    auto disconnected = [](const auto& replica) {
         return !replica.good();
     };
 
@@ -68,14 +68,14 @@ inline void handle(auto& client, auto& replicas)
         if(method == "GET"s || method == "HEAD"s)
         {
             const auto lock = ext::make_lock(replicas);
-            any_of(begin(replicas), end(replicas), request_and_response);
-            rotate(begin(replicas), ++begin(replicas), end(replicas));
+            ranges::any_of(replicas, request_and_response);
+            ranges::rotate(replicas, ++ranges::begin(replicas));
         }
         else
         {
             const auto lock = ext::make_lock(replicas);
-            all_of(begin(replicas), end(replicas), request);
-            all_of(begin(replicas), end(replicas), response);
+            ranges::all_of(replicas, request);
+            ranges::all_of(replicas, response);
         }
 
         buffer.seekg(0) >> stream;
@@ -84,6 +84,7 @@ inline void handle(auto& client, auto& replicas)
 
     const auto lock = ext::make_lock(replicas);
     replicas.remove_if(disconnected);
+    // ranges::remove_if(replicas, disconnected);
 }
 
 int main(int argc, char** argv)

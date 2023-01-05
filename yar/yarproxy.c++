@@ -9,7 +9,9 @@ using namespace net;
 
 const auto usage = R"(yarproxy [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port])";
 
-using replica_set = lockable<list<endpointstream>>;
+using replica = endpointstream;
+
+using replica_set = lockable<list<replica>>;
 
 inline auto& operator >> (istream& is, ostream& os)
 {
@@ -39,24 +41,24 @@ inline void handle(auto& client, auto& replicas)
 
     auto buffer = stringstream{};
 
-    auto request = [&buffer](auto& replica) {
-        buffer.seekg(0) >> replica;
-        return replica.good();
+    auto request_and_response = [&buffer](replica& connection) {
+        buffer.seekg(0) >> connection;
+        connection >> buffer.seekp(0);
+        return connection.good();
     };
 
-    auto response = [&buffer](auto& replica) {
-        replica >> buffer.seekp(0);
-        return replica.good();
+    auto request = [&buffer](replica& connection) {
+        buffer.seekg(0) >> connection;
+        return connection.good();
     };
 
-    auto request_and_response = [&buffer](auto& replica) {
-        buffer.seekg(0) >> replica;
-        replica >> buffer.seekp(0);
-        return replica.good();
+    auto response = [&buffer](replica& connection) {
+        connection >> buffer.seekp(0);
+        return connection.good();
     };
 
-    auto disconnected = [](const auto& replica) {
-        return !replica.good();
+    auto disconnected = [](const replica& connection) {
+        return not connection.good();
     };
 
     while(stream >> buffer)

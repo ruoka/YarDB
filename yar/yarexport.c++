@@ -4,7 +4,6 @@ import std;
 import xson;
 
 using namespace std;
-using namespace string_literals;
 using namespace xson;
 using namespace ext;
 
@@ -59,12 +58,12 @@ try
 }
 catch(const system_error& e)
 {
-    cerr << "System error with code " << e.code() << " " << e.what() << endl;
+    cerr << "System error with code " << e.code() << " aka " << quoted(e.what())<< endl;
     return 1;
 }
 catch(const exception& e)
 {
-    cerr << "Exception " << e.what() << endl;
+    cerr << "Exception " << quoted(e.what()) << endl;
     return 1;
 }
 catch(...)

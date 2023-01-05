@@ -3,8 +3,7 @@ import net;
 import std;
 
 using namespace std;
-using namespace string_literals;
-using namespace chrono_literals;
+using namespace chrono;
 using namespace ext;
 using namespace net;
 
@@ -160,12 +159,12 @@ try
 }
 catch(const system_error& e)
 {
-    slog << error << "System error with code " << e.code() << " " << e.what() << flush;
+    slog << error << "System error with code " << e.code() << " " << quoted(e.what()) << flush;
     return 1;
 }
 catch(const exception& e)
 {
-    slog << error << "Exception " << e.what() << flush;
+    slog << error << "Exception " << quoted(e.what()) << flush;
     return 1;
 }
 catch(...)

@@ -53,7 +53,7 @@ test-sources = $(wildcard $(sourcedir)/*test.c++)
 test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o) $(test-program:%=$(objectdir)/%.o)
 
 programs = yardb yarexport yarproxy yarsh
-libraries = $(librarydir)/libnet4cpp.a $(librarydir)/libjson4cpp.a
+libraries = $(addprefix $(librarydir)/, libnet4cpp.a libjson4cpp.a libstd.a)
 targets = $(programs:%=$(binarydir)/%)
 sources = $(filter-out $(programs:%=$(sourcedir)/%.c++) $(test-sources), $(wildcard $(sourcedir)/*.c++))
 modules = $(wildcard $(sourcedir)/*.c++m)

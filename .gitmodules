@@ -10,3 +10,6 @@
 [submodule "cryptic"]
 	path = cryptic
 	url = https://github.com/ruoka/cryptic.git
+[submodule "std"]
+	path = std
+	url = https://github.com/ruoka/CppStandardLibraryAsModule.git

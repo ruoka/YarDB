@@ -23,7 +23,7 @@ inline auto& operator >> (istream& is, ostream& os)
 
     auto content_length = headers.contains("content-length") ? std::stoll(headers["content-length"]) : 0ull;
 
-    while(content_length && is && os)
+    while(content_length and is and os)
     {
         os.put(is.get());
         --content_length;

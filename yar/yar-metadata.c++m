@@ -34,30 +34,27 @@ inline auto& operator << (std::ostream& os, metadata& data)
     data.timestamp = std::chrono::system_clock::now();
     data.previous = data.position;
     data.position = os.tellp();
-    auto encoder = xson::fast::encoder{os};
-    encoder.encode(data.status);
-    encoder.encode(data.collection);
-    encoder.encode(data.timestamp);
-    encoder.encode(data.position);
-    encoder.encode(data.previous);
+    xson::fast::encode(os,data.status);
+    xson::fast::encode(os,data.collection);
+    xson::fast::encode(os,data.timestamp);
+    xson::fast::encode(os,data.position);
+    xson::fast::encode(os,data.previous);
     return os;
 }
 
 inline auto& operator << (std::ostream& os, const metadata& data)
 {
-    auto encoder = xson::fast::encoder{os};
-    encoder.encode(data.status);
+    xson::fast::encode(os,data.status);
     return os;
 }
 
 inline auto& operator >> (std::istream& is, metadata& data)
 {
-    auto decoder = xson::fast::decoder{is};
-    decoder.decode(data.status);
-    decoder.decode(data.collection);
-    decoder.decode(data.timestamp);
-    decoder.decode(data.position);
-    decoder.decode(data.previous);
+    xson::fast::decode(is,data.status);
+    xson::fast::decode(is,data.collection);
+    xson::fast::decode(is,data.timestamp);
+    xson::fast::decode(is,data.position);
+    xson::fast::decode(is,data.previous);
     return is;
 }
 

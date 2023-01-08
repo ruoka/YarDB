@@ -100,16 +100,13 @@ void db::engine::reindex()
         if(metadata.collection != "_db"s)
             continue;
 
-        std::clog << xson::json::stringify(document) << std::endl;
-
-        const std::string& collection = document["collection"s];
+        auto collection = document["collection"s];
         auto keys = document["keys"s];
         auto temp = std::vector<std::string>{};
         for(const auto& k : keys.get<object::array>())
             temp.push_back(k);
 
-        //auto tmp = m_index[collection];
-        //tmp.add(temp);
+        m_index[collection].add(temp);
     }
 }
 

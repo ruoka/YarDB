@@ -100,13 +100,16 @@ void db::engine::reindex()
         if(metadata.collection != "_db"s)
             continue;
 
-        auto collection = document["collection"s];
+        std::clog << xson::json::stringify(document) << std::endl;
+
+        const std::string& collection = document["collection"s];
         auto keys = document["keys"s];
         auto temp = std::vector<std::string>{};
         for(const auto& k : keys.get<object::array>())
             temp.push_back(k);
 
-        m_index[collection].add(temp);
+        //auto tmp = m_index[collection];
+        //tmp.add(temp);
     }
 }
 
@@ -141,7 +144,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
 {
     using xson::fson::operator >>;
 
-    documents = db::object::array{};
+    documents = db::object{db::object::array{}};
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
@@ -172,7 +175,7 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
     using xson::fson::operator >>;
     using xson::fson::operator <<;
 
-    documents = db::object::array{};
+    documents = db::object{db::object::array{}};
     auto success = false;
     auto& index = m_index[m_collection];
 
@@ -215,7 +218,7 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
 {
     using xson::fson::operator >>;
 
-    documents = db::object::array{};
+    documents = db::object{db::object::array{}};
     auto top = std::numeric_limits<sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
@@ -255,7 +258,7 @@ bool db::engine::history(const db::object& selector, db::object& documents)
 {
     using xson::fson::operator >>;
 
-    documents = db::object::array{};
+    documents = db::object{db::object::array{}};
     auto success = false;
     const auto& index = m_index[m_collection];
 

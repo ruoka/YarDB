@@ -142,12 +142,12 @@ private:
     const index_type c_index_type;
 };
 
-class index_range
+class index_view : public std::ranges::view_interface<index_view>
 {
 public:
 
     template<typename T>
-    index_range(T begin, T end) :
+    index_view(T begin, T end) :
         m_begin{begin},
         m_end{end}
     {}
@@ -183,7 +183,7 @@ public:
 
     bool secondary_key(const object& selector) const;
 
-    index_range range(const object& selector) const;
+    index_view view(const object& selector) const;
 
     void update(object& document);
 

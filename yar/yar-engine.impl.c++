@@ -149,7 +149,7 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     auto success = false;
     const auto& index = m_index[m_collection];
 
-    for(const auto position : index.range(selector))
+    for(const auto position : index.view(selector))
     {
         auto metadata = db::metadata{};
         auto document = db::object{};
@@ -176,7 +176,7 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
     auto success = false;
     auto& index = m_index[m_collection];
 
-    for(const auto position : index.range(selector))
+    for(const auto position : index.view(selector))
     {
         using namespace xson::fson;
 
@@ -223,7 +223,7 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
     auto success = false;
     auto& index = m_index[m_collection];
 
-    for(const auto position : index.range(selector))
+    for(const auto position : index.view(selector))
     {
         auto metadata = db::metadata{};
         auto document = db::object{};
@@ -259,7 +259,7 @@ bool db::engine::history(const db::object& selector, db::object& documents)
     auto success = false;
     const auto& index = m_index[m_collection];
 
-    for(auto position : index.range(selector))
+    for(auto position : index.view(selector))
         while(position >= 0)
         {
             auto metadata = db::metadata{};

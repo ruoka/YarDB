@@ -9,10 +9,10 @@ auto make_primary_key   = [](const xson::object::value& v){return std::get<xson:
 auto make_secondary_key = [](const xson::object::value& v){return xson::to_string(v);};
 
 template <typename T, typename F>
-db::index_range query_analysis(const db::object& selector, const T& keys, F make_key)
+db::index_view query_analysis(const db::object& selector, const T& keys, F make_key)
 {
-    auto begin = std::cbegin(keys),
-         end   = std::cend(keys);
+    auto begin = std::ranges::cbegin(keys),
+         end   = std::ranges::cend(keys);
 
     if(selector.has("$gt"s))
     {
@@ -44,15 +44,15 @@ db::index_range query_analysis(const db::object& selector, const T& keys, F make
     else if(selector.has("$head"s))
     {
         const xson::integer_type n = selector["$head"s];
-        auto itr = std::begin(keys);
-        std::advance(itr, std::min<xson::integer_type>(n, keys.size()));
+        auto itr = std::ranges::begin(keys);
+        std::ranges::advance(itr, std::min<xson::integer_type>(n, keys.size()));
         end = itr;
     }
     else if(selector.has("$tail"s))
     {
         const xson::integer_type n = selector["$tail"s];
-        auto itr = std::rbegin(keys);
-        std::advance(itr, std::min<xson::integer_type>(n, keys.size()));
+        auto itr = std::ranges::rbegin(keys);
+        std::ranges::advance(itr, std::min<xson::integer_type>(n, keys.size()));
         begin = itr.base();
     }
     else if(std::holds_alternative<typename T::mapped_type>((db::object::value)selector)) // FIXME
@@ -102,7 +102,7 @@ bool db::index::secondary_key(const object& selector) const
     return false;
 }
 
-db::index_range db::index::range(const object& selector) const
+db::index_view db::index::view(const object& selector) const
 {
     if(primary_key(selector))
         return query_analysis(selector["_id"s], m_primary_keys, make_primary_key);
@@ -115,9 +115,9 @@ db::index_range db::index::range(const object& selector) const
     // else
 
     if(!selector.has("$desc"s))
-        return {std::cbegin(m_primary_keys),std::cend(m_primary_keys)};
+        return {std::ranges::cbegin(m_primary_keys),std::ranges::cend(m_primary_keys)};
     else
-        return {std::crbegin(m_primary_keys),std::crend(m_primary_keys)};
+        return {std::ranges::crbegin(m_primary_keys),std::ranges::crend(m_primary_keys)};
 }
 
 void db::index::update(object& document)

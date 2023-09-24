@@ -1,5 +1,5 @@
 .SUFFIXES:
-.SUFFIXES:  .cpp .hpp .c++ .c++m .impl.c++  .test.c++ .o .impl.o .test.o
+.SUFFIXES: .cpp .hpp .c++ .c++m .impl.c++ .test.c++ .o .impl.o .test.o
 .DEFAULT_GOAL = all
 
 ifndef OS
@@ -7,17 +7,17 @@ OS = $(shell uname -s)
 endif
 
 ifeq ($(OS),Linux)
-CC = /usr/lib/llvm-15/bin/clang
-CXX = /usr/lib/llvm-15/bin/clang++
-CXXFLAGS = -pthread -I/usr/lib/llvm-15/include/c++/v1
-LDFLAGS = -lc++ -lc++experimental -L/usr/lib/llvm-15/lib/c++
+CC = /usr/lib/llvm-17/bin/clang
+CXX = /usr/lib/llvm-17/bin/clang++
+CXXFLAGS = -pthread -I/usr/lib/llvm-17/include/c++/v1
+LDFLAGS = -lc++ -L/usr/lib/llvm-17/lib/c++
 endif
 
 ifeq ($(OS),Darwin)
 CC = /opt/homebrew/opt/llvm/bin/clang
 CXX = /opt/homebrew/opt/llvm/bin/clang++
 CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1
-LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++
+LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++
 endif
 
 ifeq ($(OS),Github)
@@ -27,11 +27,15 @@ CXXFLAGS = -I/usr/local/opt/llvm/include/ -I/usr/local/opt/llvm/include/c++/v1
 LDFLAGS = -L/usr/local/opt/llvm/lib/c++ -Wl,-rpath,/usr/local/opt/llvm/lib/c++
 endif
 
-CXXFLAGS += -std=c++20 -stdlib=libc++ -fexperimental-library
-CXXFLAGS += -fprebuilt-module-path=$(moduledir)
+CXXFLAGS += -std=c++20 -stdlib=libc++
 CXXFLAGS += -Wall -Wextra
 CXXFLAGS += -I$(sourcedir) -I$(includedir)
-LDFLAGS += -fuse-ld=lld -fexperimental-library
+LDFLAGS += -fuse-ld=lld
+
+PCMFLAGS += -fno-implicit-modules -fno-implicit-module-maps
+PCMFLAGS += -fmodule-file=std=./pcm/std.pcm -fmodule-file=net=./pcm/net.pcm -fmodule-file=xson=./pcm/xson.pcm
+PCMFLAGS += $(foreach P, $(foreach M, $(modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=./pcm/$(P).pcm)
+CXXFLAGS += $(PCMFLAGS)
 
 export CC
 export CXX
@@ -67,12 +71,11 @@ $(moduledir)/%.pcm: $(sourcedir)/%.c++m
 
 $(objectdir)/%.o: $(moduledir)/%.pcm
 	@mkdir -p $(@D)
-	$(CXX) $< -c -o $@
+	$(CXX) $(PCMFLAGS) $< -c -o $@
 
 $(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(moduledir)/yar.pcm -c -o $@
-#	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(objectdir)/$(basename $(basename $(@F))).pcm -c -o $@
+	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
 
 $(objectdir)/%.test.o: $(sourcedir)/%.test.c++
 	@mkdir -p $(@D)

@@ -17,7 +17,7 @@ try
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;
     auto service_or_port = "2112"s;
-    slog.tag("YarDB");
+    slog.appname("YarDB");
     slog.level(net::syslog::severity::debug);
 
     for(string_view option : arguments)
@@ -29,12 +29,12 @@ try
         else if(option.starts_with("--slog_tag="))
         {
             option.remove_prefix(option.find_first_not_of("--slog_tag="));
-            slog.tag(option);
+            slog.appname(option);
         }
         else if(option.starts_with("--slog_level="))
         {
             option.remove_prefix(option.find_first_not_of("--slog_level="));
-            auto mask = 0;
+            auto mask = 0u;
             auto [ptr,ec] = std::from_chars(option.begin(),option.end(),mask);
             if(ec != std::errc() or ptr != option.end())
             {

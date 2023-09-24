@@ -69,14 +69,14 @@ inline void handle(auto& client, auto& replicas)
         if(method == "GET"s || method == "HEAD"s)
         {
             const auto lock = ext::make_lock(replicas);
-            ranges::any_of(replicas, request_and_response);
-            ranges::rotate(replicas, ++ranges::begin(replicas));
+            [[maybe_unused]] auto r1 = ranges::any_of(replicas, request_and_response);
+            [[maybe_unused]] auto r2 = ranges::rotate(replicas, ++ranges::begin(replicas));
         }
         else
         {
             const auto lock = ext::make_lock(replicas);
-            ranges::all_of(replicas, request);
-            ranges::all_of(replicas, response);
+            [[maybe_unused]] auto r1 = ranges::all_of(replicas, request);
+            [[maybe_unused]] auto r2 = ranges::all_of(replicas, response);
         }
 
         buffer.seekg(0) >> stream;
@@ -94,7 +94,7 @@ try
     const auto arguments = span(argv,argc).subspan(1);
     auto replicas = replica_set{};
     auto service_or_port = "2113"s;
-    slog.tag("YarPROXY");
+    slog.appname("YarPROXY");
     slog.level(net::syslog::severity::debug);
 
     for(string_view option : arguments)
@@ -106,12 +106,12 @@ try
         else if(option.starts_with("--slog_tag="))
         {
             option.remove_prefix(option.find_first_not_of("--slog_tag="));
-            slog.tag(option);
+            slog.appname(option);
         }
         else if(option.starts_with("--slog_level="))
         {
             option.remove_prefix(option.find_first_not_of("--slog_level="));
-            auto mask = 0;
+            auto mask = 0u;
             auto [ptr,ec] = std::from_chars(option.begin(),option.end(),mask);
             if(ec != std::errc() or ptr != option.end())
             {

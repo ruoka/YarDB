@@ -195,7 +195,7 @@ SECTION("Destroy1ByID")
     dump(engine);
     REQUIRE(engine.read(all, documents));
     CHECK(3u == documents.size());
-    long long id = documents[1]["_id"s];
+    long id = documents[1]["_id"s];
     auto selector = object{"_id"s, id};
     documents = object{};
     REQUIRE(engine.destroy(selector, documents));

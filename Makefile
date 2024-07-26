@@ -1,23 +1,29 @@
-.SUFFIXES:
-.SUFFIXES: .cpp .hpp .c++ .c++m .impl.c++ .test.c++ .o .impl.o .test.o
-.DEFAULT_GOAL = all
+# Inspired by https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html
+
+programs = yardb yarsh yarproxy yarexport
+
+submodules = std net xson cryptic tester
+
+###############################################################################
+
+ifeq ($(MAKELEVEL),0)
 
 ifndef OS
 OS = $(shell uname -s)
 endif
 
 ifeq ($(OS),Linux)
-CC = /usr/lib/llvm-17/bin/clang
-CXX = /usr/lib/llvm-17/bin/clang++
-CXXFLAGS = -pthread -I/usr/lib/llvm-17/include/c++/v1
-LDFLAGS = -lc++ -L/usr/lib/llvm-17/lib/c++
+CC = /usr/lib/llvm-18/bin/clang
+CXX = /usr/lib/llvm-18/bin/clang++
+CXXFLAGS = -pthread -I/usr/lib/llvm-18/include/c++/v1
+LDFLAGS = -lc++ -L/usr/lib/llvm-18/lib/c++
 endif
 
 ifeq ($(OS),Darwin)
 CC = /opt/homebrew/opt/llvm/bin/clang
 CXX = /opt/homebrew/opt/llvm/bin/clang++
-CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1
-LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++
+CXXFLAGS =-I/opt/homebrew/opt/llvm/include/c++/v1 -Ofast
+LDFLAGS = -L/opt/homebrew/opt/llvm/lib/c++ -Wl,-rpath,/opt/homebrew/opt/llvm/lib/c++ -Ofast
 endif
 
 ifeq ($(OS),Github)
@@ -27,117 +33,173 @@ CXXFLAGS = -I/usr/local/opt/llvm/include/ -I/usr/local/opt/llvm/include/c++/v1
 LDFLAGS = -L/usr/local/opt/llvm/lib/c++ -Wl,-rpath,/usr/local/opt/llvm/lib/c++
 endif
 
-CXXFLAGS += -std=c++20 -stdlib=libc++
-CXXFLAGS += -Wall -Wextra
-CXXFLAGS += -I$(sourcedir) -I$(includedir)
+CXXFLAGS += -std=c++23 -stdlib=libc++
+CXXFLAGS += -Wall -Wextra -Wno-reserved-module-identifier -Wno-deprecated-declarations
+CXXFLAGS += -I$(sourcedir)
 LDFLAGS += -fuse-ld=lld
-
-PCMFLAGS += -fno-implicit-modules -fno-implicit-module-maps
-PCMFLAGS += -fmodule-file=std=./pcm/std.pcm -fmodule-file=net=./pcm/net.pcm -fmodule-file=xson=./pcm/xson.pcm
-PCMFLAGS += $(foreach P, $(foreach M, $(modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=./pcm/$(P).pcm)
-CXXFLAGS += $(PCMFLAGS)
 
 export CC
 export CXX
 export CXXFLAGS
 export LDFLAGS
 
-UNITTEST = -s
+endif # ($(MAKELEVEL),0)
 
-sourcedir = yar
-includedir = include
-objectdir = obj
-librarydir = lib
-binarydir = bin
-moduledir = pcm
+PCMFLAGS = -fno-implicit-modules -fno-implicit-module-maps
+PCMFLAGS += $(foreach P, $(submodules) ,-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
+PCMFLAGS += $(foreach P, $(foreach M, $(modules) $(example-modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
+PCMFLAGS += -fprebuilt-module-path=$(moduledir)/
 
-test-program = catch_amalgamated
-test-target = $(test-program:%=$(binarydir)/%)
-test-sources = $(wildcard $(sourcedir)/*test.c++)
-test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o) $(test-program:%=$(objectdir)/%.o)
+###############################################################################
 
-programs = yardb yarexport yarproxy yarsh
-libraries = $(addprefix $(librarydir)/, libnet4cpp.a libjson4cpp.a libstd.a)
+PREFIX = .
+sourcedir = ./$(project)
+sourcedirs = $(sourcedir)
+moduledir = $(PREFIX)/pcm
+objectdir = $(PREFIX)/obj
+librarydir = $(PREFIX)/lib
+binarydir = $(PREFIX)/bin
+
+project = $(lastword $(notdir $(CURDIR)))
+library = $(addprefix $(librarydir)/, lib$(project).a)q
 targets = $(programs:%=$(binarydir)/%)
-sources = $(filter-out $(programs:%=$(sourcedir)/%.c++) $(test-sources), $(wildcard $(sourcedir)/*.c++))
 modules = $(wildcard $(sourcedir)/*.c++m)
+sources = $(filter-out $(programs:%=$(sourcedir)/%.c++) $(test-program:%=$(sourcedir)/%.c++) $(test-sources), $(wildcard $(sourcedir)/*.c++))
 objects = $(modules:$(sourcedir)%.c++m=$(objectdir)%.o) $(sources:$(sourcedir)%.c++=$(objectdir)%.o)
 
-dependencies = $(objectdir)/Makefile.deps
+test-program = test_runner
+test-target = $(test-program:%=$(binarydir)/%)
+test-sources = $(wildcard $(sourcedir)/*.test.c++)
+test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o)
+
+###############################################################################
+
+libraries = $(librarydir)/libstd.a $(librarydir)/libnet.a $(librarydir)/libxson.a  $(librarydir)/libtester.a # $(submodules:%=$(librarydir)/lib%.a)
+
+###############################################################################
+
+.SUFFIXES:
+.SUFFIXES:  .deps .c++m .c++ .impl.c++ .test.c++ .pcm .o .impl.o .test.o .a
+.PRECIOUS: $(objectdir)/%.deps $(moduledir)/%.pcm
+
+###############################################################################
 
 $(moduledir)/%.pcm: $(sourcedir)/%.c++m
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< --precompile -c -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -c -o $@
+
+$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+
+$(objectdir)/%.test.o: $(sourcedir)/%.test.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(objectdir)/%.o: $(sourcedir)/%.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
+
+$(library) : $(objects)
+	@mkdir -p $(@D)
+	$(AR) $(ARFLAGS) $@ $^
+
+$(test-target): $(objects) $(test-objects) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
+
+###############################################################################
+
+$(moduledir)/%.pcm: $(testdir)/%.c++m
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -c -o $@
+
+$(objectdir)/%.impl.o: $(testdir)/%.impl.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+
+$(objectdir)/%.test.o: $(testdir)/%.test.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(objectdir)/%.o: $(testdir)/%.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $(LDFLAGS) $^ -o $@
+
+###############################################################################
 
 $(objectdir)/%.o: $(moduledir)/%.pcm
 	@mkdir -p $(@D)
 	$(CXX) $(PCMFLAGS) $< -c -o $@
 
-$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+###############################################################################
 
-$(objectdir)/%.test.o: $(sourcedir)/%.test.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -c -o $@
+dependencies = $(foreach D, $(sourcedirs), $(objectdir)/$(D).deps)
 
-$(objectdir)/%.o: $(sourcedir)/%.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -c -o $@
+define create_dependency_hierarchy
+	-grep -HE '^[ ]*export[ ]+module' $(1)/*.c++m | sed -E 's|.+/([a-z_0-9\-]+)\.c\+\+m.+|$(objectdir)/\1.o: $(moduledir)/\1.pcm|' >> $(2)
+	-grep -HE '^[ ]*export[ ]+import[ ]+([a-z_0-9]+)' $(1)/*.c++m | sed -E 's|.+/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9]+)[ ]*;|$(moduledir)/\1.pcm: $(moduledir)/\2.pcm|' >> $(2)
+	-grep -HE '^[ ]*import[ ]+([a-z_0-9]+)' $(1)/*.c++m | sed -E 's|.+/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9]+)[ ]*;|$(moduledir)/\1.pcm: $(moduledir)/\2.pcm|' >> $(2)
+	-grep -HE '^[ ]*export[ ]+[ ]*import[ ]+:([a-z_0-9]+)' $(1)/*.c++m | sed -E 's|.+/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9]+)[ ]*;|$(moduledir)/\1\2\3.pcm: $(moduledir)/\1\-\4.pcm|' >> $(2)
+	-grep -HE '^[ ]*import[ ]+:([a-z_0-9]+)' $(1)/*.c++m | sed -E 's|.+/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9]+)[ ]*;|$(moduledir)/\1\2\3.pcm: $(moduledir)/\1\-\4.pcm|' >> $(2)
+	grep -HE '^[ ]*module[ ]+([a-z_0-9]+)' $(1)/*.c++ | sed -E 's|.+/([a-z_0-9\.\-]+)\.c\+\+:[ ]*module[ ]+([a-z_0-9]+)[ ]*;|$(objectdir)/\1.o: $(moduledir)/\2.pcm|' >> $(2)
+	grep -HE '^[ ]*import[ ]+([a-z_0-9]+)' $(1)/*.c++ | sed -E 's|.+/([a-z_0-9\.\-]+)\.c\+\+:[ ]*import[ ]+([a-z_0-9]+)[ ]*;|$(objectdir)/\1.o: $(moduledir)/\2.pcm|' >> $(2)
+	grep -HE '^[ ]*import[ ]+:([a-z_0-9]+)' $(1)/*.c++ | sed -E 's|.+/([a-z_0-9]+)(\-*)([a-z_0-9\.]*)\.c\+\+:.*import[ ]+:([a-z_0-9]+)[ ]*;|$(objectdir)/\1\2\3.o: $(moduledir)/\1\-\4.pcm|'|  >> $(2)
+endef
 
-$(objectdir)/%.o: $(sourcedir)/%.cpp
+$(dependencies): $(modules) $(sources)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $< -c -o $@
-
-$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
-
-$(test-target): $(objects) $(test-objects) $(libraries)
-	@mkdir -p $(@D)
-	$(CXX) $(LDFLAGS) $^ -o $@
-
-$(librarydir)/%.a:
-#	git submodule update --init --depth 10
-	$(MAKE) -C $(subst lib,,$(basename $(@F))) module PREFIX=..
-
-$(dependencies): $(sources) $(modules) $(test-sources)
-	@mkdir -p $(@D)
-#c++m module wrapping headers etc.
-	grep -HE '[ ]*export[ ]+module' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m.+/$(objectdir)\/\1.o: $(moduledir)\/\1.pcm/' > $(dependencies)
-#c++m module interface unit
-	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(moduledir)\/\1.pcm: $(moduledir)\/\2.pcm/' >> $(dependencies)
-#c++m module partition unit
-	grep -HE '[ ]*import[ ]+:([a-z_0-9]+)' $(sourcedir)/*.c++m | sed -E 's/.+\/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9]+)[ ]*;/$(moduledir)\/\1\2\3.pcm: $(moduledir)\/\1\-\4.pcm/' >> $(dependencies)
-#c++m module impl unit
-	grep -HE '[ ]*module[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*module[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(moduledir)\/\2.pcm/' >> $(dependencies)
-#c++ source code
-	grep -HE '[ ]*import[ ]+([a-z_0-9]+)' $(sourcedir)/*.c++ | sed -E 's/.+\/([a-z_0-9\.\-]+)\.c\+\+:[ ]*import[ ]+([a-z_0-9]+)[ ]*;/$(objectdir)\/\1.o: $(moduledir)\/\2.pcm/' >> $(dependencies)
+	$(call create_dependency_hierarchy, ./$(basename $(@F)), $@)
 
 -include $(dependencies)
 
-.PHONY: all
-all: $(libraries) $(dependencies) $(targets)
+###############################################################################
 
-.PHONY: test
-test: $(libraries) $(dependencies) $(test-target)
-	$(test-target) $(UNITTEST)
+$(foreach M, $(submodules), $(MAKE) -C $(M) deps PREFIX=../$(PREFIX)):
+
+$(foreach M, $(submodules), $(moduledir)/$(M).pcm):
+#	git submodule update --init --depth 1
+	$(MAKE) -C $(basename $(@F)) module PREFIX=../$(PREFIX)
+
+$(librarydir)/%.a:
+#	git submodule update --init --depth 1
+	$(MAKE) -C $(subst lib,,$(basename $(@F))) module PREFIX=../$(PREFIX)
+
+###############################################################################
+
+.DEFAULT_GOAL = all
+
+.PHONY: deps
+deps: $(dependencies)
+
+.PHONY: build
+build: $(targets)
+
+.PHONY: all
+all: deps build
 
 .PHONY: tests
-tests: $(libraries)
-	$(MAKE) -C net4cpp test PREFIX=..
-	$(MAKE) -C json4cpp test PREFIX=..
-	$(test-target) $(UNITTEST)
+tests: deps $(test-target)
+
+.PHONY: run_tests
+run_tests: tests
+	$(test-target) $(TEST_TAGS)
 
 .PHONY: clean
 clean: mostlyclean
-	$(MAKE) -C net4cpp clean
-	$(MAKE) -C json4cpp clean
-	rm -rf $(librarydir) $(includedir)
+	rm -rf $(binarydir) $(librarydir)
 
 .PHONY: mostlyclean
 mostlyclean:
-	rm -rf $(objectdir) $(binarydir) $(moduledir)
+	rm -rf $(objectdir) $(moduledir)
 
 .PHONY: dump
 dump:

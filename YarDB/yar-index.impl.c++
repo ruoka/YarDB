@@ -55,7 +55,7 @@ db::index_view query_analysis(const db::object& selector, const T& keys, F make_
         std::ranges::advance(itr, std::min<xson::integer_type>(n, keys.size()));
         begin = itr.base();
     }
-    else if(std::holds_alternative<typename T::mapped_type>((db::object::value)selector)) // FIXME
+    else // if(std::holds_alternative<typename T::mapped_type>((db::object::value)selector)) // FIXME
     {
         const auto key = make_key(selector);
         std::tie(begin,end) = keys.equal_range(key);

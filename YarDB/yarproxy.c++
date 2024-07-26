@@ -68,13 +68,13 @@ inline void handle(auto& client, auto& replicas)
 
         if(method == "GET"s || method == "HEAD"s)
         {
-            const auto lock = ext::make_lock(replicas);
+            const auto guard = std::lock_guard{replicas};
             [[maybe_unused]] auto r1 = ranges::any_of(replicas, request_and_response);
             [[maybe_unused]] auto r2 = ranges::rotate(replicas, ++ranges::begin(replicas));
         }
         else
         {
-            const auto lock = ext::make_lock(replicas);
+            const auto guard = std::lock_guard{replicas};
             [[maybe_unused]] auto r1 = ranges::all_of(replicas, request);
             [[maybe_unused]] auto r2 = ranges::all_of(replicas, response);
         }
@@ -83,7 +83,7 @@ inline void handle(auto& client, auto& replicas)
         buffer.seekp(0);
     }
 
-    const auto lock = ext::make_lock(replicas);
+    const auto guard = std::lock_guard{replicas};
     replicas.remove_if(disconnected);
     // ranges::remove_if(replicas, disconnected);
 }

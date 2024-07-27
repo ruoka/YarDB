@@ -17,7 +17,7 @@ CC := /usr/lib/llvm-18/bin/clang
 CXX := /usr/lib/llvm-18/bin/clang++
 CXXFLAGS = -pthread -I/usr/local/include
 LDFLAGS = -L/usr/local/lib
-CXXFLAGS += -std=c++23
+CXXFLAGS += -std=c++23 -Wno-reserved-module-identifier 
 endif
 
 ifeq ($(OS),Darwin)
@@ -28,7 +28,7 @@ CXXFLAGS += -std=c++2b
 endif
 
 CXXFLAGS += -stdlib=libc++ -Wall -Wextra
-CXXFLAGS += -Wno-reserved-module-identifier -Wno-deprecated-declarations
+CXXFLAGS += -Wno-deprecated-declarations
 CXXFLAGS += -I$(sourcedir)
 LDFLAGS += -fuse-ld=lld
 

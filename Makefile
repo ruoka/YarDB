@@ -47,7 +47,7 @@ endif # ($(MAKELEVEL),0)
 
 PCMFLAGS = -fno-implicit-modules -fno-implicit-module-maps
 PCMFLAGS += $(foreach P, $(submodules) ,-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
-PCMFLAGS += $(foreach P, $(foreach M, $(modules) $(example-modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
+PCMFLAGS += $(foreach P, $(foreach M, $(modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
 PCMFLAGS += -fprebuilt-module-path=$(moduledir)/
 
 ###############################################################################
@@ -111,28 +111,6 @@ $(library) : $(objects)
 $(test-target): $(objects) $(test-objects) $(libraries)
 	@mkdir -p $(@D)
 	$(CXX) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
-
-###############################################################################
-
-$(moduledir)/%.pcm: $(testdir)/%.c++m
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -c -o $@
-
-$(objectdir)/%.impl.o: $(testdir)/%.impl.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
-
-$(objectdir)/%.test.o: $(testdir)/%.test.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
-
-$(objectdir)/%.o: $(testdir)/%.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
-
-$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(libraries)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $(LDFLAGS) $^ -o $@
 
 ###############################################################################
 

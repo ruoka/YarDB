@@ -16,11 +16,7 @@ jobs:
       with:
         fetch-depth: 1
         submodules: true
-    - name: Install Clang 15
-      run: |
-        export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
-        brew install --force llvm
     - name: make
-      run: make OS=Github
-    - name: make test
-      run: make test OS=Github
+      run: make
+    - name: make run_tests
+      run: make run_tests

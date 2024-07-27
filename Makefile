@@ -27,7 +27,7 @@ CXXFLAGS = -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 CXXFLAGS += -std=c++2b
 endif
 
-CXXFLAGS += -std=c++23 -stdlib=libc++ -Wall -Wextra
+CXXFLAGS += -stdlib=libc++ -Wall -Wextra
 CXXFLAGS += -Wno-reserved-module-identifier -Wno-deprecated-declarations
 CXXFLAGS += -I$(sourcedir)
 LDFLAGS += -fuse-ld=lld

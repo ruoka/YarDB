@@ -1,15 +1,15 @@
 [submodule "cryptic"]
-	path = cryptic
+	path = deps/cryptic
 	url = https://github.com/ruoka/cryptic.git
 [submodule "std"]
-	path = std
+	path = deps/std
 	url = https://github.com/ruoka/CppStandardLibraryAsModule.git
 [submodule "tester"]
-	path = tester
+	path = deps/tester
 	url = https://github.com/ruoka/tester.git
 [submodule "xson"]
-	path = xson
+	path = deps/xson
 	url = https://github.com/ruoka/json4cpp.git
 [submodule "net"]
-	path = net
+	path = deps/net
 	url = https://github.com/ruoka/net4cpp.git

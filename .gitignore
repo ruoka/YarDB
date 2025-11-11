@@ -1,8 +1,39 @@
-bin
-obj
-lib
-include
-pcm
-*.db
+# Build artifacts
+build/
+obj/
+pcm/
+bin/
+lib/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
 *.log
+*.deps
+
+# Compiled files
+*.o
+*.a
+*.pcm
+*.d
+
+# Executables
+yardb
+yarsh
+yarproxy
+yarexport
+test_runner
+
+# Database files
+*.db
 *.pid

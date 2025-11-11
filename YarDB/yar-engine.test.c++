@@ -202,7 +202,7 @@ auto test_set()
             dump(engine);
             require_true(engine.read(all, documents));
             require_true(3u == documents.size());
-            long id = documents[1]["_id"s];
+            xson::integer_type id = documents[1]["_id"s];
             auto selector = object{"_id"s, id};
             documents = object{};
             require_true(engine.destroy(selector, documents));

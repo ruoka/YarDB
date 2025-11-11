@@ -33,7 +33,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 slog << debug << "GET /: "<< request << flush;
 
                 const auto guard = std::lock_guard{engine};
-                return xson::json::stringify({"collections", engine.collections()});
+                return std::make_tuple("200 OK"s, xson::json::stringify({"collections", engine.collections()}));
             });
 
     // Create
@@ -49,7 +49,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.create(document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
     // Read _id
@@ -66,7 +66,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
 
@@ -84,7 +84,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
     // Read first
@@ -101,7 +101,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
     // Read all in descending order
@@ -118,7 +118,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
     // Read last
@@ -135,7 +135,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.read(selector, document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
     // Update aka replace _id
@@ -152,7 +152,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.replace(selector,document);
-                return xson::json::stringify(document);
+                return std::make_tuple("200 OK"s, xson::json::stringify(document));
             });
 
     // Update aka modify _id
@@ -170,7 +170,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.upsert(selector,updates,documents);
-                return xson::json::stringify(documents);
+                return std::make_tuple("200 OK"s, xson::json::stringify(documents));
             });
 
     // Delete _id
@@ -187,7 +187,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.destroy(selector,documents);
-                return xson::json::stringify(documents);
+                return std::make_tuple("200 OK"s, xson::json::stringify(documents));
             });
 
     // Delete first
@@ -204,7 +204,7 @@ export void restful_web_server(std::string_view file, const std::string_view por
                 const auto guard = std::lock_guard{engine};
                 engine.collection(uri.path[1]);
                 engine.destroy(selector,documents);
-                return xson::json::stringify(documents);
+                return std::make_tuple("200 OK"s, xson::json::stringify(documents));
             });
 
     server.listen(port_or_service);

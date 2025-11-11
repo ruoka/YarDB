@@ -1,0 +1,10 @@
+export module tester;
+export import :basic;
+export import :runner;
+export import :assertions;
+export import :behavior_driven_development;
+
+namespace tester
+{
+    export namespace bdd = behavior_driven_development;
+}

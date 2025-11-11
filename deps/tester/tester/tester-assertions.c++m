@@ -1,0 +1,167 @@
+export module tester:assertions;
+import :output;
+import :data;
+import std;
+
+namespace tester::assertions
+{
+    using namespace std::literals;
+    using data::test;
+    using data::statistics;
+
+    export template<template <typename> class M, typename A, typename E>
+    auto require(M<std::common_type_t<A,E>> match, A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        ++statistics.total_assertions;
+        const auto ok = match(actual,expected);
+        statistics.successful_assertions += ok;
+        output::assertion(ok,actual,expected,location);
+        return ok;
+    };
+
+    export template<typename A, typename E>
+    auto require_eq(A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        return require(std::equal_to<std::common_type_t<A,E>>{},actual,expected,location);
+    };
+
+    export template<typename A, typename E>
+    auto require_neq(A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        return require(std::not_equal_to<std::common_type_t<A,E>>{},actual,expected,location);
+    };
+
+    export template<typename A, typename E>
+    auto require_lt(A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        return require(std::less<std::common_type_t<A,E>>{},actual,expected,location);
+    };
+
+    export template<typename A, typename E>
+    auto require_lteq(A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        return require(std::less_equal<std::common_type_t<A,E>>{},actual,expected,location);
+    };
+
+    export template<typename A, typename E>
+    auto require_gt(A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        return require(std::greater<std::common_type_t<A,E>>{},actual,expected,location);
+    };
+
+    export template<typename A, typename E>
+    auto require_gteq(A actual, E expected, const std::source_location location = std::source_location::current())
+    {
+        return require(std::greater_equal<std::common_type_t<A,E>>{},actual,expected,location);
+    };
+
+    export auto require_true(bool actual, const std::source_location location = std::source_location::current())
+    {
+        return require(std::equal_to<bool>{},actual,true,location);
+    };
+
+    export auto require_false(bool actual, const std::source_location location = std::source_location::current())
+    {
+        return require(std::equal_to<bool>{},actual,false,location);
+    };
+
+    export auto require_nothrow(auto&& t, const std::source_location location = std::source_location::current())
+    {
+        auto ok = true;
+        auto actual = "none"sv;
+        const auto expected = "none"sv;
+        try
+        {
+            ++statistics.total_assertions;
+            t();
+            // ok = ok;
+        }
+        catch(const std::exception& e)
+        {
+            ok = not ok;
+            actual = typeid(e).name();
+        }
+        catch(...)
+        {
+            ok = not ok;
+            actual = "?"sv;
+        }
+        statistics.successful_assertions += ok;
+        output::assertion(ok,actual,expected,location);
+    }
+
+    export auto require_throws(auto&& t, const std::source_location location = std::source_location::current())
+    {
+        auto ok = true;
+        auto actual = "?"sv;
+        const auto expected = "any"sv;
+        try
+        {
+            ++statistics.total_assertions;
+            t(); // FIXME
+            ok = not ok;
+            actual = "none"sv;
+        }
+        catch(const std::exception& e)
+        {
+            // ok = ok;
+            actual = typeid(e).name();
+        }
+        catch(...)
+        {
+            // ok = ok;
+            actual = "?"sv;
+        }
+        statistics.successful_assertions += ok;
+        output::assertion(ok,actual,expected,location);
+    }
+
+    export template<typename E>
+    auto require_throws_as(auto&& t, E exception, const std::source_location location = std::source_location::current())
+    {
+        auto ok = true;
+        auto actual = "?"sv;
+        const auto expected = typeid(E).name();
+        try
+        {
+            ++statistics.total_assertions;
+            t(); // FIXME?
+            ok = not ok;
+        }
+        catch(const E&)
+        {
+            // ok = ok;
+            actual = typeid(E).name();
+        }
+        catch(const std::exception& e)
+        {
+            ok = not ok;
+            actual = typeid(e).name();
+        }
+        catch(...)
+        {
+            ok = not ok;
+        }
+        statistics.successful_assertions += ok;
+        output::assertion(ok,actual,expected,location);
+    }
+
+    export auto succeed(auto message, const std::source_location location = std::source_location::current())
+    {
+        ++statistics.total_assertions;
+        ++statistics.successful_assertions;
+        output::message(true,message,location);
+    }
+
+    export auto failed(auto message, const std::source_location location = std::source_location::current())
+    {
+        ++statistics.total_assertions;
+        output::message(false,message,location);
+    }
+
+    export auto warning(auto message, const std::source_location location = std::source_location::current())
+    {
+        output::message(true,message,location);
+    }
+
+}

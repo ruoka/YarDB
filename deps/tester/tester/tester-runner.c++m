@@ -1,0 +1,61 @@
+export module tester:runner;
+import :output;
+import :engine;
+import std;
+
+namespace tester
+{
+
+using namespace std::literals;
+using namespace data;
+
+export class runner
+{
+public:
+
+    runner(std::string_view tags = "") : m_tags{tags}
+    {}
+
+    auto print_test_cases()
+    {
+        output::print_test_cases([this](const auto& tc){return this->included(tc);});
+    }
+
+    auto run_tests()
+    {
+        engine::run_test_cases([this](const auto& tc){return this->excluded(tc);});
+    }
+
+    auto print_test_results()
+    {
+        output::print_test_results();
+    }
+
+    auto print_test_failures()
+    {
+        output::print_test_failures();
+    }
+
+    auto print_test_statistics()
+    {
+        output::print_test_statistics();
+    }
+
+private:
+
+    std::string_view m_tags;
+
+    bool included(const test_case& tc) const
+    {
+        return m_tags.empty() or
+               not (tc.test_name.starts_with("scenario") or tc.test_name.starts_with("test_case")) or
+               tc.test_name.contains(m_tags);
+    }
+
+    bool excluded(const test_case& tc) const
+    {
+        return not included(tc);
+    }
+};
+
+}

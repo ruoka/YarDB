@@ -1,0 +1,77 @@
+export module tester:engine;
+import :output;
+import :data;
+import std;
+
+namespace tester::engine {
+
+using namespace data;
+using namespace std::literals;
+
+auto& make_test_case(std::string_view description, const std::source_location location1, const std::source_location location2 = std::source_location::current()) noexcept
+{
+    auto test_type = std::string_view{location2.function_name()};
+    
+    if(test_type.contains("behavior_driven_development::"))
+        test_type.remove_prefix(test_type.find("behavior_driven_development::") + "behavior_driven_development::"s.length());
+    else if (test_type.contains("basic::"))
+        test_type.remove_prefix(test_type.find("basic::") + "basic::"s.length());
+    else
+        std::terminate();
+
+    test_type.remove_suffix(test_type.length() - test_type.find_first_of("("));
+
+    auto test_name = std::string{test_type} + " -> "s + std::string{description};
+    auto test_case = data::test_case{{location1.function_name(),test_name,location1.file_name(),location1.line(),location1.column(),location2.function_name()},data::test{}};
+
+    if(test_type.contains("scenario") or test_type.contains("test_case"))
+    {
+        test_cases.push_back(test_case);
+        return test_cases.back().run;
+    }
+    else
+    {
+        auto itr = test_cases.begin();
+        if(test_type.starts_with("and_"))
+            test_type.remove_prefix(4); // remove "and_"
+        while(itr->test_name.starts_with("then") or
+              itr->test_name.starts_with("and_then") or
+              itr->test_name.contains(test_type)) // given, and_given, when, and_when, section
+           ++itr;
+        return test_cases.insert(itr,test_case)->run;
+    }
+}
+
+auto run_test_cases(auto filter)
+{
+    while(not test_cases.empty())
+    {
+        auto tc = test_cases.begin();
+
+        if(filter(*tc))
+        {
+            test_cases.erase(tc);
+            continue;
+        }
+
+        output::test_case(*tc);
+
+        auto tr = test_result{*tc};
+        try
+        {
+            ++statistics.total_tests;
+            tc->run();
+            ++statistics.successful_tests;
+        }
+        catch(const std::exception& ex)
+        {
+            tr.success = false;
+            output::exception(*tc,ex);
+        }
+        test_cases.erase(tc);
+        tr.output = output::stream.view();
+        test_results.push_back(tr);
+    }
+}
+
+}

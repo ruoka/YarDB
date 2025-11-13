@@ -10,23 +10,48 @@ submoduledir = deps
 # Include shared compiler configuration
 include config/compiler.mk
 
+lowercase_os := $(if $(OS),$(shell echo $(OS) | tr '[:upper:]' '[:lower:]'),unknown)
+BUILD_DIR ?= build-$(lowercase_os)
+export BUILD_DIR
+
+ifndef PREFIX
+PREFIX := $(BUILD_DIR)
+endif
+
+stamproot = $(PREFIX)/stamps
+submodule_module_stamps = $(submodules:%=$(stamproot)/module-%)
+submodule_deps_stamps = $(submodules:%=$(stamproot)/deps-%)
+
+submodule_deps_prev :=
+$(foreach s,$(submodule_deps_stamps),$(if $(submodule_deps_prev),$(eval $(s): $(submodule_deps_prev)))$(eval submodule_deps_prev := $(s)))
+submodule_module_prev :=
+$(foreach s,$(submodule_module_stamps),$(if $(submodule_module_prev),$(eval $(s): $(submodule_module_prev)))$(eval submodule_module_prev := $(s)))
+
 PCMFLAGS = -fno-implicit-modules -fno-implicit-module-maps
 PCMFLAGS += $(foreach P, $(submodules) ,-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
-PCMFLAGS += $(foreach P, $(foreach M, $(modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
+PCMFLAGS += $(foreach P, $(foreach M, $(modules) $(example-modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
 PCMFLAGS += -fprebuilt-module-path=$(moduledir)/
 
 ###############################################################################
 
-PREFIX = build
 sourcedir = $(project)
-sourcedirs = $(sourcedir)
+testdir = tests
+project = $(lastword $(notdir $(CURDIR)))
 moduledir = $(PREFIX)/pcm
 objectdir = $(PREFIX)/obj
 librarydir = $(PREFIX)/lib
 binarydir = $(PREFIX)/bin
-
-project = $(lastword $(notdir $(CURDIR)))
 library = $(addprefix $(librarydir)/, lib$(project).a)
+
+ifneq ($(wildcard $(testdir)),)
+sourcedirs = $(sourcedir) $(testdir)
+example-modules = $(wildcard $(testdir)/*.c++m)
+example-objects = $(example-modules:$(testdir)/%.c++m=$(objectdir)/$(testdir)/%.o)
+else
+sourcedirs = $(sourcedir)
+example-modules =
+example-objects =
+endif
 
 # Add sourcedir to include path after it's defined
 CXXFLAGS += -I$(sourcedir)
@@ -57,7 +82,15 @@ $(moduledir)/%.pcm: $(sourcedir)/%.c++m
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -o $@
 
+$(moduledir)/%.pcm: $(testdir)/%.c++m
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -o $@
+
 $(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+
+$(objectdir)/%.impl.o: $(testdir)/%.impl.c++
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
 
@@ -65,13 +98,25 @@ $(objectdir)/%.test.o: $(sourcedir)/%.test.c++
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) -c $< -o $@
 
+$(objectdir)/%.test.o: $(testdir)/%.test.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) -c $< -o $@
+
 $(objectdir)/%.o: $(sourcedir)/%.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(objectdir)/%.o: $(testdir)/%.c++
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
 
 $(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
+
+$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $(LDFLAGS) $^ -o $@
 
 $(library) : $(objects)
 	@mkdir -p $(@D)
@@ -85,7 +130,7 @@ $(test-target): $(objects) $(test-objects) $(libraries)
 
 $(objectdir)/%.o: $(moduledir)/%.pcm
 	@mkdir -p $(@D)
-	$(CXX) $(PCMFLAGS) $< -c -o $@
+	$(CXX) -fPIC $(PCMFLAGS) $< -c -o $@
 
 ###############################################################################
 
@@ -112,18 +157,25 @@ $(dependencies): $(modules) $(sources)
 ###############################################################################
 
 .PHONY: submodule-deps
-submodule-deps:
-	$(foreach M, $(submodules), $(MAKE) -C $(submoduledir)/$(M) deps PREFIX=../../$(PREFIX);)
+submodule-deps: $(submodule_deps_stamps)
 
-$(foreach M, $(submodules), $(moduledir)/$(M).pcm):
-	@echo "git submodule update skipped"
-#	git submodule update --init --depth 1
-	$(MAKE) -C $(submoduledir)/$(basename $(@F)) module PREFIX=../../$(PREFIX)
+$(stamproot)/deps-%:
+	@mkdir -p $(@D)
+	$(MAKE) -C $(submoduledir)/$* deps PREFIX=../../$(PREFIX)
+	@touch $@
 
-$(librarydir)/%.a:
-	@echo "git submodule update skipped"
-#	git submodule update --init --depth 1
-	$(MAKE) -C $(submoduledir)/$(subst lib,,$(basename $(@F))) module PREFIX=../../$(PREFIX)
+.PHONY: submodule-modules
+submodule-modules: $(submodule_module_stamps)
+
+$(submodules:%=$(moduledir)/%.pcm): $(moduledir)/%.pcm: $(stamproot)/module-% ;
+
+$(stamproot)/module-%:
+	@mkdir -p $(@D)
+	$(MAKE) -C $(submoduledir)/$* module PREFIX=../../$(PREFIX)
+	@touch $@
+
+$(librarydir)/lib%.a: $(moduledir)/%.pcm
+	@true
 
 ###############################################################################
 
@@ -146,7 +198,7 @@ submodule-update:
 deps: $(dependencies)
 
 .PHONY: build
-build: $(targets)
+build: submodule-modules $(targets)
 
 .PHONY: tests
 tests: submodule-update deps $(test-target)
@@ -162,7 +214,7 @@ clean: mostlyclean
 
 .PHONY: mostlyclean
 mostlyclean:
-	rm -rf $(objectdir) $(moduledir)
+	rm -rf $(objectdir) $(moduledir) $(stamproot)
 
 .PHONY: dump
 dump:

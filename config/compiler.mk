@@ -9,7 +9,7 @@ endif
 
 COMMON_CXXFLAGS = -std=c++23 -stdlib=libc++
 COMMON_CXXFLAGS += -Wall -Wextra -Wno-reserved-module-identifier -Wno-deprecated-declarations
-COMMON_LDFLAGS = -lc++
+COMMON_LDFLAGS =
 AR = ar
 ARFLAGS = rv
 

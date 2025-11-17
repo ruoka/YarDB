@@ -1,12 +1,15 @@
 # Build artifacts
 build/
+build-*/
 obj/
 pcm/
 bin/
 lib/
+stamps/
 
 # IDE files
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo

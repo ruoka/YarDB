@@ -22,46 +22,54 @@ try
 
     for(string_view option : arguments)
     {
-        if(option.starts_with("--clog"))
-        {
-            slog.redirect(clog);
-        }
-        else if(option.starts_with("--slog_tag="))
-        {
-            option.remove_prefix(option.find_first_not_of("--slog_tag="));
-            slog.appname(option);
-        }
-        else if(option.starts_with("--slog_level="))
-        {
-            option.remove_prefix(option.find_first_not_of("--slog_level="));
-            auto mask = 0u;
-            auto [ptr,ec] = std::from_chars(option.begin(),option.end(),mask);
-            if(ec != std::errc() or ptr != option.end())
-            {
-                slog << error << " invalid syslog mask --slog_level=" << option << flush;
-                return 1;
-            }
-            slog.level(mask);
-        }
-        else if(option.starts_with("--file="))
-        {
-            option.remove_prefix(option.find_first_not_of("--file="));
-            file = option;
-        }
-        else if(option.starts_with("--help"))
+        if(option == "--help")
         {
             clog << usage << endl;
             return 0;
         }
-        else if(option.starts_with("-"))
+
+        if(option == "--clog")
         {
+            slog.redirect(clog);
+            continue;
+        }
+
+        if(option.starts_with("--slog_tag="))
+        {
+            auto tag = option.substr(string_view{"--slog_tag="}.size());
+            slog.appname(tag);
+            continue;
+        }
+
+        if(option.starts_with("--slog_level="))
+        {
+            auto level_str = option.substr(string_view{"--slog_level="}.size());
+            auto mask = 0u;
+            auto [ptr,ec] = std::from_chars(level_str.begin(), level_str.end(), mask);
+            if(ec != std::errc() or ptr != level_str.end())
+            {
+                clog << "Error: invalid syslog mask --slog_level=" << level_str << endl;
+                clog << usage << endl;
+                return 1;
+            }
+            slog.level(mask);
+            continue;
+        }
+
+        if(option.starts_with("--file="))
+        {
+            file = option.substr(string_view{"--file="}.size());
+            continue;
+        }
+
+        if(option.starts_with("-"))
+        {
+            clog << "Error: unknown option " << option << endl;
             clog << usage << endl;
             return 1;
         }
-        else
-        {
-            service_or_port = option;
-        }
+
+        service_or_port = option;
     }
 
     slog << notice << "Starting up server" << flush;

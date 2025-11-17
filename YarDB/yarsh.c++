@@ -34,20 +34,20 @@ try
 
     for(const string_view option : arguments)
     {
-        if(option.starts_with("--help"))
+        if(option == "--help")
         {
             clog << usage << endl;
             return 0;
         }
-        else if(option.starts_with("-"))
+
+        if(option.starts_with("-"))
         {
+            clog << "Error: unknown option " << option << endl;
             clog << usage << endl;
             return 1;
         }
-        else
-        {
-            url = option;
-        }
+
+        url = option;
     }
 
     auto server = connect(url);

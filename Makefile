@@ -18,6 +18,22 @@ ifndef PREFIX
 PREFIX := $(BUILD_DIR)
 endif
 
+# Detect spaces in the absolute path; GNU make targets/prereqs break on unescaped spaces.
+empty :=
+space := $(empty) $(empty)
+# Export compiler settings for submodules (they may not include config/compiler.mk)
+# Note: config/compiler.mk uses 'override', so these are already set, but we export for submodules
+export CC CXX CXXFLAGS LDFLAGS
+ifneq ($(findstring $(space),$(CURDIR)),)
+# Repo path contains spaces: keep PREFIX relative for targets/prereqs and pass it explicitly to sub-makes.
+SUBMAKE_PREFIX_ARG := PREFIX=../../$(PREFIX)
+else
+# No spaces: safe to export absolute PREFIX to sub-makes.
+PREFIX := $(abspath $(PREFIX))
+export PREFIX
+SUBMAKE_PREFIX_ARG :=
+endif
+
 stamproot = $(PREFIX)/stamps
 submodule_module_stamps = $(submodules:%=$(stamproot)/module-%)
 submodule_deps_stamps = $(submodules:%=$(stamproot)/deps-%)
@@ -28,7 +44,7 @@ submodule_module_prev :=
 $(foreach s,$(submodule_module_stamps),$(if $(submodule_module_prev),$(eval $(s): $(submodule_module_prev)))$(eval submodule_module_prev := $(s)))
 
 PCMFLAGS = -fno-implicit-modules -fno-implicit-module-maps
-PCMFLAGS += $(foreach P, $(submodules) ,-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
+PCMFLAGS += $(foreach P, $(submodules),-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
 PCMFLAGS += $(foreach P, $(foreach M, $(modules) $(example-modules), $(basename $(notdir $(M)))), -fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
 PCMFLAGS += -fprebuilt-module-path=$(moduledir)/
 
@@ -36,22 +52,14 @@ PCMFLAGS += -fprebuilt-module-path=$(moduledir)/
 
 sourcedir = $(project)
 testdir = tests
-project = $(lastword $(notdir $(CURDIR)))
+sourcedirs = $(sourcedir) $(testdir)
 moduledir = $(PREFIX)/pcm
 objectdir = $(PREFIX)/obj
 librarydir = $(PREFIX)/lib
 binarydir = $(PREFIX)/bin
-library = $(addprefix $(librarydir)/, lib$(project).a)
 
-ifneq ($(wildcard $(testdir)),)
-sourcedirs = $(sourcedir) $(testdir)
-example-modules = $(wildcard $(testdir)/*.c++m)
-example-objects = $(example-modules:$(testdir)/%.c++m=$(objectdir)/$(testdir)/%.o)
-else
-sourcedirs = $(sourcedir)
-example-modules =
-example-objects =
-endif
+project = $(lastword $(notdir $(CURDIR)))
+library = $(addprefix $(librarydir)/, lib$(project).a)
 
 # Add sourcedir to include path after it's defined
 CXXFLAGS += -I$(sourcedir)
@@ -65,6 +73,8 @@ test-program = test_runner
 test-target = $(test-program:%=$(binarydir)/%)
 test-sources = $(wildcard $(sourcedir)/*.test.c++)
 test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o)
+example-modules = $(wildcard $(testdir)/*.c++m)
+example-objects = $(example-modules:$(testdir)/%.c++m=$(objectdir)/$(testdir)/%.o)
 
 ###############################################################################
 
@@ -82,15 +92,7 @@ $(moduledir)/%.pcm: $(sourcedir)/%.c++m
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -o $@
 
-$(moduledir)/%.pcm: $(testdir)/%.c++m
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -o $@
-
 $(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
-
-$(objectdir)/%.impl.o: $(testdir)/%.impl.c++
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
 
@@ -98,15 +100,7 @@ $(objectdir)/%.test.o: $(sourcedir)/%.test.c++
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) -c $< -o $@
 
-$(objectdir)/%.test.o: $(testdir)/%.test.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) -c $< -o $@
-
 $(objectdir)/%.o: $(sourcedir)/%.c++
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
-
-$(objectdir)/%.o: $(testdir)/%.c++
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
 
@@ -114,17 +108,35 @@ $(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
 
-$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(libraries)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $(LDFLAGS) $^ -o $@
-
 $(library) : $(objects)
 	@mkdir -p $(@D)
 	$(AR) $(ARFLAGS) $@ $^
 
 $(test-target): $(objects) $(test-objects) $(libraries)
 	@mkdir -p $(@D)
-	$(CXX) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS) $^ -o $@
+
+###############################################################################
+
+$(moduledir)/%.pcm: $(testdir)/%.c++m
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< --precompile -o $@
+
+$(objectdir)/%.impl.o: $(testdir)/%.impl.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+
+$(objectdir)/%.test.o: $(testdir)/%.test.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(objectdir)/%.o: $(testdir)/%.c++
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $< -c -o $@
+
+$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(libraries)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS) $(LDFLAGS) $^ -o $@
 
 ###############################################################################
 
@@ -161,7 +173,7 @@ submodule-deps: $(submodule_deps_stamps)
 
 $(stamproot)/deps-%:
 	@mkdir -p $(@D)
-	$(MAKE) -C $(submoduledir)/$* deps PREFIX=../../$(PREFIX)
+	$(MAKE) -C $(submoduledir)/$* deps $(SUBMAKE_PREFIX_ARG)
 	@touch $@
 
 .PHONY: submodule-modules
@@ -171,7 +183,7 @@ $(submodules:%=$(moduledir)/%.pcm): $(moduledir)/%.pcm: $(stamproot)/module-% ;
 
 $(stamproot)/module-%:
 	@mkdir -p $(@D)
-	$(MAKE) -C $(submoduledir)/$* module PREFIX=../../$(PREFIX)
+	$(MAKE) -C $(submoduledir)/$* module $(SUBMAKE_PREFIX_ARG)
 	@touch $@
 
 $(librarydir)/lib%.a: $(moduledir)/%.pcm

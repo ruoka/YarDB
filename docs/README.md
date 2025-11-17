@@ -6,6 +6,7 @@ This directory contains project documentation organized by topic.
 
 ### Current Documentation
 - **README.md** (this file) - Documentation index
+- **project_organization.md** - Project structure and organization (P1204R0 compliance)
 - **development.md** - Development workflows and quick reference
 - **deployment.md** - Deployment procedures
 - **programs.md** - Detailed documentation for all programs

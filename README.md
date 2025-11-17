@@ -192,11 +192,12 @@ See [LICENSE](LICENSE) for details.
 
 ## Project Structure
 
-This project follows [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html) guidelines. See [PROJECT_ORGANIZATION.md](PROJECT_ORGANIZATION.md) for detailed structure documentation.
+This project follows [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html) guidelines. See [Project Organization](docs/project_organization.md) for detailed structure documentation.
 
 ## Documentation
 
 See [docs/](docs/) for detailed documentation:
-- [Development Guide](docs/development.md)
-- [Deployment Guide](docs/deployment.md)
+- [Project Organization](docs/project_organization.md) - Project structure and P1204R0 compliance
+- [Development Guide](docs/development.md) - Development workflows and quick reference
+- [Deployment Guide](docs/deployment.md) - Deployment procedures
 - [Programs Documentation](docs/programs.md) - Detailed guide for all programs

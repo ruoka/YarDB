@@ -5,7 +5,7 @@
         "*.c++": "cpp",
         "*.c++m": "cpp"
     },
-    "C_Cpp.default.compilerPath": "/usr/lib/llvm-19/bin/clang++",
+    "C_Cpp.default.compilerPath": "/usr/lib/llvm-20/bin/clang++",
     "C_Cpp.default.compilerArgs": [
         "-std=c++23",
         "-stdlib=libc++",
@@ -19,14 +19,16 @@
     "C_Cpp.default.intelliSenseMode": "clang-x64",
     "C_Cpp.default.includePaths": [
         "${workspaceFolder}/YarDB",
+        "${workspaceFolder}/deps/net/include",
+        "${workspaceFolder}/deps/xson/include",
         "/usr/include/c++/v1"
     ],
     "C_Cpp.errorSquiggles": "enabled",
     "C_Cpp.configurationProvider": "ms-vscode.makefile-tools",
     "makefile.launchConfigurations": [
         {
-            "cwd": "/workspaces",
-            "binaryPath": "/workspaces/YarDB/build-linux/bin/yardb",
+            "cwd": "${workspaceFolder}",
+            "binaryPath": "${workspaceFolder}/build-linux/bin/yardb",
             "binaryArgs": ["--help"]
         }
     ],

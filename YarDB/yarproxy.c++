@@ -85,7 +85,6 @@ inline void handle(auto& client, auto& replicas)
 
     const auto guard = std::lock_guard{replicas};
     replicas.remove_if(disconnected);
-    // ranges::remove_if(replicas, disconnected);
 }
 
 int main(int argc, char** argv)

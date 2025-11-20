@@ -1,42 +1,94 @@
-# Build artifacts
+###############################################################################
+# Build Artifacts
+###############################################################################
+
+# Build directories
 build/
 build-*/
+
+# Build subdirectories
 obj/
 pcm/
 bin/
 lib/
 stamps/
 
-# IDE files
-.vscode/*
-!.vscode/settings.json
-.idea/
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.log
-*.deps
-
-# Compiled files
+# Compiled object files
 *.o
 *.a
 *.pcm
 *.d
+*.deps
 
-# Executables
+# Executables (covered by build-*/bin/ pattern above)
+# Specific executables listed for clarity, but build-*/bin/ should catch them
 yardb
 yarsh
 yarproxy
 yarexport
 test_runner
 
-# Database files
+###############################################################################
+# IDE and Editor Files
+###############################################################################
+
+# Visual Studio Code
+.vscode/
+!.vscode/settings.json
+.vscode-test/
+.cursor/
+
+# Vim
+*.swp
+*.swo
+*~
+
+###############################################################################
+# Operating System Files
+###############################################################################
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+.directory
+.Trash-*
+
+###############################################################################
+# Temporary and Log Files
+###############################################################################
+
+*.tmp
+*.log
+*.bak
+
+# Test output
+test_runner.log
+*.test.log
+
+# Build logs
+build.log
+*.build.log
+
+###############################################################################
+# Database Files
+###############################################################################
+
 *.db
 *.pid
+
+###############################################################################
+# Coverage and Analysis Reports
+###############################################################################
+
+# Code coverage (gcov)
+*.gcov
+*.gcda
+*.gcno
+coverage/
+
+# Static analysis reports
+*.plist

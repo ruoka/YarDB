@@ -62,7 +62,7 @@ try
 }
 catch(const system_error& e)
 {
-    cerr << "System error with code " << e.code() << " aka " << quoted(e.what())<< endl;
+    cerr << "System error with code " << e.code() << " aka " << quoted(e.what()) << endl;
     return 1;
 }
 catch(const exception& e)

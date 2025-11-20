@@ -1,27 +1,30 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
-	"name": "clang++-19",
+	"name": "clang++-20",
 	"build": {
 		"dockerfile": "Dockerfile"
 	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
-	
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	"forwardPorts": [
-		2112
+		2112,
+		2113
 	],
 	"portsAttributes": {
 		"2112": {
 			"label": "YarDB Server",
 			"onAutoForward": "notify"
+		},
+		"2113": {
+			"label": "YarProxy Server",
+			"onAutoForward": "notify"
 		}
 	},
-	
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "clang++-19 -v && echo 'Dev container ready!'",
-	
+	"postCreateCommand": "clang++-20 -v && ls -lh ~/clang-modules-cache/std.pcm 2>/dev/null || echo 'Note: std.pcm will be created during container build'",
+
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
@@ -35,9 +38,6 @@
 		},
 		"codespaces": {
 			"repositories": {
-				"ruoka/std": {
-					"permissions": "write-all"
-				},
 				"ruoka/net": {
 					"permissions": "write-all"
 				},

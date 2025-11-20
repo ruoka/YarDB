@@ -41,11 +41,12 @@ YarDB/
 │   └── compiler.mk             # Shared compiler configuration
 │
 ├── deps/                        # Dependencies (submodules)
-│   ├── std/                     # Standard library extensions
 │   ├── net/                     # Network library
 │   ├── xson/                    # JSON/XML library
 │   ├── cryptic/                 # Cryptographic functions
 │   └── tester/                 # Testing framework
+│
+│   Note: std module is built from libc++ source (Clang 20+), not from a submodule
 │
 └── docs/                        # Documentation
     ├── README.md               # Documentation index
@@ -105,7 +106,7 @@ YarDB/
 
 ### Dependencies
 
-- **std**: Standard library extensions (module)
+- **std**: Built-in standard library module (from libc++ source, Clang 20+)
 - **net**: Network library (module) - HTTP server implementation
 - **xson**: JSON/XML library (module) - Data serialization
 - **cryptic**: Cryptographic functions (module) - Hashing and encoding

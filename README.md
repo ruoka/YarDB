@@ -23,12 +23,16 @@ YarDB is a C++23 application that implements:
 
 ## Requirements
 
+### Compiler
+- **Clang 20 or higher** (required for C++23 modules and built-in std module support)
+- libc++ development libraries with module support
+
 ### Linux
-- Clang 18+ (`/usr/lib/llvm-18/bin/clang++`)
+- Clang 20+ (`/usr/lib/llvm-20/bin/clang++`) or later
 - libc++ development libraries
 
 ### macOS
-- Homebrew LLVM 19+ (`brew install llvm@19`) or LLVM (`brew install llvm`)
+- Homebrew LLVM 20+ (`brew install llvm@20`) or LLVM 20+ (`brew install llvm`)
 - System clang from Xcode doesn't fully support C++23 modules
 
 ## Building
@@ -168,11 +172,12 @@ yarexport --file=mydb.db > export.json
 ## Dependencies
 
 The project uses git submodules for dependencies:
-- `std`: Standard library extensions
 - `net`: Network library (HTTP server)
 - `xson`: JSON/XML parsing
 - `cryptic`: Cryptographic functions (SHA1, SHA2, Base64)
 - `tester`: Testing framework
+
+**Note**: The `std` module is built from libc++ source (provided by Clang 20+), not from a submodule.
 
 ## API Endpoints
 

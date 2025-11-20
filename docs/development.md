@@ -23,17 +23,19 @@ git pull --recurse-submodules
 
 #### macOS
 ```bash
-# Install Homebrew LLVM (required for C++23 modules)
-brew install llvm@19
+# Install Homebrew LLVM 20+ (required for C++23 modules and built-in std module)
+brew install llvm@20
 
-# Or use latest LLVM
+# Or use latest LLVM (must be 20+)
 brew install llvm
 ```
 
 #### Linux
 ```bash
-# Install Clang 19
-sudo apt-get install clang-19 libc++-19-dev
+# Install Clang 20+
+sudo apt-get install clang-20 libc++-20-dev
+
+# Or use LLVM 20 from /usr/lib/llvm-20
 ```
 
 ### Common Tasks
@@ -44,7 +46,7 @@ sudo apt-get install clang-19 libc++-19-dev
 ## Troubleshooting
 
 ### Linking Issues
-- Check that all submodules are built: `make -C deps/std module`
+- Check that all submodules are built: `make build` (std module is built from libc++ source, not from a submodule)
 - Verify library paths in `config/compiler.mk`
 
 ### Module Issues

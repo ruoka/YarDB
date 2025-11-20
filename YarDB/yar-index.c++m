@@ -179,23 +179,23 @@ public:
 
     std::vector<std::string> keys() const;
 
-    bool primary_key(const object& selector) const;
+    bool primary_key(const xson::object& selector) const;
 
-    bool secondary_key(const object& selector) const;
+    bool secondary_key(const xson::object& selector) const;
 
-    index_view view(const object& selector) const;
+    index_view view(const xson::object& selector) const;
 
-    void update(object& document);
+    void update(xson::object& document);
 
-    void insert(object& document, position_type position);
+    void insert(xson::object& document, position_type position);
 
-    void erase(const object& document);
+    void erase(const xson::object& document);
 
 private:
 
-    sequence_type  m_sequence;
+    xson::integer_type  m_sequence;
 
-    primary_index_type m_primary_keys;
+    std::map<xson::integer_type, position_type> m_primary_keys;
 
     secondary_index_map m_secondary_keys;
 };

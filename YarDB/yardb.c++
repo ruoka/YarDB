@@ -1,3 +1,4 @@
+#include <csignal>
 import yar;
 import net;
 import std;
@@ -11,8 +12,8 @@ const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<
 int main(int argc, char** argv)
 try
 {
-    std::signal(std::sigterm, std::exit); // Handle kill
-    std::signal(std::sigint,  std::exit); // Handle ctrl-c
+    std::signal(SIGTERM, std::exit); // Handle kill
+    std::signal(SIGINT,  std::exit); // Handle ctrl-c
 
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;

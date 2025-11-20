@@ -46,13 +46,11 @@ export SDKROOT
 LLVM_HAS_LIBCXX := $(shell test -d $(LLVM_PREFIX)/include/c++/v1 && echo yes || echo no)
 
 # Always use built-in std module from libc++
-# We assume clang will always provide std.cppm
+# With -fimplicit-modules, Clang automatically builds std.pcm when first imported
 ifeq ($(LLVM_HAS_LIBCXX),yes)
 # LLVM with its own libc++: use LLVM's libc++ headers and libraries
 # This enables using "import std;" with -fexperimental-library
-# The built-in std module is provided by libc++, so we don't need to build deps/std
-# Note: We build std.pcm from source to ensure matching flags, so we don't need implicit modules
-override CXXFLAGS := $(COMMON_CXXFLAGS) -nostdinc++ -isystem $(LLVM_PREFIX)/include/c++/v1 -fno-implicit-modules -fno-implicit-module-maps -O3
+override CXXFLAGS := $(COMMON_CXXFLAGS) -nostdinc++ -isystem $(LLVM_PREFIX)/include/c++/v1 -fimplicit-modules -O3
 # Ensure we consistently use one SDK for C headers/libs and link against LLVM libc++
 # Explicit libc++ linkage with rpath ensures correct library resolution
 # Check if lib/c++ subdirectory exists (Homebrew), otherwise use lib directly (/usr/local/llvm)

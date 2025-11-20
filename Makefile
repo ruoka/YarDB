@@ -34,12 +34,14 @@ endif
 # Detect spaces in the absolute path; GNU make targets/prereqs break on unescaped spaces.
 empty :=
 space := $(empty) $(empty)
-# Always use built-in std module from libc++
-# We build std.pcm from libc++ source, so we need to reference it explicitly
-PCMFLAGS_COMMON = -fno-implicit-modules -fno-implicit-module-maps
-PCMFLAGS_COMMON += -fmodule-file=std=$(moduledir)/std.pcm
+
+# Use implicit modules - Clang will automatically build missing modules (including std)
+# Modules are cached in moduledir for reuse across builds
+# Note: -fmodules-cache-path is only used during precompile, not during -c compilation
+PCMFLAGS_COMMON = -fimplicit-modules
 PCMFLAGS_COMMON += $(foreach M, $(modules) $(example-modules), -fmodule-file=$(subst -,:,$(basename $(notdir $(M))))=$(moduledir)/$(basename $(notdir $(M))).pcm)
 PCMFLAGS_COMMON += -fprebuilt-module-path=$(moduledir)/
+PCMFLAGS_PRECOMPILE = -fmodules-cache-path=$(moduledir)
 PCMFLAGS_BUILD = $(PCMFLAGS_COMMON)
 PCMFLAGS_BUILD += $(foreach P, $(build_submodules),-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
 PCMFLAGS_TEST = $(PCMFLAGS_BUILD)
@@ -47,7 +49,6 @@ PCMFLAGS_TEST += $(foreach P, $(test_submodules),-fmodule-file=$(subst -,:,$(P))
 
 # Export compiler settings for submodules (they may not include config/compiler.mk)
 # Note: config/compiler.mk uses 'override', so these are already set, but we export for submodules
-# Also export LLVM_PREFIX for std module building
 export CC CXX CXXFLAGS LDFLAGS LLVM_PREFIX
 ifneq ($(findstring $(space),$(CURDIR)),)
 # Repo path contains spaces: keep PREFIX relative for targets/prereqs and pass it explicitly to sub-makes.
@@ -70,33 +71,18 @@ $(foreach s,$(submodule_deps_stamps),$(if $(submodule_deps_prev),$(eval $(s): $(
 submodule_module_prev :=
 $(foreach s,$(submodule_module_stamps),$(if $(submodule_module_prev),$(eval $(s): $(submodule_module_prev)))$(eval submodule_module_prev := $(s)))
 
-# Always use built-in std module from libc++
-# We build std.pcm from libc++ source, so we need to reference it explicitly
-PCMFLAGS_COMMON = -fno-implicit-modules -fno-implicit-module-maps
-PCMFLAGS_COMMON += -fmodule-file=std=$(moduledir)/std.pcm
-PCMFLAGS_COMMON += $(foreach M, $(modules) $(example-modules), -fmodule-file=$(subst -,:,$(basename $(notdir $(M))))=$(moduledir)/$(basename $(notdir $(M))).pcm)
-PCMFLAGS_COMMON += -fprebuilt-module-path=$(moduledir)/
-PCMFLAGS_BUILD = $(PCMFLAGS_COMMON)
-PCMFLAGS_BUILD += $(foreach P, $(build_submodules),-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
-PCMFLAGS_TEST = $(PCMFLAGS_BUILD)
-PCMFLAGS_TEST += $(foreach P, $(test_submodules),-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
-
 ###############################################################################
 
 sourcedir = $(project)
 testdir = tests
-sourcedirs = $(sourcedir) $(testdir)
 moduledir = $(PREFIX)/pcm
 objectdir = $(PREFIX)/obj
 librarydir = $(PREFIX)/lib
 binarydir = $(PREFIX)/bin
 
-# Separate flags for submodules - only include std and prebuilt-module-path
+# Separate flags for submodules - use same module cache as main project
 # Submodules shouldn't reference main project modules that don't exist yet
-# Use PREFIX directly since moduledir = $(PREFIX)/pcm
-PCMFLAGS_SUBMODULE = -fno-implicit-modules -fno-implicit-module-maps
-PCMFLAGS_SUBMODULE += -fmodule-file=std=$(PREFIX)/pcm/std.pcm
-PCMFLAGS_SUBMODULE += -fprebuilt-module-path=$(PREFIX)/pcm/
+PCMFLAGS_SUBMODULE = -fimplicit-modules -fprebuilt-module-path=$(PREFIX)/pcm/
 export PCMFLAGS_SUBMODULE
 
 project = $(lastword $(notdir $(CURDIR)))
@@ -108,7 +94,8 @@ CXXFLAGS += -I$(sourcedir)
 targets = $(programs:%=$(binarydir)/%)
 modules = $(wildcard $(sourcedir)/*.c++m)
 sources = $(filter-out $(programs:%=$(sourcedir)/%.c++) $(test-program:%=$(sourcedir)/%.c++) $(test-sources), $(wildcard $(sourcedir)/*.c++))
-objects = $(modules:$(sourcedir)%.c++m=$(objectdir)%.o) $(sources:$(sourcedir)%.c++=$(objectdir)%.o)
+impl-sources = $(wildcard $(sourcedir)/*.impl.c++)
+objects = $(modules:$(sourcedir)%.c++m=$(objectdir)%.o) $(sources:$(sourcedir)%.c++=$(objectdir)%.o) $(impl-sources:$(sourcedir)%.impl.c++=$(objectdir)%.impl.o)
 
 test-program = test_runner
 test-target = $(test-program:%=$(binarydir)/%)
@@ -116,6 +103,19 @@ test-sources = $(wildcard $(sourcedir)/*.test.c++)
 test-objects = $(test-sources:$(sourcedir)%.c++=$(objectdir)%.o)
 example-modules = $(wildcard $(testdir)/*.c++m)
 example-objects = $(example-modules:$(testdir)/%.c++m=$(objectdir)/$(testdir)/%.o)
+
+# Dependency files: header deps (.d) and module deps
+header_deps = $(objects:.o=.d) $(test-objects:.o=.d)
+
+# clang-scan-deps is required (comes with Clang 20+)
+# Use the same directory as the compiler
+clang_scan_deps := $(shell dirname "$(CXX)" 2>/dev/null)/clang-scan-deps
+
+# One big dependency file for the whole project (module dependencies)
+module_depfile = $(moduledir)/modules.dep
+
+# All source files for dependency scanning
+all_sources = $(modules) $(sources) $(impl-sources) $(test-sources) $(example-modules) $(wildcard $(testdir)/*.impl.c++) $(wildcard $(testdir)/*.c++)
 
 ###############################################################################
 
@@ -132,30 +132,36 @@ $(dirs):
 
 .SUFFIXES:
 .SUFFIXES:  .deps .c++m .c++ .impl.c++ .test.c++ .pcm .o .impl.o .test.o .a
-.PRECIOUS: $(objectdir)/%.deps $(moduledir)/%.pcm
+.PRECIOUS: $(moduledir)/%.pcm $(objectdir)/%.d $(module_depfile)
 
 ###############################################################################
 
-$(moduledir)/%.pcm: $(sourcedir)/%.c++m $(moduledir)/std.pcm | $(moduledir)
+# Rule for module interface units (.c++m) → produces .pcm
+$(moduledir)/%.pcm: $(sourcedir)/%.c++m $(submodule_module_stamps) $(module_depfile) | $(moduledir)
+	@mkdir -p $(@D) $(objectdir)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $(PCMFLAGS_PRECOMPILE) $< --precompile -o $@
+
+# Rule to compile .pcm to .o (module interface object file)
+$(objectdir)/%.o: $(moduledir)/%.pcm | $(objectdir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< --precompile -o $@
+	$(CXX) -fPIC $(PCMFLAGS_BUILD) $< -c -o $@
 
-$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++ | $(objectdir)
+# Rule for implementation partitions (.impl.c++) → produces .o
+$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++ $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -MD -MF $(@:.o=.d) -o $@
 
-$(objectdir)/%.test.o: $(sourcedir)/%.test.c++ | $(objectdir)
+# Rule for test units (.test.c++) → produces .o
+$(objectdir)/%.test.o: $(sourcedir)/%.test.c++ $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) -c $< -MD -MF $(@:.o=.d) -o $@
 
-$(objectdir)/%.o: $(sourcedir)/%.c++ $(moduledir)/std.pcm | $(objectdir)
+# Rule for implementation units (.c++) → produces .o
+$(objectdir)/%.o: $(sourcedir)/%.c++ $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< -c -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< -c -MD -MF $(@:.o=.d) -o $@
 
-# Always use built-in std module from libc++
-BUILTIN_STD_OBJECT = $(objectdir)/std.o
-
-$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(BUILTIN_STD_OBJECT) $(libraries) | $(binarydir)
+$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries) | $(binarydir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS_BUILD) $^ -o $@
 
@@ -163,29 +169,32 @@ $(library) : $(objects) | $(librarydir)
 	@mkdir -p $(@D)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(test-target): $(objects) $(test-objects) $(BUILTIN_STD_OBJECT) $(libraries) $(test_libraries) | $(binarydir)
+$(test-target): $(objects) $(test-objects) $(libraries) $(test_libraries) | $(binarydir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS_TEST) $^ -o $@
 
 ###############################################################################
 
-$(moduledir)/%.pcm: $(testdir)/%.c++m $(moduledir)/std.pcm | $(moduledir)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< --precompile -o $@
+# Rule for test module interface units
+$(moduledir)/%.pcm: $(testdir)/%.c++m $(submodule_module_stamps) $(module_depfile) | $(moduledir)
+	@mkdir -p $(@D) $(objectdir)/$(testdir)
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $(PCMFLAGS_PRECOMPILE) $< --precompile -o $@
 
-$(objectdir)/%.impl.o: $(testdir)/%.impl.c++ | $(objectdir)
+# Rule for test implementation partitions
+$(objectdir)/%.impl.o: $(testdir)/%.impl.c++ $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -MD -MF $(@:.o=.d) -o $@
 
 $(objectdir)/%.test.o: $(testdir)/%.test.c++ | $(objectdir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -c -o $@
 
-$(objectdir)/%.o: $(testdir)/%.c++ $(moduledir)/std.pcm | $(objectdir)
+# Rule for test source files
+$(objectdir)/%.o: $(testdir)/%.c++ $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -c -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -c -MD -MF $(@:.o=.d) -o $@
 
-$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(BUILTIN_STD_OBJECT) $(libraries) $(test_libraries) | $(binarydir)
+$(binarydir)/%: $(testdir)/%.c++ $(example-objects) $(library) $(libraries) $(test_libraries) | $(binarydir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $(LDFLAGS) $^ -o $@
 
@@ -201,26 +210,21 @@ $(objectdir)/%.o: $(moduledir)/%.pcm | $(objectdir)
 
 ###############################################################################
 
-dependencies = $(foreach D, $(sourcedirs), $(objectdir)/$(D).deps)
+# First pass: generate the complete module dependency graph
+# Generate one big dependency file for all sources using p1689 format
+# Parse JSON output to extract module dependencies and create Makefile rules
+$(module_depfile): $(all_sources) scripts/parse_module_deps.py | $(objectdir) $(moduledir)
+	@echo "Generating module dependency graph..."
+	@$(clang_scan_deps) -format=p1689 \
+	    -module-files-dir $(moduledir) \
+	    -- $(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $(all_sources) 2>/dev/null | \
+	python3 scripts/parse_module_deps.py $(moduledir) $(objectdir) > $@
 
-# Generate dependencies for modules and sources
-# Filter out std.pcm dependencies since we always use built-in std module
-define create_dependency_hierarchy
-	grep -HE '^[ ]*module[ ]+([a-z_0-9][a-z_0-9:]*)' $(1)/*.c++ 2>/dev/null | sed -nE 's|.+/([a-z_0-9\.\-]+)\.c\+\+:[ ]*module[ ]+([a-z_0-9][a-z_0-9:]*)[ ]*;|$(objectdir)/\1.o: $(moduledir)/\2.pcm|p' >> $(2) || true; \
-	grep -HE '^[ ]*export[ ]+module' $(1)/*.c++m 2>/dev/null | sed -nE 's|.+/([a-z_0-9\-]+)\.c\+\+m.+|$(objectdir)/\1.o: $(moduledir)/\1.pcm|p' >> $(2) || true; \
-	grep -HE '^[ ]*export[ ]+import[ ]+([a-z_0-9][a-z_0-9:]*)' $(1)/*.c++m 2>/dev/null | sed -nE 's|.+/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9][a-z_0-9:]*)[ ]*;|$(moduledir)/\1.pcm: $(moduledir)/\2.pcm|p' | grep -v ':.*std\.pcm' >> $(2) || true; \
-	grep -HE '^[ ]*export[ ]+[ ]*import[ ]+:([a-z_0-9:]+)' $(1)/*.c++m 2>/dev/null | sed -nE 's|.+/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9:]+)[ ]*;|$(moduledir)/\1\2\3.pcm: $(moduledir)/\1\-\4.pcm|p' >> $(2) || true; \
-	grep -HE '^[ ]*import[ ]+([a-z_0-9][a-z_0-9:]*)' $(1)/*.c++m 2>/dev/null | sed -nE 's|.+/([a-z_0-9\-]+)\.c\+\+m:[ ]*import[ ]+([a-z_0-9][a-z_0-9:]*)[ ]*;|$(moduledir)/\1.pcm: $(moduledir)/\2.pcm|p' | grep -v ':.*std\.pcm' >> $(2) || true; \
-	grep -HE '^[ ]*import[ ]+:([a-z_0-9:]+)' $(1)/*.c++m 2>/dev/null | sed -nE 's|.+/([a-z_0-9]+)(\-*)([a-z_0-9]*)\.c\+\+m:.*import[ ]+:([a-z_0-9:]+)[ ]*;|$(moduledir)/\1\2\3.pcm: $(moduledir)/\1\-\4.pcm|p' >> $(2) || true; \
-	grep -HE '^[ ]*import[ ]+([a-z_0-9][a-z_0-9:]*)' $(1)/*.c++ 2>/dev/null | sed -nE 's|.+/([a-z_0-9\.\-]+)\.c\+\+:[ ]*import[ ]+([a-z_0-9][a-z_0-9:]*)[ ]*;|$(objectdir)/\1.o: $(moduledir)/\2.pcm|p' | grep -v 'std\.pcm' >> $(2) || true; \
-	grep -HE '^[ ]*import[ ]+:([a-z_0-9:]+)' $(1)/*.c++ 2>/dev/null | sed -nE 's|.+/([a-z_0-9]+)(\-*)([a-z_0-9\.]*)\.c\+\+:.*import[ ]+:([a-z_0-9:]+)[ ]*;|$(objectdir)/\1\2\3.o: $(moduledir)/\1\-\4.pcm|p' >> $(2) || true;
-endef
+# Include it so Make knows about all .pcm rules
+-include $(module_depfile)
 
-$(dependencies): $(modules) $(sources) | $(objectdir)
-	@mkdir -p $(@D)
-	$(call create_dependency_hierarchy, ./$(basename $(@F)), $@)
-
--include $(dependencies)
+# Include generated header dependencies
+-include $(header_deps)
 
 ###############################################################################
 
@@ -233,91 +237,25 @@ $(stamproot)/deps-%: | $(stamproot)
 	@touch $@
 
 .PHONY: submodule-modules
-submodule-modules: $(moduledir)/std.pcm $(submodule_module_stamps)
+submodule-modules: $(submodule_module_stamps)
 
-# Always use built-in std module from libc++
-# std.pcm is built from libc++ source (rule defined below), not from deps/std
+# Submodules build into PREFIX/pcm via SUBMAKE_PREFIX_ARG
+# Since moduledir = $(PREFIX)/pcm, no copy needed - file is already in the right place
 $(submodules:%=$(moduledir)/%.pcm): $(moduledir)/%.pcm: $(stamproot)/module-% | $(moduledir)
-	@if [ -f $(PREFIX)/pcm/$*.pcm ] && [ "$(PREFIX)/pcm/$*.pcm" != "$(moduledir)/$*.pcm" ]; then \
-		cp $(PREFIX)/pcm/$*.pcm $(moduledir)/$*.pcm; \
-	elif [ -f $(submoduledir)/$*/pcm/$*.pcm ] && [ "$(submoduledir)/$*/pcm/$*.pcm" != "$(moduledir)/$*.pcm" ]; then \
-		cp $(submoduledir)/$*/pcm/$*.pcm $(moduledir)/$*.pcm; \
-	fi
+	@:
 
 $(stamproot)/module-%: | $(stamproot)
 	@mkdir -p $(@D)
-	@if [ "$*" = "std" ]; then \
-		echo "Building std module from libc++ source with matching flags"; \
-		$(MAKE) $(SUBMAKE_FLAGS) build-builtin-std-module PREFIX=$(PREFIX); \
-		touch $@; \
-	else \
-		$(MAKE) $(SUBMAKE_FLAGS) -C $(submoduledir)/$* module $(SUBMAKE_PREFIX_ARG); \
-		touch $@; \
-	fi
+	$(MAKE) $(SUBMAKE_FLAGS) -C $(submoduledir)/$* module $(SUBMAKE_PREFIX_ARG)
+	@touch $@
 
-$(librarydir)/lib%.a: $(moduledir)/%.pcm | $(librarydir)
+# Submodules build into PREFIX/lib via SUBMAKE_PREFIX_ARG
+# Since librarydir = $(PREFIX)/lib, no copy needed - file is already in the right place
+# Depend on module stamp to ensure submodule is built, then trigger lib build
+$(librarydir)/lib%.a: $(stamproot)/module-% | $(librarydir)
 	@mkdir -p $(librarydir)
-	@if [ -f $(submoduledir)/$*/lib/lib$*.a ]; then \
-		cp $(submoduledir)/$*/lib/lib$*.a $(librarydir)/lib$*.a; \
-	elif [ -f $(PREFIX)/lib/lib$*.a ]; then \
-		cp $(PREFIX)/lib/lib$*.a $(librarydir)/lib$*.a; \
-	else \
-		echo "Warning: lib$*.a not found in submodule, building library target"; \
-		$(MAKE) $(SUBMAKE_FLAGS) -C $(submoduledir)/$* lib $(SUBMAKE_PREFIX_ARG); \
-		if [ -f $(submoduledir)/$*/lib/lib$*.a ]; then \
-			cp $(submoduledir)/$*/lib/lib$*.a $(librarydir)/lib$*.a; \
-		elif [ -f $(PREFIX)/lib/lib$*.a ]; then \
-			cp $(PREFIX)/lib/lib$*.a $(librarydir)/lib$*.a; \
-		fi; \
-	fi
+	$(MAKE) $(SUBMAKE_FLAGS) -C $(submoduledir)/$* lib $(SUBMAKE_PREFIX_ARG)
 
-# Build std module from libc++ source
-# This ensures the module is built with matching compilation flags
-# Based on https://libcxx.llvm.org/Modules.html
-# We need both the .pcm (module interface) and .o (module implementation with initializer)
-.PHONY: build-builtin-std-module
-build-builtin-std-module: $(moduledir)/std.pcm $(objectdir)/std.o | $(moduledir) $(objectdir)
-
-# Build std.pcm (module interface)
-# Uses LLVM_PREFIX from config/compiler.mk to find std.cppm (if set)
-# Falls back to /usr/lib/llvm-20/share/libc++/v1/std.cppm on Linux
-# Assumes LLVM 20 or higher is installed on both Linux and Darwin/macOS
-# Reuses CXXFLAGS but filters out user-specific include paths and adds std module-specific flags
-# Suppress reserved-module-identifier warning only for std.pcm (comes from libc++ source)
-STD_MODULE_FLAGS = $(filter-out -I% -isysroot%,$(CXXFLAGS)) -Wno-reserved-module-identifier -fno-implicit-modules -fno-implicit-module-maps
-$(moduledir)/std.pcm: | $(moduledir)
-	@mkdir -p $(moduledir)
-	@if [ -n "$(LLVM_PREFIX)" ] && [ -f $(LLVM_PREFIX)/share/libc++/v1/std.cppm ]; then \
-		echo "Precompiling std module from $(LLVM_PREFIX)/share/libc++/v1/std.cppm"; \
-		$(CXX) $(STD_MODULE_FLAGS) -nostdinc++ -isystem $(LLVM_PREFIX)/include/c++/v1 \
-			$(LLVM_PREFIX)/share/libc++/v1/std.cppm --precompile -o $(moduledir)/std.pcm; \
-	elif [ -f /usr/local/llvm/share/libc++/v1/std.cppm ]; then \
-		echo "Precompiling std module from /usr/local/llvm/share/libc++/v1/std.cppm"; \
-		$(CXX) $(STD_MODULE_FLAGS) -nostdinc++ -isystem /usr/local/llvm/include/c++/v1 \
-			/usr/local/llvm/share/libc++/v1/std.cppm --precompile -o $(moduledir)/std.pcm; \
-	elif [ -f /usr/lib/llvm-20/share/libc++/v1/std.cppm ]; then \
-		echo "Precompiling std module from /usr/lib/llvm-20/share/libc++/v1/std.cppm"; \
-		$(CXX) $(STD_MODULE_FLAGS) -nostdinc++ -isystem /usr/lib/llvm-20/include/c++/v1 \
-			/usr/lib/llvm-20/share/libc++/v1/std.cppm --precompile -o $(moduledir)/std.pcm; \
-	else \
-		echo "Error: std.cppm not found."; \
-		if [ -n "$(LLVM_PREFIX)" ]; then \
-			echo "  Checked: $(LLVM_PREFIX)/share/libc++/v1/std.cppm"; \
-		fi; \
-		echo "  Checked: /usr/local/llvm/share/libc++/v1/std.cppm"; \
-		echo "  Checked: /usr/lib/llvm-20/share/libc++/v1/std.cppm"; \
-		echo "Please ensure LLVM 20 or higher with libc++ modules is installed."; \
-		exit 1; \
-	fi
-
-# Build std.o (module implementation with initializer)
-# This provides the module initializer that the linker needs
-# Reuses CXXFLAGS but filters out user-specific include paths
-STD_OBJECT_FLAGS = $(filter-out -I% -isysroot%,$(CXXFLAGS)) -fno-implicit-modules -fno-implicit-module-maps -fmodule-file=std=$(moduledir)/std.pcm
-$(objectdir)/std.o: $(moduledir)/std.pcm | $(objectdir)
-	@mkdir -p $(objectdir)
-	@echo "Compiling std module implementation with initializer"; \
-	$(CXX) $(STD_OBJECT_FLAGS) $(moduledir)/std.pcm -c -o $(objectdir)/std.o
 
 ###############################################################################
 
@@ -340,7 +278,7 @@ help:
 	@echo "  make build             - Build all programs (yardb, yarsh, yarproxy, yarexport)"
 	@echo "  make tests             - Build unit test binary only"
 	@echo "  make run_tests         - Build and run unit tests (use TEST_TAGS='...' for filtering)"
-	@echo "  make clean             - Remove all build artifacts except std.pcm"
+	@echo "  make clean             - Remove all build artifacts (modules rebuilt automatically)"
 	@echo "  make mostlyclean       - Remove object files only"
 	@echo ""
 	@echo "Build configuration:"
@@ -361,11 +299,11 @@ help:
 	@echo "  make run_tests                # Build and run all unit tests"
 	@echo "  make run_tests TEST_TAGS='yar'  # Run unit tests with tag filter"
 
-all: deps $(dirs) $(moduledir)/std.pcm $(submodule_module_stamps) $(library) $(targets) $(test-target)
+all: $(dirs) $(submodule_module_stamps) $(library) $(targets) $(test-target)
 
-build: $(dirs) $(moduledir)/std.pcm $(build_submodule_module_stamps) $(targets)
+build: $(dirs) $(build_submodule_module_stamps) $(targets)
 
-tests: deps $(dirs) $(moduledir)/std.pcm $(build_submodule_module_stamps) $(test_submodule_module_stamps) $(library) $(test-target)
+tests: $(dirs) $(build_submodule_module_stamps) $(test_submodule_module_stamps) $(library) $(test-target)
 
 run_tests: tests
 	$(test-target) $(TEST_TAGS)
@@ -373,8 +311,9 @@ run_tests: tests
 clean: mostlyclean
 	rm -rf $(binarydir) $(librarydir) $(stamproot)
 	@if [ -d $(moduledir) ]; then \
-		find $(moduledir) -mindepth 1 ! -name 'std.pcm' -exec rm -rf {} +; \
+		rm -rf $(moduledir)/*; \
 	fi
+	@find $(objectdir) -name "*.d" 2>/dev/null | xargs rm -f 2>/dev/null || true
 
 mostlyclean:
 	rm -rf $(objectdir)
@@ -392,7 +331,7 @@ submodule-update:
 	@echo "git submodule update skipped"
 #	git submodule update --recursive
 
-deps: $(dependencies)
+deps: $(header_deps) $(module_depfile)
 
 ###############################################################################
 # Utility targets

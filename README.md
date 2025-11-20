@@ -63,12 +63,13 @@ YarDB/
 │   └── yar-metadata.* # Metadata module
 ├── tests/            # Functional/integration tests (P1204R0 Section 7)
 ├── deps/             # Dependencies (submodules)
-│   ├── std/          # Standard library extensions
 │   ├── net/          # Network library
 │   ├── xson/         # JSON/XML library
 │   ├── cryptic/       # Cryptographic functions
 │   └── tester/       # Testing framework
-├── build/            # Build artifacts (generated)
+│
+│   Note: std module is built from libc++ source (Clang 20+), not from a submodule
+├── build-{os}/       # Build artifacts (generated, e.g., build-darwin/, build-linux/)
 ├── config/           # Build configuration
 └── docs/             # Documentation
 ```

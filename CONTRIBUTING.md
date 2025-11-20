@@ -27,7 +27,7 @@ Thank you for your interest in contributing to YarDB! This document provides gui
 3. **Build the project:**
    ```bash
    make clean
-   make all
+   make build
    ```
 
 4. **Run tests:**
@@ -96,8 +96,9 @@ The project follows the [C++ Core Guidelines](https://github.com/isocpp/CppCoreG
 
 - Main Makefile is in the project root
 - Compiler configuration is in `config/compiler.mk`
-- Build artifacts go to `build-{os}/` directory
-- Submodules are built with `PREFIX=../../build-{os}`
+- Build artifacts go to `build-{os}/` directory (e.g., `build-darwin/`, `build-linux/`)
+- Submodules are built with `PREFIX=../../build-{os}` to share the same build directory
+- Override `BUILD_DIR` environment variable to use a custom build directory
 
 ## Questions?
 

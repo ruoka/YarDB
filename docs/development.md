@@ -51,10 +51,11 @@ sudo apt-get install clang-20 libc++-20-dev
 
 ### Module Issues
 - Ensure module names follow project prefix convention
-- Check PCM files are generated in `build/pcm/`
+- Check PCM files are generated in `build-{os}/pcm/` (e.g., `build-darwin/pcm/`)
 
 ### Build System
-- All build artifacts go to `build/` directory
+- All build artifacts go to `build-{os}/` directory (e.g., `build-darwin/`, `build-linux/`)
+- Override `BUILD_DIR` environment variable to use a custom build directory
 - Dependencies are in `deps/` directory
 - Compiler configuration is in `config/compiler.mk`
 

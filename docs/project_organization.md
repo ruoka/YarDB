@@ -31,7 +31,7 @@ YarDB/
 │   ├── example.html             # Example/test HTML
 │   └── yar.sh                   # Test script
 │
-├── build/                       # Build artifacts (gitignored)
+├── build-{os}/                  # Build artifacts (gitignored, e.g., build-darwin/, build-linux/)
 │   ├── obj/                     # Object files
 │   ├── pcm/                     # Precompiled modules
 │   ├── bin/                     # Executables
@@ -76,7 +76,7 @@ YarDB/
    - ✅ Module interface files use `.c++m` extension
 
 4. **Build System (P1204R0 Tool Compatibility)**
-   - ✅ Build artifacts separated in `build/` directory
+   - ✅ Build artifacts separated in `build-{os}/` directory
    - ✅ Centralized configuration in `config/`
    - ✅ Shared compiler/platform settings
 
@@ -114,12 +114,14 @@ YarDB/
 
 ## Build Artifacts
 
-All build artifacts are generated in the `build/` directory:
+All build artifacts are generated in the `build-{os}/` directory (e.g., `build-darwin/`, `build-linux/`):
 
-- `build/bin/` - Executable programs
-- `build/lib/` - Static libraries from dependencies
-- `build/obj/` - Object files
-- `build/pcm/` - Precompiled module files
+- `build-{os}/bin/` - Executable programs
+- `build-{os}/lib/` - Static libraries from dependencies
+- `build-{os}/obj/` - Object files
+- `build-{os}/pcm/` - Precompiled module files
+
+Override `BUILD_DIR` environment variable to use a custom build directory.
 
 ## Configuration
 
@@ -133,7 +135,7 @@ Compiler and platform settings are centralized in `config/compiler.mk`:
 
 Dependencies are managed as git submodules in `deps/`:
 - Each dependency is a separate git submodule
-- Dependencies are built with `PREFIX=../../build` to place artifacts in main `build/` directory
+- Dependencies are built with `PREFIX=../../build-{os}` to place artifacts in main `build-{os}/` directory
 - Submodule paths are configured in `.gitmodules`
 
 ## Testing Strategy

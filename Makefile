@@ -35,13 +35,12 @@ endif
 empty :=
 space := $(empty) $(empty)
 
-# Use implicit modules - Clang will automatically build missing modules (including std)
-# Modules are cached in moduledir for reuse across builds
-# Note: -fmodules-cache-path is only used during precompile, not during -c compilation
-PCMFLAGS_COMMON = -fimplicit-modules
+# Use explicit module building - build std.pcm explicitly from libc++ source
+PCMFLAGS_COMMON = -fno-implicit-modules
+PCMFLAGS_COMMON += -fmodule-file=std=$(moduledir)/std.pcm
 PCMFLAGS_COMMON += $(foreach M, $(modules) $(example-modules), -fmodule-file=$(subst -,:,$(basename $(notdir $(M))))=$(moduledir)/$(basename $(notdir $(M))).pcm)
 PCMFLAGS_COMMON += -fprebuilt-module-path=$(moduledir)/
-PCMFLAGS_PRECOMPILE = -fmodules-cache-path=$(moduledir)
+PCMFLAGS_PRECOMPILE =
 PCMFLAGS_BUILD = $(PCMFLAGS_COMMON)
 PCMFLAGS_BUILD += $(foreach P, $(build_submodules),-fmodule-file=$(subst -,:,$(P))=$(moduledir)/$(P).pcm)
 PCMFLAGS_TEST = $(PCMFLAGS_BUILD)
@@ -82,7 +81,7 @@ binarydir = $(PREFIX)/bin
 
 # Separate flags for submodules - use same module cache as main project
 # Submodules shouldn't reference main project modules that don't exist yet
-PCMFLAGS_SUBMODULE = -fimplicit-modules -fprebuilt-module-path=$(PREFIX)/pcm/
+PCMFLAGS_SUBMODULE = -fno-implicit-modules -fmodule-file=std=$(PREFIX)/pcm/std.pcm -fprebuilt-module-path=$(PREFIX)/pcm/
 export PCMFLAGS_SUBMODULE
 
 project = $(lastword $(notdir $(CURDIR)))
@@ -136,10 +135,29 @@ $(dirs):
 
 ###############################################################################
 
+# Build std.pcm explicitly from libc++ source
+BUILTIN_STD_OBJECT = $(objectdir)/std.o
+
+$(moduledir)/std.pcm: | $(moduledir)
+	@mkdir -p $(moduledir)
+	@echo "Precompiling std module from $(LLVM_PREFIX)/share/libc++/v1/std.cppm"
+	$(CXX) -std=c++23 -pthread -fPIC -fexperimental-library \
+		-nostdinc++ -isystem $(LLVM_PREFIX)/include/c++/v1 \
+		-fno-implicit-modules -fno-implicit-module-maps \
+		-Wall -Wextra -Wno-reserved-module-identifier -g -O3 \
+		$(LLVM_PREFIX)/share/libc++/v1/std.cppm --precompile -o $(moduledir)/std.pcm
+
+$(objectdir)/std.o: $(moduledir)/std.pcm | $(objectdir)
+	@mkdir -p $(@D)
+	@echo "Compiling std module implementation"
+	$(CXX) -fPIC -fno-implicit-modules -fno-implicit-module-maps \
+		-fmodule-file=std=$(moduledir)/std.pcm \
+		$(moduledir)/std.pcm -c -o $(objectdir)/std.o
+
 # Rule for module interface units (.c++m) → produces .pcm
-$(moduledir)/%.pcm: $(sourcedir)/%.c++m $(submodule_module_stamps) $(module_depfile) | $(moduledir)
+$(moduledir)/%.pcm: $(sourcedir)/%.c++m $(moduledir)/std.pcm $(submodule_module_stamps) $(module_depfile) | $(moduledir)
 	@mkdir -p $(@D) $(objectdir)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $(PCMFLAGS_PRECOMPILE) $< --precompile -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< --precompile -o $@
 
 # Rule to compile .pcm to .o (module interface object file)
 $(objectdir)/%.o: $(moduledir)/%.pcm | $(objectdir)
@@ -147,21 +165,21 @@ $(objectdir)/%.o: $(moduledir)/%.pcm | $(objectdir)
 	$(CXX) -fPIC $(PCMFLAGS_BUILD) $< -c -o $@
 
 # Rule for implementation partitions (.impl.c++) → produces .o
-$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++ $(module_depfile) | $(objectdir) $(moduledir)
+$(objectdir)/%.impl.o: $(sourcedir)/%.impl.c++ $(moduledir)/std.pcm $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -MD -MF $(@:.o=.d) -o $@
 
 # Rule for test units (.test.c++) → produces .o
-$(objectdir)/%.test.o: $(sourcedir)/%.test.c++ $(module_depfile) | $(objectdir) $(moduledir)
+$(objectdir)/%.test.o: $(sourcedir)/%.test.c++ $(moduledir)/std.pcm $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) -c $< -MD -MF $(@:.o=.d) -o $@
 
 # Rule for implementation units (.c++) → produces .o
-$(objectdir)/%.o: $(sourcedir)/%.c++ $(module_depfile) | $(objectdir) $(moduledir)
+$(objectdir)/%.o: $(sourcedir)/%.c++ $(moduledir)/std.pcm $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) $< -c -MD -MF $(@:.o=.d) -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_BUILD) -c $< -MD -MF $(@:.o=.d) -o $@
 
-$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(libraries) | $(binarydir)
+$(binarydir)/%: $(sourcedir)/%.c++ $(objects) $(BUILTIN_STD_OBJECT) $(libraries) | $(binarydir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS_BUILD) $^ -o $@
 
@@ -169,19 +187,19 @@ $(library) : $(objects) | $(librarydir)
 	@mkdir -p $(@D)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(test-target): $(objects) $(test-objects) $(libraries) $(test_libraries) | $(binarydir)
+$(test-target): $(objects) $(test-objects) $(BUILTIN_STD_OBJECT) $(libraries) $(test_libraries) | $(binarydir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(PCMFLAGS_TEST) $^ -o $@
 
 ###############################################################################
 
 # Rule for test module interface units
-$(moduledir)/%.pcm: $(testdir)/%.c++m $(submodule_module_stamps) $(module_depfile) | $(moduledir)
+$(moduledir)/%.pcm: $(testdir)/%.c++m $(moduledir)/std.pcm $(submodule_module_stamps) $(module_depfile) | $(moduledir)
 	@mkdir -p $(@D) $(objectdir)/$(testdir)
-	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $(PCMFLAGS_PRECOMPILE) $< --precompile -o $@
+	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< --precompile -o $@
 
 # Rule for test implementation partitions
-$(objectdir)/%.impl.o: $(testdir)/%.impl.c++ $(module_depfile) | $(objectdir) $(moduledir)
+$(objectdir)/%.impl.o: $(testdir)/%.impl.c++ $(moduledir)/std.pcm $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -fmodule-file=$(basename $(basename $(@F)))=$(moduledir)/$(basename $(basename $(@F))).pcm -c -MD -MF $(@:.o=.d) -o $@
 
@@ -190,7 +208,7 @@ $(objectdir)/%.test.o: $(testdir)/%.test.c++ | $(objectdir)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -c -o $@
 
 # Rule for test source files
-$(objectdir)/%.o: $(testdir)/%.c++ $(module_depfile) | $(objectdir) $(moduledir)
+$(objectdir)/%.o: $(testdir)/%.c++ $(moduledir)/std.pcm $(module_depfile) | $(objectdir) $(moduledir)
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) $(PCMFLAGS_TEST) $< -c -MD -MF $(@:.o=.d) -o $@
 
@@ -311,9 +329,10 @@ run_tests: tests
 clean: mostlyclean
 	rm -rf $(binarydir) $(librarydir) $(stamproot)
 	@if [ -d $(moduledir) ]; then \
-		rm -rf $(moduledir)/*; \
+		find $(moduledir) -mindepth 1 ! -name 'std.pcm' -exec rm -rf {} +; \
 	fi
 	@find $(objectdir) -name "*.d" 2>/dev/null | xargs rm -f 2>/dev/null || true
+	@find $(objectdir) -name "std.o" -exec rm -f {} + 2>/dev/null || true
 
 mostlyclean:
 	rm -rf $(objectdir)

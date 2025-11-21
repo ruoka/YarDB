@@ -24,15 +24,13 @@ LDFLAGS = $(COMMON_LDFLAGS) -L/usr/lib/$(ARCH)-linux-gnu -lc++ -O3
 endif
 
 ifeq ($(OS),Darwin)
-export PATH := /opt/homebrew/bin:$(PATH)
-# Prefer /usr/local/llvm if available, otherwise use Homebrew LLVM
-# Note: System clang from Xcode doesn't fully support C++23 modules, so LLVM is required.
+# Assume natively built Clang 20+ at /usr/local/llvm with libc++
 # You can override by setting LLVM_PREFIX environment variable
 ifndef LLVM_PREFIX
-LLVM_PREFIX := $(shell if [ -d /usr/local/llvm ]; then echo "/usr/local/llvm"; elif [ -d /opt/homebrew/opt/llvm ]; then echo "/opt/homebrew/opt/llvm"; else echo ""; fi)
+LLVM_PREFIX := /usr/local/llvm
 endif
-ifeq ($(LLVM_PREFIX),)
-$(error LLVM not found. Please install LLVM at /usr/local/llvm or: brew install llvm)
+ifeq ($(wildcard $(LLVM_PREFIX)/bin/clang++),)
+$(error LLVM not found at $(LLVM_PREFIX). Please build Clang 20+ natively and install to /usr/local/llvm)
 endif
 # Force LLVM unless the user explicitly overrides on the command line.
 # This avoids picking up system 'cc'/'c++' from the environment.
@@ -42,46 +40,15 @@ override CXX := $(LLVM_PREFIX)/bin/clang++
 SDKROOT ?= $(shell xcrun --show-sdk-path 2>/dev/null)
 export SDKROOT
 
-# Check if LLVM has its own libc++ (Homebrew or /usr/local/llvm with libc++)
-LLVM_HAS_LIBCXX := $(shell test -d $(LLVM_PREFIX)/include/c++/v1 && echo yes || echo no)
-
-# Always use built-in std module from libc++
-# With -fimplicit-modules, Clang automatically builds std.pcm when first imported
-ifeq ($(LLVM_HAS_LIBCXX),yes)
-# LLVM with its own libc++: use LLVM's libc++ headers and libraries
-# This enables using "import std;" with -fexperimental-library
-override CXXFLAGS := $(COMMON_CXXFLAGS) -nostdinc++ -isystem $(LLVM_PREFIX)/include/c++/v1 -fimplicit-modules -O3
+# Assume LLVM has libc++ (natively built Clang includes libc++)
+# Build std.pcm explicitly from libc++ source
+override CXXFLAGS := $(COMMON_CXXFLAGS) -nostdinc++ -isystem $(LLVM_PREFIX)/include/c++/v1 -fno-implicit-modules -O3
 # Ensure we consistently use one SDK for C headers/libs and link against LLVM libc++
-# Explicit libc++ linkage with rpath ensures correct library resolution
-# Check if lib/c++ subdirectory exists (Homebrew), otherwise use lib directly (/usr/local/llvm)
-LLVM_LIBCXX_LIBDIR := $(shell if [ -d $(LLVM_PREFIX)/lib/c++ ]; then echo "$(LLVM_PREFIX)/lib/c++"; else echo "$(LLVM_PREFIX)/lib"; fi)
-# Build rpath list, avoiding duplicates
-LLVM_RPATH := -Wl,-rpath,$(LLVM_LIBCXX_LIBDIR)
-ifeq ($(LLVM_LIBCXX_LIBDIR),$(LLVM_PREFIX)/lib)
-# LLVM_LIBCXX_LIBDIR equals LLVM_PREFIX/lib, so don't add duplicate rpath
-else
-# Add both paths since they're different
-LLVM_RPATH += -Wl,-rpath,$(LLVM_PREFIX)/lib
-endif
 ifneq ($(SDKROOT),)
 CXXFLAGS += -isysroot $(SDKROOT)
-# Note: -stdlib=libc++ in CXXFLAGS automatically links libc++, so no explicit -lc++ needed
-LDFLAGS ?= $(COMMON_LDFLAGS) -isysroot $(SDKROOT) -L$(LLVM_LIBCXX_LIBDIR) -L$(LLVM_PREFIX)/lib $(LLVM_RPATH) -O3
+LDFLAGS ?= $(COMMON_LDFLAGS) -isysroot $(SDKROOT) -L$(LLVM_PREFIX)/lib -Wl,-rpath,$(LLVM_PREFIX)/lib -O3
 else
-# Note: -stdlib=libc++ in CXXFLAGS automatically links libc++, so no explicit -lc++ needed
-LDFLAGS ?= $(COMMON_LDFLAGS) -L$(LLVM_LIBCXX_LIBDIR) -L$(LLVM_PREFIX)/lib $(LLVM_RPATH) -O3
-endif
-else
-# LLVM without its own libc++: use system libc++ headers and libraries
-# Use system libc++ from the SDK (LLVM compiler but system libc++)
-# Note: -stdlib=libc++ in CXXFLAGS automatically links libc++, so no need for explicit -lc++
-CXXFLAGS ?= $(COMMON_CXXFLAGS) -O3
-ifneq ($(SDKROOT),)
-CXXFLAGS += -isysroot $(SDKROOT)
-LDFLAGS ?= $(COMMON_LDFLAGS) -isysroot $(SDKROOT) -O3
-else
-LDFLAGS ?= $(COMMON_LDFLAGS) -O3
-endif
+LDFLAGS ?= $(COMMON_LDFLAGS) -L$(LLVM_PREFIX)/lib -Wl,-rpath,$(LLVM_PREFIX)/lib -O3
 endif
 
 endif

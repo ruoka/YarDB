@@ -5,7 +5,7 @@ import xson;
 
 export namespace db {
 
-using object = xson::object;
+using object = xson::fson::object;
 
 class engine
 {

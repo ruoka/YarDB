@@ -32,7 +32,8 @@ YarDB is a C++23 application that implements:
 - libc++ development libraries
 
 ### macOS
-- Homebrew LLVM 20+ (`brew install llvm@20`) or LLVM 20+ (`brew install llvm`)
+- LLVM 20+ installed at `/usr/local/llvm/` (not Homebrew)
+- The build system expects `/usr/local/llvm/bin/clang++` to be available
 - System clang from Xcode doesn't fully support C++23 modules
 
 ## Building

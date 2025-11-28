@@ -10,9 +10,7 @@ This directory contains project documentation organized by topic.
 - **development.md** - Development workflows and quick reference
 - **deployment.md** - Deployment procedures
 - **programs.md** - Detailed documentation for all programs
-
-### Archive
-- **archive/** - Historical documentation
+- **clang_module_flags.md** - How C++ Builder handles C++23 modules
 
 ## Root Directory Markdown Files
 

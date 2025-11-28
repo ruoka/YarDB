@@ -8,7 +8,8 @@ Following [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/s
 YarDB/
 ├── README.md                    # Main project documentation
 ├── LICENSE                      # Project license
-├── Makefile                     # Main build system
+├── tools/                       # Build tools
+│   └── CB.sh                    # C++ Builder bootstrap script
 ├── .gitignore                   # Git ignore rules
 ├── .gitmodules                  # Git submodule configuration
 │
@@ -31,14 +32,11 @@ YarDB/
 │   ├── example.html             # Example/test HTML
 │   └── yar.sh                   # Test script
 │
-├── build-{os}/                  # Build artifacts (gitignored, e.g., build-darwin/, build-linux/)
+├── build-{os}-{config}/         # Build artifacts (gitignored, e.g., build-darwin-debug/, build-linux-release/)
 │   ├── obj/                     # Object files
 │   ├── pcm/                     # Precompiled modules
 │   ├── bin/                     # Executables
-│   └── lib/                     # Static libraries
-│
-├── config/                      # Configuration files
-│   └── compiler.mk             # Shared compiler configuration
+│   └── cache/                   # Build cache
 │
 ├── deps/                        # Dependencies (submodules)
 │   ├── net/                     # Network library
@@ -114,28 +112,26 @@ YarDB/
 
 ## Build Artifacts
 
-All build artifacts are generated in the `build-{os}/` directory (e.g., `build-darwin/`, `build-linux/`):
+All build artifacts are generated in the `build-{os}-{config}/` directory (e.g., `build-darwin-debug/`, `build-linux-release/`):
 
-- `build-{os}/bin/` - Executable programs
-- `build-{os}/lib/` - Static libraries from dependencies
-- `build-{os}/obj/` - Object files
-- `build-{os}/pcm/` - Precompiled module files
-
-Override `BUILD_DIR` environment variable to use a custom build directory.
+- `build-{os}-{config}/bin/` - Executable programs
+- `build-{os}-{config}/obj/` - Object files
+- `build-{os}-{config}/pcm/` - Precompiled module files
+- `build-{os}-{config}/cache/` - Build cache
 
 ## Configuration
 
-Compiler and platform settings are centralized in `config/compiler.mk`:
-- Platform detection (Linux, Darwin, Github CI)
+Build configuration is handled by the `tools/CB.sh` script:
+- Platform detection (Linux, Darwin)
 - Compiler selection (Homebrew LLVM, system clang)
-- Compiler flags and linker settings
-- Shared across all Makefiles
+- Include paths for YarDB and submodules
+- Automatic module dependency resolution
 
 ## Dependencies Management
 
 Dependencies are managed as git submodules in `deps/`:
 - Each dependency is a separate git submodule
-- Dependencies are built with `PREFIX=../../build-{os}` to place artifacts in main `build-{os}/` directory
+- C++ Builder automatically resolves dependencies and includes them in the build
 - Submodule paths are configured in `.gitmodules`
 
 ## Testing Strategy
@@ -144,11 +140,11 @@ Dependencies are managed as git submodules in `deps/`:
   - Example: `yar-engine.test.c++` tests `yar-engine.c++m`
 - **Functional Tests**: In `tests/` directory
   - Integration tests and end-to-end scenarios
-- **Test Runner**: `test_runner` executable built from all `.test.c++` files
+- **Test Runner**: Built automatically by C++ Builder, run with `./tools/CB.sh debug test`
 
 ## References
 
 - [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html)
 - Project uses C++23 modules with `.c++m` extension
-- Build system follows P1204R0 tool compatibility guidelines
+- Build system uses [C++ Builder](https://github.com/ruoka/tester) (CB.sh) for automatic dependency resolution
 

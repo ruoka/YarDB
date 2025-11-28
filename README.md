@@ -37,17 +37,31 @@ YarDB is a C++23 application that implements:
 
 ## Building
 
+YarDB uses [C++ Builder](https://github.com/ruoka/tester) (CB.sh) for building:
+
 ```bash
-# Build all programs
-make build
+# Build all programs in debug mode
+./tools/CB.sh debug build
+
+# Build in release mode (optimized)
+./tools/CB.sh release build
 
 # Build and run tests
-make tests
-make run_tests
+./tools/CB.sh debug test
 
 # Clean build artifacts
-make clean
+./tools/CB.sh debug clean
+
+# List all translation units
+./tools/CB.sh debug list
 ```
+
+**Build Output**: Artifacts are generated in `build-<os>-<config>/`:
+- `build-<os>-<config>/bin/` - Executable programs
+- `build-<os>-<config>/obj/` - Object files
+- `build-<os>-<config>/pcm/` - Precompiled module files
+
+Example: `build-darwin-debug/`, `build-linux-release/`
 
 ## Project Structure
 
@@ -69,8 +83,8 @@ YarDB/
 │   └── tester/       # Testing framework
 │
 │   Note: std module is built from libc++ source (Clang 20+), not from a submodule
-├── build-{os}/       # Build artifacts (generated, e.g., build-darwin/, build-linux/)
-├── config/           # Build configuration
+├── build-{os}-{config}/  # Build artifacts (generated, e.g., build-darwin-debug/, build-linux-release/)
+├── tools/            # Build tools (CB.sh)
 └── docs/             # Documentation
 ```
 

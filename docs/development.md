@@ -4,10 +4,11 @@
 
 ### Building
 ```bash
-make build          # Build all programs
-make tests          # Build tests
-make run_tests      # Run tests
-make clean          # Clean build artifacts
+./tools/CB.sh debug build    # Build all programs in debug mode
+./tools/CB.sh release build  # Build in release mode (optimized)
+./tools/CB.sh debug test     # Build and run tests
+./tools/CB.sh debug clean    # Clean build artifacts
+./tools/CB.sh debug list     # List all translation units
 ```
 
 ### Git Submodules
@@ -41,21 +42,23 @@ sudo apt-get install clang-20 libc++-20-dev
 ### Common Tasks
 - Add new module: Create `.c++m` file in `YarDB/` directory
 - Add new test: Create `.test.c++` file next to source
-- Add new program: Add to `programs` variable in `Makefile`
+- Add new program: Create `.c++` file in `YarDB/` directory (C++ Builder will automatically detect it)
 
 ## Troubleshooting
 
 ### Linking Issues
-- Check that all submodules are built: `make build` (std module is built from libc++ source, not from a submodule)
-- Verify library paths in `config/compiler.mk`
+- Check that all submodules are built: `./tools/CB.sh debug build`
+- Verify include paths in `tools/CB.sh` script
+- Ensure OpenSSL libraries are available (for cryptic submodule)
 
 ### Module Issues
 - Ensure module names follow project prefix convention
-- Check PCM files are generated in `build-{os}/pcm/` (e.g., `build-darwin/pcm/`)
+- Check PCM files are generated in `build-{os}-{config}/pcm/` (e.g., `build-darwin-debug/pcm/`)
+- Clean and rebuild if module dependencies are incorrect: `./tools/CB.sh debug clean && ./tools/CB.sh debug build`
 
 ### Build System
-- All build artifacts go to `build-{os}/` directory (e.g., `build-darwin/`, `build-linux/`)
-- Override `BUILD_DIR` environment variable to use a custom build directory
+- All build artifacts go to `build-{os}-{config}/` directory (e.g., `build-darwin-debug/`, `build-linux-release/`)
+- C++ Builder automatically detects source files and handles dependencies
 - Dependencies are in `deps/` directory
-- Compiler configuration is in `config/compiler.mk`
+- Build configuration is handled by `tools/CB.sh` script
 

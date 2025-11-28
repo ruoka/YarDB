@@ -4,11 +4,13 @@
 
 ```bash
 # Clean build
-make clean
-make build
+./tools/CB.sh release clean
+./tools/CB.sh release build
 
-# Binaries are in build/bin/
-./build/bin/yardb
+# Binaries are in build-{os}-release/bin/
+./build-darwin-release/bin/yardb
+# or
+./build-linux-release/bin/yardb
 ```
 
 ## Docker

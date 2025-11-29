@@ -27,6 +27,7 @@ yarsh
 yarproxy
 yarexport
 test_runner
+tools/cb
 
 ###############################################################################
 # IDE and Editor Files

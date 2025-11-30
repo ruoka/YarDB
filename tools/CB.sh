@@ -13,18 +13,18 @@ BIN="$TOOLS_DIR/cb"
 UNAME_OUT="$(uname -s)"
 case "$UNAME_OUT" in
     Linux)
-        CXX_COMPILER="clang++-20"
-        LLVM_PREFIX="/usr/lib/llvm-20"
+    CXX_COMPILER="clang++-20"
+    LLVM_PREFIX="/usr/lib/llvm-20"
         STD_CPPM_DEFAULT="/usr/lib/llvm-20/share/libc++/v1/std.cppm"
         ;;
     Darwin)
-        CXX_COMPILER="/usr/local/llvm/bin/clang++"
-        LLVM_PREFIX="/usr/local/llvm"
+    CXX_COMPILER="/usr/local/llvm/bin/clang++"
+    LLVM_PREFIX="/usr/local/llvm"
         STD_CPPM_DEFAULT="/usr/local/llvm/share/libc++/v1/std.cppm"
         ;;
     *)
-        echo "ERROR: Unsupported OS '$UNAME_OUT'"
-        exit 1
+    echo "ERROR: Unsupported OS '$UNAME_OUT'"
+    exit 1
         ;;
 esac
 
@@ -49,8 +49,8 @@ fi
 # otherwise use LLVM_PATH or defaults per OS.
 STD_CPPM=""
 if [[ -n "$1" && ("$1" == *.cppm || "$1" == */*) ]]; then
-    STD_CPPM="$1"
-    shift
+        STD_CPPM="$1"
+        shift
 fi
 
 if [[ -z "$STD_CPPM" ]]; then
@@ -66,24 +66,24 @@ fi
 # Find YarDB project root and build include flags
 CURRENT_DIR="$(pwd)"
 PROJECT_ROOT=""
-CHECK_DIR="$CURRENT_DIR"
+    CHECK_DIR="$CURRENT_DIR"
 
 # Walk up directory tree to find project root
-while [[ "$CHECK_DIR" != "/" ]]; do
-    if [[ -d "$CHECK_DIR/YarDB" && -d "$CHECK_DIR/deps" ]]; then
+    while [[ "$CHECK_DIR" != "/" ]]; do
+        if [[ -d "$CHECK_DIR/YarDB" && -d "$CHECK_DIR/deps" ]]; then
         PROJECT_ROOT="$CHECK_DIR"
-        break
-    fi
-    CHECK_DIR="$(cd "$CHECK_DIR/.." 2>/dev/null && pwd)"
-done
+            break
+        fi
+        CHECK_DIR="$(cd "$CHECK_DIR/.." 2>/dev/null && pwd)"
+    done
 
 # Build include flags if project root found
 INCLUDE_FLAGS=()
 if [[ -n "$PROJECT_ROOT" ]]; then
-    INCLUDE_FLAGS=(
+        INCLUDE_FLAGS=(
         -I "$PROJECT_ROOT/deps/net/src"
-        -I "/opt/homebrew/include"
-    )
+            -I "/opt/homebrew/include"
+        )
 fi
 
 # Run it with resolved std.cppm path and include flags

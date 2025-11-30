@@ -130,6 +130,7 @@ fi
 
 # Run it with resolved std.cppm path and include flags
 # Add -lcrypto for OpenSSL support (needed for cryptic benchmark)
-# Pass -L flag after include flags but before other arguments
-exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" --link-flags "-lcrypto" "$@"
+# Try passing via --link-flags first, with environment variable as fallback
+export CB_LINK_FLAGS="-lcrypto"
+exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" --link-flags -lcrypto "$@"
 

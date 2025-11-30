@@ -129,5 +129,6 @@ if [[ -n "$CB_INCLUDE_FLAGS" ]]; then
 fi
 
 # Run it with resolved std.cppm path and include flags
-exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" "$@"
+# Add -lcrypto for OpenSSL support (needed for cryptic benchmark)
+exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" -L "-lcrypto" "$@"
 

@@ -9,11 +9,12 @@ RUN set -ex && \
     wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends git cmake make clang-20 lldb-20 lld-20 libc++-20-dev libc++abi-20-dev && \
+    apt-get install -y --no-install-recommends git cmake make clang-20 lldb-20 lld-20 libc++-20-dev libc++abi-20-dev libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100 && \
-    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100 && \
+    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-20 100
 
 # https://code.visualstudio.com/remote/advancedcontainers/add-nonroot-user
 ARG USERNAME=vscode

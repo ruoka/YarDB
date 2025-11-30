@@ -25,7 +25,16 @@ jobs:
         sudo apt-get install -y libc++-20-dev libc++abi-20-dev clang-20 lldb-20 lld-20
         sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
-    - name: make
-      run: make
-    - name: make run_tests
-      run: make run_tests
+        sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-20 100
+    - name: Verify std.cppm location
+      run: |
+        if [ -f /usr/lib/llvm-20/share/libc++/v1/std.cppm ]; then
+          echo "std.cppm found at /usr/lib/llvm-20/share/libc++/v1/std.cppm"
+        else
+          echo "Warning: std.cppm not found at expected location"
+          find /usr/lib/llvm-20 -name "std.cppm" 2>/dev/null || echo "std.cppm not found in /usr/lib/llvm-20"
+        fi
+    - name: Build project
+      run: ./tools/CB.sh debug build
+    - name: Run tests
+      run: ./tools/CB.sh debug test

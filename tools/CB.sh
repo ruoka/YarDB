@@ -77,16 +77,21 @@ PROJECT_ROOT=""
         CHECK_DIR="$(cd "$CHECK_DIR/.." 2>/dev/null && pwd)"
     done
 
-# Build include flags if project root found
+# Build include flags and link flags if project root found
 INCLUDE_FLAGS=()
+LINK_FLAGS_STR="-lcrypto"
 if [[ -n "$PROJECT_ROOT" ]]; then
         INCLUDE_FLAGS=(
         -I "$PROJECT_ROOT/deps/net/src"
-            -I "/opt/homebrew/include"
         )
+        # Add Homebrew paths on Darwin (macOS)
+        if [[ "$UNAME_OUT" == "Darwin" ]]; then
+            INCLUDE_FLAGS+=(-I "/opt/homebrew/include")
+            LINK_FLAGS_STR="-L/opt/homebrew/lib $LINK_FLAGS_STR"
+        fi
 fi
 
 # Run it with resolved std.cppm path and include flags
 # Add -lcrypto for OpenSSL support (needed for cryptic benchmark)
-exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" --link-flags -lcrypto "$@"
+exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" --link-flags "$LINK_FLAGS_STR" "$@"
 

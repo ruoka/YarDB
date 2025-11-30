@@ -1,13 +1,13 @@
-FROM ubuntu:24.04
+FROM debian:bookworm-slim
 
 RUN set -ex && \
     apt-get update && \
-    apt-get install -y --no-install-recommends wget gnupg ca-certificates lsb-release software-properties-common && \
+    apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -ex && \
     wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
+    echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-20 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends git cmake make clang-20 lldb-20 lld-20 libc++-20-dev libc++abi-20-dev libssl-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -39,17 +39,3 @@ RUN existing_group="$(getent group "$USER_GID" | cut -d: -f1 || true)" && \
 
 # [Optional] Set the default user. Omit if you want to keep the default as root.
 USER $USERNAME
-
-# Precompile std module for C++23
-RUN mkdir -p ~/clang-modules-cache && \
-    if [ -f /usr/lib/llvm-20/include/c++/v1/std.cppm ]; then \
-        clang++-20 -std=c++23 -stdlib=libc++ --precompile \
-            /usr/lib/llvm-20/include/c++/v1/std.cppm \
-            -o ~/clang-modules-cache/std.pcm; \
-    elif [ -f /usr/include/c++/v1/std.cppm ]; then \
-        clang++-20 -std=c++23 -stdlib=libc++ --precompile \
-            /usr/include/c++/v1/std.cppm \
-            -o ~/clang-modules-cache/std.pcm; \
-    else \
-        echo "Warning: std.cppm not found, skipping module precompilation"; \
-    fi

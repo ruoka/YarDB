@@ -22,7 +22,7 @@ jobs:
         wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg
         echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/apt.llvm.org.list
         sudo apt-get update
-        sudo apt-get install -y libc++-20-dev libc++abi-20-dev clang-20 lldb-20 lld-20
+        sudo apt-get install -y libc++-20-dev libc++abi-20-dev clang-20 lldb-20 lld-20 libssl-dev
         sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
         sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
         sudo update-alternatives --install /usr/bin/lld lld /usr/bin/lld-20 100

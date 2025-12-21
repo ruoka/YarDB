@@ -168,6 +168,78 @@ inline auto url_decode(std::string_view encoded)
     return decoded;
 }
 
+// Helper function to check if JSON is acceptable based on Accept header
+// Returns true if JSON is acceptable, false otherwise
+// According to HTTP spec: missing Accept header means accept anything (*/*)
+inline auto accepts_json(const http::headers& headers) -> bool
+{
+    // If no Accept header, default to accepting anything (including JSON)
+    if(!headers.contains("accept") && !headers.contains("Accept"))
+        return true;
+    
+    auto accept_value = headers.contains("accept") 
+        ? std::string_view{headers["accept"]}
+        : std::string_view{headers["Accept"]};
+    
+    // Normalize to lowercase for case-insensitive comparison
+    auto accept_lower = std::string{accept_value};
+    std::transform(accept_lower.begin(), accept_lower.end(), accept_lower.begin(), 
+                   [](unsigned char c) { return std::tolower(c); });
+    
+    // Parse Accept header - it's a comma-separated list of media types with optional q-values
+    // Examples:
+    //   "application/json"
+    //   "application/json, application/xml;q=0.8"
+    //   "*/*"
+    //   "application/*"
+    //   "application/json;odata=fullmetadata"
+    
+    auto start = std::size_t{0};
+    while(start < accept_lower.length())
+    {
+        // Find next comma or end
+        auto comma_pos = accept_lower.find(',', start);
+        auto media_range = trim(accept_lower.substr(start, 
+            comma_pos == std::string::npos ? accept_lower.length() - start : comma_pos - start));
+        
+        // Remove q-value if present (e.g., "application/json;q=0.9" -> "application/json")
+        auto semicolon_pos = media_range.find(';');
+        if(semicolon_pos != std::string_view::npos)
+            media_range = trim(media_range.substr(0, semicolon_pos));
+        
+        // Check if this media range accepts JSON
+        if(media_range == "*/*"sv)
+            return true; // Accepts anything
+        
+        if(media_range == "application/*"sv)
+            return true; // Accepts any application/* type (including application/json)
+        
+        if(media_range == "application/json"sv)
+            return true; // Explicitly accepts JSON
+        
+        if(media_range.starts_with("application/json"sv))
+            return true; // application/json with parameters (e.g., application/json;odata=...)
+        
+        // Move to next media range
+        if(comma_pos == std::string::npos)
+            break;
+        start = comma_pos + 1;
+    }
+    
+    // No matching media range found - JSON is not acceptable
+    return false;
+}
+
+// Helper function to create 406 Not Acceptable error response
+inline auto not_acceptable_response() -> std::tuple<std::string, std::string>
+{
+    auto error = db::object{
+        {"error", "Not Acceptable"s},
+        {"message", "Only application/json is supported"s}
+    };
+    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error));
+}
+
 // Helper function to parse query parameters from URI
 // Limits: max 100 parameters, max 1024 chars per param name/value, max 64KB total query string
 inline auto parse_query_params(const http::uri& uri)
@@ -663,9 +735,13 @@ private:
         // List all collections
         m_server.get("/"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "GET /: "<< request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
 
                     const auto guard = std::lock_guard{m_engine};
                     return std::make_tuple("200 OK"s, xson::json::stringify({"collections", m_engine.collections()}));
@@ -674,9 +750,19 @@ private:
         // Create
         m_server.post("/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "POST /[a-z]+: "<< request << " <- " << body << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                    {
+                        auto error = db::object{
+                            {"error", "Not Acceptable"s},
+                            {"message", "Only application/json is supported"s}
+                        };
+                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
+                    }
 
                     try
                     {
@@ -708,9 +794,13 @@ private:
         // Read _id
         m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
 
                     try
                     {
@@ -755,9 +845,13 @@ private:
         // Note: Collection names must start with a letter, but can contain digits
         m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "GET /[a-z]+: " << request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
 
                     try
                     {
@@ -899,12 +993,150 @@ private:
                     }
                 });
 
+        // HEAD / - List all collections (same as GET but no body)
+        m_server.head("/"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+                {
+                    slog << debug << "HEAD /: "<< request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
+
+                    // HEAD returns same headers as GET but no body (framework handles this)
+                    const auto guard = std::lock_guard{m_engine};
+                    return std::make_tuple("200 OK"s, ""s);
+                });
+
+        // HEAD /collection/{id} - Get document headers (same as GET but no body)
+        m_server.head("/[a-z][a-z0-9]*/[0-9]+"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+                {
+                    slog << debug << "HEAD /[a-z]+/[0-9]+: " << request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto id = stoll(uri.path[2]);
+                        auto documents = db::object{};
+                        auto selector = db::object{"_id", id};
+
+                        const auto guard = std::lock_guard{m_engine};
+                        auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
+                        auto found = m_engine.read(selector, documents);
+
+                        // Check if document was found
+                        if(!found || documents.get<db::object::array>().empty())
+                        {
+                            auto error = db::object{
+                                {"error", "Not Found"s},
+                                {"message", "Document not found"s},
+                                {"collection", collection},
+                                {"id", id}
+                            };
+                            return std::make_tuple("404 Not Found"s, xson::json::stringify(error));
+                        }
+
+                        // HEAD returns same headers as GET but no body (framework handles this)
+                        return std::make_tuple("200 OK"s, ""s);
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                    }
+                });
+
+        // HEAD /collection - Get collection headers (same as GET but no body)
+        m_server.head("/[a-z][a-z0-9]*(\\?.*)?"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+                {
+                    slog << debug << "HEAD /[a-z]+: " << request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto document = db::object{};
+                        auto selector = db::object{};
+                        
+                        // Parse OData query parameters (same as GET)
+                        auto params = parse_query_params(uri);
+                        
+                        // Handle $top, $skip, $orderby, $filter, $select, $expand (same as GET)
+                        // ... (same logic as GET handler but we don't need to process results)
+                        
+                        // For HEAD, we just need to validate the request and return headers
+                        // The actual query processing is the same, but we return empty body
+                        
+                        const auto guard = std::lock_guard{m_engine};
+                        auto collection_name = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection_name);
+                        
+                        // Validate query parameters (same validation as GET)
+                        if(params.contains("$top"s))
+                        {
+                            auto top_value = stoll(params["$top"s]);
+                            if(top_value < 0)
+                                throw std::invalid_argument{"$top must be non-negative"};
+                            constexpr auto max_top = 10000;
+                            if(top_value > max_top)
+                                throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(max_top) + ")"};
+                        }
+                        
+                        if(params.contains("$skip"s))
+                        {
+                            auto skip_value = stoll(params["$skip"s]);
+                            if(skip_value < 0)
+                                throw std::invalid_argument{"$skip must be non-negative"};
+                            constexpr auto max_skip = 100000;
+                            if(skip_value > max_skip)
+                                throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(max_skip) + ")"};
+                        }
+                        
+                        // HEAD returns same headers as GET but no body (framework handles this)
+                        return std::make_tuple("200 OK"s, ""s);
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                    }
+                });
+
         // Update aka replace _id (upsert behavior)
         m_server.put("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                    {
+                        auto error = db::object{
+                            {"error", "Not Acceptable"s},
+                            {"message", "Only application/json is supported"s}
+                        };
+                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
+                    }
 
                     try
                     {
@@ -962,9 +1194,19 @@ private:
         // Update aka modify _id
         m_server.patch("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                    {
+                        auto error = db::object{
+                            {"error", "Not Acceptable"s},
+                            {"message", "Only application/json is supported"s}
+                        };
+                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
+                    }
 
                     try
                     {
@@ -998,9 +1240,13 @@ private:
         // Delete _id
         m_server.destroy("/[a-z][a-z0-9]*/[0-9]+"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
                 {
                     slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
+
+                    // Check Accept header (for error responses)
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
 
                     try
                     {

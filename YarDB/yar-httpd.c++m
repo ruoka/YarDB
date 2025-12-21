@@ -86,16 +86,28 @@ inline auto parse_query_params(const http::uri& uri)
     return params;
 }
 
+// String filter function type for post-processing
+struct string_filter
+{
+    std::string function;  // "startswith", "contains", "endswith"
+    std::string field;
+    std::string value;
+};
+
 // Helper function to parse OData $filter expression and convert to selector
 // Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
+// Supports: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
 // Supports: and, or operators
-inline db::object parse_odata_filter(std::string_view filter_expr)
+// Returns: pair of (selector, vector of string filters for post-processing)
+inline std::pair<db::object, std::vector<string_filter>> parse_odata_filter(std::string_view filter_expr)
 {
     auto selector = db::object{};
+    auto string_filters = std::vector<string_filter>{};
     
     // Simple parser for basic OData filter expressions
     // Example: "age gt 25" -> {"age": {"$gt": 25}}
     // Example: "name eq 'John'" -> {"name": "John"}
+    // Example: "startswith(name, 'John')" -> string filter for post-processing
     // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
     
     auto expr = std::string{filter_expr};
@@ -120,11 +132,16 @@ inline db::object parse_odata_filter(std::string_view filter_expr)
         // Process each part and merge into selector
         for(const auto& part : parts)
         {
-            auto part_selector = parse_odata_filter(part);
-            // Merge part_selector into selector (xson::object merge operator)
-            selector = db::object{selector, part_selector};
+            auto [part_selector, part_string_filters] = parse_odata_filter(part);
+            // Merge part_selector into selector by copying fields
+            for(const auto& [key, value] : part_selector.get<db::object::map>())
+            {
+                selector[key] = value;
+            }
+            // Collect string filters
+            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
         }
-        return selector;
+        return std::make_pair(selector, string_filters);
     }
     
     // Handle 'or' operator (simpler - just process parts, engine will handle OR logic via match)
@@ -148,21 +165,103 @@ inline db::object parse_odata_filter(std::string_view filter_expr)
         // Process each part and merge into selector
         for(const auto& part : parts)
         {
-            auto part_selector = parse_odata_filter(part);
-            // Merge part_selector into selector (xson::object merge operator)
-            selector = db::object{selector, part_selector};
+            auto [part_selector, part_string_filters] = parse_odata_filter(part);
+            // Merge part_selector into selector by copying fields
+            for(const auto& [key, value] : part_selector.get<db::object::map>())
+            {
+                selector[key] = value;
+            }
+            // Collect string filters
+            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
         }
-        return selector;
+        return std::make_pair(selector, string_filters);
     }
     
-    // Parse single comparison: "field operator value"
+    // Parse single comparison: "field operator value" or "function(field, 'value')"
     // Trim whitespace
     while(!expr.empty() && expr[0] == ' ')
         expr.erase(0, 1);
     while(!expr.empty() && expr.back() == ' ')
         expr.pop_back();
     
-    // Find operator
+    // Check for string functions: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
+    if(expr.starts_with("startswith("s) && expr.back() == ')')
+    {
+        // Parse: startswith(field, 'value')
+        auto inner = expr.substr(11, expr.size() - 12); // Remove "startswith(" and ")"
+        auto comma_pos = inner.find(',');
+        if(comma_pos == std::string::npos)
+            throw std::invalid_argument{"Invalid startswith expression: "s + expr};
+        
+        auto field = inner.substr(0, comma_pos);
+        // Trim field
+        while(!field.empty() && field.back() == ' ')
+            field.pop_back();
+        
+        auto value_str = inner.substr(comma_pos + 1);
+        // Trim value
+        while(!value_str.empty() && value_str[0] == ' ')
+            value_str.erase(0, 1);
+        
+        // Remove quotes
+        if(value_str.size() >= 2 && ((value_str[0] == '\'' && value_str.back() == '\'') || (value_str[0] == '"' && value_str.back() == '"')))
+            value_str = value_str.substr(1, value_str.size() - 2);
+        
+        string_filters.push_back({"startswith"s, field, value_str});
+        return std::make_pair(selector, string_filters);
+    }
+    else if(expr.starts_with("contains("s) && expr.back() == ')')
+    {
+        // Parse: contains(field, 'value')
+        auto inner = expr.substr(9, expr.size() - 10); // Remove "contains(" and ")"
+        auto comma_pos = inner.find(',');
+        if(comma_pos == std::string::npos)
+            throw std::invalid_argument{"Invalid contains expression: "s + expr};
+        
+        auto field = inner.substr(0, comma_pos);
+        // Trim field
+        while(!field.empty() && field.back() == ' ')
+            field.pop_back();
+        
+        auto value_str = inner.substr(comma_pos + 1);
+        // Trim value
+        while(!value_str.empty() && value_str[0] == ' ')
+            value_str.erase(0, 1);
+        
+        // Remove quotes
+        if(value_str.size() >= 2 && ((value_str[0] == '\'' && value_str.back() == '\'') || (value_str[0] == '"' && value_str.back() == '"')))
+            value_str = value_str.substr(1, value_str.size() - 2);
+        
+        string_filters.push_back({"contains"s, field, value_str});
+        return std::make_pair(selector, string_filters);
+    }
+    else if(expr.starts_with("endswith("s) && expr.back() == ')')
+    {
+        // Parse: endswith(field, 'value')
+        auto inner = expr.substr(9, expr.size() - 10); // Remove "endswith(" (9 chars) and ")" (1 char)
+        auto comma_pos = inner.find(',');
+        if(comma_pos == std::string::npos)
+            throw std::invalid_argument{"Invalid endswith expression: "s + expr};
+        
+        auto field = inner.substr(0, comma_pos);
+        // Trim field
+        while(!field.empty() && field.back() == ' ')
+            field.pop_back();
+        
+        auto value_str = inner.substr(comma_pos + 1);
+        // Trim value
+        while(!value_str.empty() && value_str[0] == ' ')
+            value_str.erase(0, 1);
+        
+        // Remove quotes
+        if(value_str.size() >= 2 && ((value_str[0] == '\'' && value_str.back() == '\'') || (value_str[0] == '"' && value_str.back() == '"')))
+            value_str = value_str.substr(1, value_str.size() - 2);
+        
+        string_filters.push_back({"endswith"s, field, value_str});
+        return std::make_pair(selector, string_filters);
+    }
+    
+    // Find operator for comparison expressions
     auto op_pos = std::string::npos;
     auto op = ""s;
     
@@ -269,7 +368,7 @@ inline db::object parse_odata_filter(std::string_view filter_expr)
         selector[field] = db::object{{"$lte"s, num}};
     }
     
-    return selector;
+    return std::make_pair(selector, string_filters);
 }
 
 // Helper function to apply $select projection to documents
@@ -331,6 +430,70 @@ inline auto apply_select(const db::object& documents, std::string_view select_va
         }
         
         result += std::move(projected);
+    }
+    
+    return result;
+}
+
+// Helper function to apply string filters to documents (post-processing)
+inline auto apply_string_filters(const db::object& documents, const std::vector<string_filter>& filters)
+{
+    if(filters.empty() || !documents.is_array())
+        return documents;
+    
+    auto result = db::object{db::object::array{}};
+    const auto& docs = documents.get<db::object::array>();
+    
+    for(const auto& doc : docs)
+    {
+        auto matches = true;
+        
+        for(const auto& filter : filters)
+        {
+            if(!doc.has(filter.field))
+            {
+                matches = false;
+                break;
+            }
+            
+            const auto field_value = doc[filter.field];
+            if(!field_value.is_string())
+            {
+                matches = false;
+                break;
+            }
+            
+            // Get string value from object - direct conversion works like in tests
+            const std::string field_str = field_value;
+            
+            if(filter.function == "startswith"s)
+            {
+                if(!field_str.starts_with(filter.value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            else if(filter.function == "contains"s)
+            {
+                if(!field_str.contains(filter.value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            else if(filter.function == "endswith"s)
+            {
+                if(!field_str.ends_with(filter.value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+        }
+        
+        if(matches)
+            result += doc;
     }
     
     return result;
@@ -575,13 +738,19 @@ private:
                         
                         // Handle $filter (OData: $filter=field eq 'value' or $filter=field gt number)
                         // Merge filter criteria into selector for query-time filtering
+                        auto string_filters = std::vector<string_filter>{};
                         if(params.contains("$filter"s))
                         {
                             try
                             {
-                                auto filter_selector = parse_odata_filter(params["$filter"s]);
-                                // Merge filter into selector (xson::object merge operator)
-                                selector = db::object{selector, filter_selector};
+                                auto [filter_selector, filter_string_filters] = parse_odata_filter(params["$filter"s]);
+                                // Merge filter into selector by copying fields
+                                for(const auto& [key, value] : filter_selector.get<db::object::map>())
+                                {
+                                    selector[key] = value;
+                                }
+                                // Collect string filters for post-processing
+                                string_filters = std::move(filter_string_filters);
                             }
                             catch(const std::exception& e)
                             {
@@ -596,6 +765,12 @@ private:
                         const auto guard = std::lock_guard{m_engine};
                         m_engine.collection(uri.path[1]);
                         m_engine.read(selector, document);
+                        
+                        // Post-process: Apply string filters (startswith, contains, endswith)
+                        if(!string_filters.empty())
+                        {
+                            document = apply_string_filters(document, string_filters);
+                        }
                         
                         // Post-process: Apply $select projection (result transformation)
                         if(params.contains("$select"s))

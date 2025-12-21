@@ -76,9 +76,30 @@ All previously identified critical issues have been addressed:
 - Properly documented and tested
 
 ### OData Compliance
-Claims OData inspiration but only implements a small subset. Consider:
-- Full OData query syntax (`$filter`, `$orderby`, `$select`, `$expand`)
-- Or remove OData references and use simpler custom syntax
+
+**Current Implementation:**
+- `$top` - Partially implemented (hardcoded to 1, doesn't accept value parameter)
+- `$desc` - **Non-standard** (OData uses `$orderby field desc` instead)
+- Query parameters matched via regex patterns, not parsed from query string
+
+**OData Standard Query Parameters:**
+
+| Parameter | OData Standard | YarDB Implementation | Compatibility |
+|-----------|----------------|---------------------|---------------|
+| `$top` | `$top=n` (e.g., `$top=10`) | `$top` (hardcoded to 1) | ⚠️ Partial - name matches but doesn't accept value |
+| `$skip` | `$skip=n` (e.g., `$skip=20`) | ❌ Not implemented | ❌ Missing |
+| `$orderby` | `$orderby=field desc` or `$orderby=field asc` | ❌ Not implemented | ❌ Missing (uses non-standard `$desc` instead) |
+| `$filter` | `$filter=field eq 'value'` | ❌ Not implemented | ❌ Missing |
+| `$select` | `$select=field1,field2` | ❌ Not implemented | ❌ Missing |
+| `$expand` | `$expand=relatedEntity` | ❌ Not implemented | ❌ Missing |
+| `$desc` | ❌ Not an OData parameter | ✅ Implemented | ⚠️ Non-standard (should use `$orderby field desc`) |
+
+**Recommendations:**
+1. **Parse query parameters properly** - Currently using regex pattern matching instead of parsing `uri.query`
+2. **Make `$top` accept values** - Change from hardcoded `$top=1` to `$top=n` where n is parsed from query string
+3. **Replace `$desc` with `$orderby`** - Use standard OData `$orderby=field desc` syntax
+4. **Implement missing parameters** - Add `$skip`, `$filter`, `$select` for full OData compliance
+5. **Or simplify** - Remove OData references and use custom query syntax if full compliance isn't needed
 
 ## Comparison with REST Best Practices
 

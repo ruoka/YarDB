@@ -1,5 +1,114 @@
 # YarDB REST API Design Evaluation
 
+## TODO: Missing Features (Prioritized)
+
+### 🔴 High Priority
+
+#### OData Features
+1. **`$apply` with `aggregate` and `groupby`** - Implement OData aggregation support
+   - Support `aggregate` functions: `sum`, `count`, `min`, `max`, `average`, `distinctcount`
+   - Support `groupby` for grouping results by fields
+   - Example: `$apply=groupby((Category),aggregate(Price with sum as Total))`
+   - **Impact**: Enables analytics and reporting queries
+
+2. **Full `$expand` implementation** - Currently placeholder, needs actual expansion logic
+   - Parse related entity names from `$expand` parameter
+   - Query related collections and embed results
+   - Handle nested expansions if needed
+   - **Impact**: Enables relationship traversal and nested data retrieval
+
+#### REST Features
+3. **Content Negotiation** - Support `Accept` header for response format
+   - Support `application/json` (current default)
+   - Support `application/json;odata=minimalmetadata` and `application/json;odata=fullmetadata`
+   - Return appropriate `Content-Type` header
+   - **Impact**: Better client-server negotiation, OData metadata support
+
+4. **ETag Support** - For caching and optimistic locking
+   - Generate ETags for resources (hash of content or version)
+   - Support `If-Match` and `If-None-Match` headers for conditional requests
+   - Return `ETag` header in responses
+   - **Impact**: Enables efficient caching and prevents lost updates
+
+### 🟡 Medium Priority
+
+#### OData Features
+5. **`$count` query option** - Return count of items
+   - Support `$count=true` to return count instead of items
+   - Support `$count` inline with results
+   - Example: `GET /Products?$count=true`
+   - **Impact**: Efficient counting without fetching all data
+
+6. **Enhanced `$filter` operators** - Expand filter capabilities
+   - Support `in` operator: `$filter=status in ('active','pending')`
+   - Support `startswith`, `contains`, `endswith` in filter (currently post-processing only)
+   - Support nested property access: `$filter=Customer/Country eq 'USA'`
+   - **Impact**: More powerful querying capabilities
+
+7. **`$search` query option** - Full-text search support
+   - Implement basic full-text search across fields
+   - Example: `$search=keyword`
+   - **Impact**: Enables search functionality
+
+#### REST Features
+8. **Last-Modified Header** - For conditional requests
+   - Track modification timestamps for resources
+   - Return `Last-Modified` header
+   - Support `If-Modified-Since` and `If-Unmodified-Since` headers
+   - **Impact**: Enables conditional GET requests and caching
+
+9. **Conditional Requests** - Full support for conditional headers
+   - `If-Match` / `If-None-Match` (with ETags)
+   - `If-Modified-Since` / `If-Unmodified-Since` (with Last-Modified)
+   - Return `412 Precondition Failed` when conditions not met
+   - **Impact**: Prevents lost updates and enables efficient caching
+
+10. **API Versioning** - Version management strategy
+    - Support version in URL (`/v1/collection`) or header (`API-Version: 1.0`)
+    - Document versioning strategy
+    - **Impact**: Enables API evolution without breaking clients
+
+### 🟢 Low Priority
+
+#### OData Features
+11. **`$metadata` endpoint** - OData service metadata
+    - Implement `GET /$metadata` endpoint
+    - Return EDM (Entity Data Model) XML describing the service
+    - Include entity types, properties, and relationships
+    - **Impact**: Enables service discovery and code generation
+
+12. **`$batch` request support** - Batch operations
+    - Support OData batch requests for multiple operations
+    - Parse batch request body
+    - Execute operations and return batch response
+    - **Impact**: Reduces round trips for multiple operations
+
+13. **`$format` query option** - Response format selection
+    - Support `$format=json` (default)
+    - Support `$format=xml` if needed
+    - **Impact**: Format flexibility (though JSON is standard)
+
+#### REST Features
+14. **Bulk Operations** - Batch create/update/delete
+    - Support bulk POST/PUT/PATCH/DELETE operations
+    - Return individual results for each operation
+    - **Impact**: Efficient bulk data operations
+
+15. **Full-Text Search** - Advanced search capabilities
+    - Implement indexing for full-text search
+    - Support complex search queries
+    - **Impact**: Enhanced search functionality
+
+16. **Relationships/Nested Resources** - Relationship support
+    - Support nested resource access: `GET /Customers/123/Orders`
+    - Implement relationship navigation
+    - **Impact**: RESTful relationship traversal
+
+17. **CORS Support** - Cross-Origin Resource Sharing
+    - Add CORS headers for web client access
+    - Support preflight OPTIONS requests
+    - **Impact**: Enables browser-based clients
+
 ## Overall Assessment
 
 **Rating: 8.0/10** - Solid REST API with proper HTTP semantics and good error handling. Minor improvements needed for advanced features.
@@ -107,6 +216,12 @@ All previously identified critical issues have been addressed:
 | `$filter` | `$filter=field eq 'value'` | ✅ `$filter=field eq 'value'` (supports eq, ne, gt, ge, lt, le, and, or) | ✅ **FULLY COMPATIBLE** |
 | `$select` | `$select=field1,field2` | ✅ `$select=field1,field2` (always includes `_id`) | ✅ **FULLY COMPATIBLE** |
 | `$expand` | `$expand=relatedEntity` | ⚠️ Parsed but placeholder (returns as-is) | ⚠️ **PARTIAL** - parsed but expansion not yet implemented |
+| `$apply` | `$apply=groupby((field),aggregate(Price with sum))` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #1 |
+| `$count` | `$count=true` or inline count | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #5 |
+| `$search` | `$search=keyword` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #7 |
+| `$format` | `$format=json` or `$format=xml` | ⚠️ JSON only (default) | ⚠️ **PARTIAL** - JSON only, no format selection |
+| `$metadata` | `GET /$metadata` endpoint | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #11 |
+| `$batch` | Batch request support | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #12 |
 
 **Recommendations:**
 - ✅ **DONE**: Query parameter parsing from `uri.query` - **COMPLETED**
@@ -132,30 +247,32 @@ All previously identified critical issues have been addressed:
 
 ## Recommendations Priority
 
-### ✅ High Priority - COMPLETED
-1. ✅ Fix status codes (201, 404, 400) - **DONE**
-2. ✅ Return 404 for missing documents - **DONE**
-3. ✅ Add input validation and error handling - **DONE**
-4. ✅ Add Location header on POST - **DONE**
-5. ✅ Return single object from GET /collection/{id} - **DONE**
-6. ✅ Add structured error responses - **DONE**
-7. ✅ Add Content-Location header on PUT/PATCH - **DONE**
-8. ✅ Refactor query parameter parsing from uri.query - **DONE**
-9. ✅ Implement $top with numeric values - **DONE**
-10. ✅ Implement $orderby parameter (OData compliant) - **DONE**
+**Note**: See the [TODO: Missing Features](#todo-missing-features-prioritized) section at the top of this document for the complete prioritized list of missing REST and OData features.
 
-### Medium Priority (Next Steps)
-11. ✅ Implement `$skip` in the engine - **COMPLETED**
-12. ✅ Add filtering capabilities (`$filter`) - **COMPLETED**
-13. ✅ Add field projection (`$select`) - **COMPLETED**
-14. Implement actual expansion logic for `$expand` (currently placeholder)
-15. Add field names to `$orderby` (currently only supports `desc`/`asc`)
+### ✅ Completed Features
 
-### Low Priority
-9. Add ETag/Last-Modified headers
-10. Add API versioning
-11. Implement full OData or simplify
-12. Add bulk operations
+**REST Features:**
+- ✅ Proper HTTP status codes (201, 204, 400, 404)
+- ✅ Structured error responses
+- ✅ Location header on resource creation (POST and PUT)
+- ✅ Content-Location header on resource updates (PUT and PATCH)
+- ✅ Single object responses from GET /collection/{id}
+- ✅ Input validation and security measures
+- ✅ Collection name validation
+
+**OData Query Parameters:**
+- ✅ `$top` - Pagination limit (e.g., `$top=10`)
+- ✅ `$skip` - Pagination offset (e.g., `$skip=20`)
+- ✅ `$orderby` - Sorting (e.g., `$orderby=field desc`)
+- ✅ `$filter` - Filtering with comparison and logical operators
+- ✅ `$select` - Field projection (e.g., `$select=name,email`)
+- ✅ `$expand` - Parsed (placeholder implementation)
+
+**Code Quality:**
+- ✅ Optimized string handling with `string_view`
+- ✅ Helper functions for code reuse
+- ✅ Comprehensive input validation
+- ✅ Exception handling throughout
 
 ## Conclusion
 
@@ -180,5 +297,9 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 The API now follows REST best practices and provides a solid foundation for client applications. All major OData query parameters have been implemented, providing comprehensive query capabilities for client applications.
 
 ### Next Steps
-Focus on implementing actual expansion logic for `$expand` and adding advanced features (ETags, conditional requests, API versioning) to enhance the API's functionality for more complex use cases.
+See the [TODO: Missing Features](#todo-missing-features-prioritized) section at the top of this document for prioritized next steps. High-priority items include:
+- Implementing `$apply` with aggregation and grouping
+- Full `$expand` implementation
+- Content negotiation support
+- ETag support for caching and optimistic locking
 

@@ -45,7 +45,7 @@ private:
 };
 
 // Helper function to parse HTTP status line and headers
-auto parse_http_response(net::endpointstream& stream)
+auto parse_http_response(net::endpointstream& stream, const string& method = ""s)
 {
     auto version = ""s, status_code = ""s, reason = ""s;
     auto headers = http::headers{};
@@ -79,8 +79,9 @@ auto parse_http_response(net::endpointstream& stream)
     // Read headers
     stream >> headers >> crlf;
 
-    // Read body if content-length is present
-    if(headers.contains("content-length"))
+    // Read body if content-length is present and method is not HEAD
+    // For HEAD requests, Content-Length is set but body is not sent by framework
+    if(headers.contains("content-length") && method != "HEAD"s)
     {
         auto content_length = std::stoll(headers["content-length"]);
         if(content_length > 0)
@@ -109,7 +110,7 @@ auto make_request(const string& port, const string& method, const string& path, 
     
     stream << crlf << body << flush;
 
-    return parse_http_response(stream);
+    return parse_http_response(stream, method);
 }
 
 // Helper function to make HTTP request with custom Accept header
@@ -129,7 +130,7 @@ auto make_request_with_accept(const string& port, const string& method, const st
     
     stream << crlf << body << flush;
 
-    return parse_http_response(stream);
+    return parse_http_response(stream, method);
 }
 
 auto test_set()
@@ -1284,7 +1285,7 @@ auto test_set()
         section("GET with Accept: application/json;odata=fullmetadata returns 200 OK") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "application/json;odata=fullmetadata"s, ""s
+                setup->get_port(), "GET"s, "/headtest?$top=1"s, "application/json;odata=fullmetadata"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1461,6 +1462,246 @@ auto test_set()
             require_eq(head_body, ""s);
             // GET should have body
             require_false(get_body.empty());
+        };
+    };
+
+    test_case("OData metadata support") = []
+    {
+        const auto test_file = "./httpd_odata_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("Collection query with minimal metadata") = [setup]
+        {
+            // Create test document
+            auto [post_status, _, __, post_body] = make_request(
+                setup->get_port(), "POST"s, "/odatatest"s, R"({"name":"Alice","age":30})"s
+            );
+            require_eq(post_status, "201"s);
+
+            // Query collection with minimal metadata
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/odatatest"s, "application/json;odata=minimalmetadata"s
+            );
+
+            require_eq(status, "200"s);
+            auto response = json::parse(body);
+            
+            // Should have @odata.context at root
+            require_true(response.has("@odata.context"s));
+            require_eq(response["@odata.context"s].get<string>(), "/$metadata#odatatest"s);
+            
+            // Should have value array
+            require_true(response.has("value"s));
+            require_true(response["value"s].is_array());
+            
+            // Items in array should NOT have metadata (minimal only adds context at root)
+            auto& items = response["value"s].get<db::object::array>();
+            require_false(items.empty());
+            require_false(items[0].has("@odata.context"s));
+        };
+
+        section("Collection query with full metadata") = [setup]
+        {
+            // Query collection with full metadata
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/odatatest"s, "application/json;odata=fullmetadata"s
+            );
+
+            require_eq(status, "200"s);
+            auto response = json::parse(body);
+            
+            // Should have @odata.context at root
+            require_true(response.has("@odata.context"s));
+            require_eq(response["@odata.context"s].get<string>(), "/$metadata#odatatest"s);
+            
+            // Should have value array
+            require_true(response.has("value"s));
+            auto& items = response["value"s].get<db::object::array>();
+            require_false(items.empty());
+            
+            // Each item should have full metadata
+            for(const auto& item : items)
+            {
+                require_true(item.has("@odata.context"s));
+                require_true(item.has("@odata.id"s));
+                require_true(item.has("@odata.editLink"s));
+                require_true(item.has("_id"s));
+                
+                auto id = static_cast<long long>(item["_id"s]);
+                require_eq(item["@odata.id"s].get<string>(), "/odatatest/"s + std::to_string(id));
+                require_eq(item["@odata.editLink"s].get<string>(), "/odatatest/"s + std::to_string(id));
+            }
+        };
+
+        section("Single document with minimal metadata") = [setup]
+        {
+            // Get first document ID
+            auto [get_status, __, ___, get_body] = make_request(
+                setup->get_port(), "GET"s, "/odatatest"s, ""s
+            );
+            auto all_docs = json::parse(get_body);
+            auto& items = all_docs.get<db::object::array>();
+            require_false(items.empty());
+            auto doc_id = static_cast<long long>(items[0]["_id"s]);
+            
+            // Get single document with minimal metadata
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/odatatest/"s + std::to_string(doc_id), 
+                "application/json;odata=minimalmetadata"s
+            );
+
+            require_eq(status, "200"s);
+            auto document = json::parse(body);
+            
+            // Should have @odata.context
+            require_true(document.has("@odata.context"s));
+            require_eq(document["@odata.context"s].get<string>(), "/$metadata#odatatest/$entity"s);
+            
+            // Should NOT have other metadata properties for minimal
+            require_false(document.has("@odata.id"s));
+            require_false(document.has("@odata.editLink"s));
+        };
+
+        section("Single document with full metadata") = [setup]
+        {
+            // Get first document ID
+            auto [get_status, __, ___, get_body] = make_request(
+                setup->get_port(), "GET"s, "/odatatest"s, ""s
+            );
+            auto all_docs = json::parse(get_body);
+            auto& items = all_docs.get<db::object::array>();
+            require_false(items.empty());
+            auto doc_id = static_cast<long long>(items[0]["_id"s]);
+            
+            // Get single document with full metadata
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/odatatest/"s + std::to_string(doc_id), 
+                "application/json;odata=fullmetadata"s
+            );
+
+            require_eq(status, "200"s);
+            auto document = json::parse(body);
+            
+            // Should have all metadata properties
+            require_true(document.has("@odata.context"s));
+            require_eq(document["@odata.context"s].get<string>(), "/$metadata#odatatest/$entity"s);
+            require_true(document.has("@odata.id"s));
+            require_true(document.has("@odata.editLink"s));
+            
+            require_eq(document["@odata.id"s].get<string>(), "/odatatest/"s + std::to_string(doc_id));
+            require_eq(document["@odata.editLink"s].get<string>(), "/odatatest/"s + std::to_string(doc_id));
+        };
+
+        section("No metadata without Accept header") = [setup]
+        {
+            // Query without Accept header
+            auto [status, reason, headers, body] = make_request(
+                setup->get_port(), "GET"s, "/odatatest"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto response = json::parse(body);
+            
+            // Should NOT have @odata.context
+            require_false(response.has("@odata.context"s));
+            require_false(response.has("value"s));
+            
+            // Should be direct array (not wrapped)
+            require_true(response.is_array());
+        };
+
+        section("No metadata with odata=nometadata") = [setup]
+        {
+            // Query with explicit no metadata
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/odatatest"s, "application/json;odata=nometadata"s
+            );
+
+            require_eq(status, "200"s);
+            auto response = json::parse(body);
+            
+            // Should NOT have @odata.context
+            require_false(response.has("@odata.context"s));
+            require_false(response.has("value"s));
+            
+            // Should be direct array (not wrapped)
+            require_true(response.is_array());
+        };
+
+        section("POST response includes metadata when requested") = [setup]
+        {
+            // Create document with minimal metadata request
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "POST"s, "/odatatest2"s, "application/json;odata=minimalmetadata"s,
+                R"({"name":"Bob","age":25})"s
+            );
+
+            require_eq(status, "201"s);
+            auto document = json::parse(body);
+            
+            // Should have @odata.context
+            require_true(document.has("@odata.context"s));
+            require_eq(document["@odata.context"s].get<string>(), "/$metadata#odatatest2/$entity"s);
+            require_true(document.has("_id"s));
+        };
+
+        section("PUT response includes full metadata when requested") = [setup]
+        {
+            // First create a document
+            auto [post_status, __, ___, post_body] = make_request(
+                setup->get_port(), "POST"s, "/odatatest3"s, R"({"name":"Charlie"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // Update with full metadata request
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "PUT"s, "/odatatest3/"s + std::to_string(doc_id), 
+                "application/json;odata=fullmetadata"s,
+                R"({"name":"Charlie Updated","age":40})"s
+            );
+
+            require_eq(status, "200"s);
+            auto document = json::parse(body);
+            
+            // Should have all metadata properties
+            require_true(document.has("@odata.context"s));
+            require_true(document.has("@odata.id"s));
+            require_true(document.has("@odata.editLink"s));
+        };
+
+        section("PATCH response includes metadata when requested") = [setup]
+        {
+            // First create a document
+            auto [post_status, __, ___, post_body] = make_request(
+                setup->get_port(), "POST"s, "/odatatest4"s, R"({"name":"David"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // Update with minimal metadata request
+            auto [status, reason, headers, body] = make_request_with_accept(
+                setup->get_port(), "PATCH"s, "/odatatest4/"s + std::to_string(doc_id), 
+                "application/json;odata=minimalmetadata"s,
+                R"({"age":35})"s
+            );
+
+            require_eq(status, "200"s);
+            auto document = json::parse(body);
+            
+            // PATCH may return array or single object - check metadata accordingly
+            if(document.is_array())
+            {
+                // If array, check first element has metadata
+                auto& items = document.get<db::object::array>();
+                require_false(items.empty());
+                require_true(items[0].has("@odata.context"s));
+            }
+            else
+            {
+                // If single object, check it has metadata
+                require_true(document.has("@odata.context"s));
+            }
         };
     };
 

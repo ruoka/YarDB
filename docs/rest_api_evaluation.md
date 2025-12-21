@@ -18,11 +18,17 @@
    - **Impact**: Enables relationship traversal and nested data retrieval
 
 #### REST Features
-3. **Content Negotiation** - Support `Accept` header for response format
-   - Support `application/json` (current default)
-   - Support `application/json;odata=minimalmetadata` and `application/json;odata=fullmetadata`
-   - Return appropriate `Content-Type` header
-   - **Impact**: Better client-server negotiation, OData metadata support
+3. **✅ Content Negotiation** - ✅ **PARTIALLY COMPLETED** - Support `Accept` header for response format
+   - ✅ Support `application/json` (current default)
+   - ✅ Accept `application/json;odata=minimalmetadata` and `application/json;odata=fullmetadata` header formats
+   - ⚠️ **Note**: OData metadata properties (`@odata.context`, `@odata.type`, `@odata.id`, etc.) are not yet generated in responses
+   - **OData Metadata Format** (when implemented):
+     - `odata=fullmetadata`: Include `@odata.context`, `@odata.type`, `@odata.id`, `@odata.editLink`, `@odata.etag`
+     - `odata=minimalmetadata`: Include only `@odata.context`
+     - `odata=nometadata` or default: Plain JSON (current behavior)
+   - ✅ Return `406 Not Acceptable` for unsupported content types
+   - ✅ Return appropriate `Content-Type` header
+   - ✅ **Impact**: Better client-server negotiation, foundation for OData metadata support
 
 4. **ETag Support** - For caching and optimistic locking
    - Generate ETags for resources (hash of content or version)
@@ -111,15 +117,16 @@
 
 ## Overall Assessment
 
-**Rating: 8.0/10** - Solid REST API with proper HTTP semantics and good error handling. Minor improvements needed for advanced features.
+**Rating: 8.5/10** - Solid REST API with proper HTTP semantics, good error handling, and content negotiation. Minor improvements needed for advanced features like ETags and conditional requests.
 
 ## Strengths ✅
 
 1. **Clear Resource Structure**: Clean `/{collection}` and `/{collection}/{id}` pattern
-2. **Proper HTTP Methods**: Uses GET, POST, PUT, PATCH, DELETE appropriately
-3. **Consistent JSON**: All responses use JSON format
-4. **OData Compliance**: Includes `$top`, `$orderby` query parameters with proper parsing
-5. **Thread Safety**: Proper locking with `lockable<engine>`
+2. **Proper HTTP Methods**: Uses GET, POST, PUT, PATCH, DELETE, HEAD appropriately
+3. **Content Negotiation**: Supports Accept header with proper 406 Not Acceptable responses
+4. **Consistent JSON**: All responses use JSON format
+5. **OData Compliance**: Includes `$top`, `$orderby`, `$filter`, `$select`, `$skip` query parameters with proper parsing
+6. **Thread Safety**: Proper locking with `lockable<engine>`
 
 ## Critical Issues 🔴
 
@@ -157,9 +164,18 @@ All previously identified critical issues have been addressed:
 
 ## Missing Features 🟡
 
+### HTTP Methods
+- **✅ HEAD**: Now supports HEAD method for all GET endpoints (`/`, `/collection`, `/collection/{id}`)
+  - Returns same headers as GET but no body
+  - Supports Accept header content negotiation
+  - Returns correct Content-Length header
+  - **Impact**: Enables efficient resource existence checks and cache validation
+
 ### Headers
 - **✅ Location**: Now includes `Location: /collection/{id}` header on `POST` and `PUT` (when creating new resources)
 - **✅ Content-Location**: Now includes `Content-Location: /collection/{id}` header on `PUT` (updates) and `PATCH` (updates)
+- **✅ Content Negotiation**: Now supports `Accept` header with `406 Not Acceptable` for unsupported formats
+  - Accepts `application/json;odata=fullmetadata` header format (but doesn't generate OData metadata yet)
 - **ETag**: For caching and optimistic locking (not yet implemented)
 - **Last-Modified**: For conditional requests (not yet implemented)
 
@@ -241,7 +257,7 @@ All previously identified critical issues have been addressed:
 | Status codes | ✅ Good | Proper 2xx/4xx/5xx | ✅ |
 | Error handling | ✅ Good | Structured error responses | ✅ |
 | Headers | ✅ Good | Location header included | ✅ |
-| Content negotiation | ❌ None | Accept header support | ❌ |
+| Content negotiation | ✅ Good | Accept header support | ✅ |
 | Idempotency | ✅ Good | PUT/DELETE are idempotent | ✅ |
 | Stateless | ✅ Good | No session state | ✅ |
 
@@ -252,11 +268,13 @@ All previously identified critical issues have been addressed:
 ### ✅ Completed Features
 
 **REST Features:**
-- ✅ Proper HTTP status codes (201, 204, 400, 404)
+- ✅ Proper HTTP status codes (201, 204, 400, 404, 406)
 - ✅ Structured error responses
 - ✅ Location header on resource creation (POST and PUT)
 - ✅ Content-Location header on resource updates (PUT and PATCH)
 - ✅ Single object responses from GET /collection/{id}
+- ✅ HEAD method support for all GET endpoints
+- ✅ Content negotiation via Accept header (returns 406 Not Acceptable for unsupported formats)
 - ✅ Input validation and security measures
 - ✅ Collection name validation
 
@@ -279,13 +297,15 @@ All previously identified critical issues have been addressed:
 YarDB now has a **production-ready REST API** with proper HTTP semantics, correct status codes, comprehensive error handling, and standard response formats. All critical issues have been resolved.
 
 ### Improvements Made ✅
-- Proper HTTP status codes (201, 204, 400, 404)
+- Proper HTTP status codes (201, 204, 400, 404, 406)
 - Comprehensive error handling with structured error responses
 - Location header on resource creation (POST and PUT)
 - Content-Location header on resource updates (PUT and PATCH)
 - PUT upsert behavior (creates new resources with 201 Created, updates existing with 200 OK)
 - Single object responses from GET /collection/{id}
 - Clear distinction between success and error cases
+- HEAD method support for all GET endpoints (returns headers without body)
+- Content negotiation via Accept header (returns 406 Not Acceptable for unsupported formats)
 - OData-compliant query parameter parsing from uri.query
 - $top parameter with numeric values (e.g., `$top=10`)
 - $skip parameter with numeric values (e.g., `$skip=20`)
@@ -294,12 +314,12 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 - $select parameter for field projection (e.g., `$select=name,email`)
 - $expand parameter parsing (placeholder for future expansion)
 
-The API now follows REST best practices and provides a solid foundation for client applications. All major OData query parameters have been implemented, providing comprehensive query capabilities for client applications.
+The API now follows REST best practices and provides a solid foundation for client applications. All major OData query parameters have been implemented, providing comprehensive query capabilities for client applications. Content negotiation and HEAD method support enable efficient client-server interaction and caching strategies.
 
 ### Next Steps
 See the [TODO: Missing Features](#todo-missing-features-prioritized) section at the top of this document for prioritized next steps. High-priority items include:
 - Implementing `$apply` with aggregation and grouping
 - Full `$expand` implementation
-- Content negotiation support
 - ETag support for caching and optimistic locking
+- Last-Modified header and conditional requests
 

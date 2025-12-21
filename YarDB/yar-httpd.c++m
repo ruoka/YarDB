@@ -168,66 +168,132 @@ inline auto url_decode(std::string_view encoded)
     return decoded;
 }
 
+// Enum for OData metadata level
+enum class odata_metadata_level
+{
+    none,           // No metadata (plain JSON)
+    minimal,        // Only @odata.context
+    full            // All metadata (@odata.context, @odata.type, @odata.id, etc.)
+};
+
+// Helper function to parse OData metadata level from Accept header
+// Returns the metadata level requested, or 'none' if not specified
+// Note: Header values are already normalized (lowercase) by the http::headers class
+inline auto parse_odata_metadata_level(const http::headers& headers) -> odata_metadata_level
+{
+    if(!headers.contains("accept"s))
+        return odata_metadata_level::none;
+    
+    const auto accept_value = headers["accept"s];
+    
+    // Check for odata=fullmetadata
+    if(accept_value.contains("odata=fullmetadata"s))
+        return odata_metadata_level::full;
+    
+    // Check for odata=minimalmetadata
+    if(accept_value.contains("odata=minimalmetadata"s))
+        return odata_metadata_level::minimal;
+    
+    // Check for odata=nometadata (explicit no metadata)
+    if(accept_value.contains("odata=nometadata"s))
+        return odata_metadata_level::none;
+    
+    // Default: no metadata
+    return odata_metadata_level::none;
+}
+
 // Helper function to check if JSON is acceptable based on Accept header
 // Returns true if JSON is acceptable, false otherwise
 // According to HTTP spec: missing Accept header means accept anything (*/*)
 inline auto accepts_json(const http::headers& headers) -> bool
 {
-    // If no Accept header, default to accepting anything (including JSON)
-    if(!headers.contains("accept") && !headers.contains("Accept"))
+    // Headers are stored in lowercase, so check "accept" directly
+    if(!headers.contains("accept"s))
+        return true; // No Accept header means accept anything (including JSON)
+    
+    // Get Accept header value (already lowercase from headers class)
+    const auto accept_value = headers["accept"s];
+    
+    // Check for wildcards that accept anything
+    if(accept_value.contains("*/*"s) || accept_value.contains("application/*"s))
         return true;
     
-    auto accept_value = headers.contains("accept") 
-        ? std::string_view{headers["accept"]}
-        : std::string_view{headers["Accept"]};
+    // Check if it contains "application/json" (handles all variants including parameters)
+    // Examples that match: "application/json", "application/json;odata=fullmetadata", 
+    //                      "application/json, application/xml", etc.
+    return accept_value.contains("application/json"s);
+}
+
+// Helper function to add OData metadata to a document based on metadata level
+// For minimal metadata: adds @odata.context
+// For full metadata: adds @odata.context, @odata.id, @odata.editLink
+inline auto add_odata_metadata(db::object document, odata_metadata_level level, 
+                                std::string_view collection_name,
+                                std::optional<long long> id = std::nullopt) -> db::object
+{
+    if(level == odata_metadata_level::none)
+        return document; // No metadata needed
     
-    // Normalize to lowercase for case-insensitive comparison
-    auto accept_lower = std::string{accept_value};
-    std::transform(accept_lower.begin(), accept_lower.end(), accept_lower.begin(), 
-                   [](unsigned char c) { return std::tolower(c); });
+    // OData context format:
+    // - For entity sets (arrays): /$metadata#EntitySetName
+    // - For single entities: /$metadata#EntitySetName/$entity
+    auto context_url = "/$metadata#"s + std::string{collection_name};
+    if(id.has_value())
+        context_url += "/$entity"s; // Single entity
     
-    // Parse Accept header - it's a comma-separated list of media types with optional q-values
-    // Examples:
-    //   "application/json"
-    //   "application/json, application/xml;q=0.8"
-    //   "*/*"
-    //   "application/*"
-    //   "application/json;odata=fullmetadata"
-    
-    auto start = std::size_t{0};
-    while(start < accept_lower.length())
+    if(level == odata_metadata_level::minimal)
     {
-        // Find next comma or end
-        auto comma_pos = accept_lower.find(',', start);
-        auto media_range = trim(accept_lower.substr(start, 
-            comma_pos == std::string::npos ? accept_lower.length() - start : comma_pos - start));
-        
-        // Remove q-value if present (e.g., "application/json;q=0.9" -> "application/json")
-        auto semicolon_pos = media_range.find(';');
-        if(semicolon_pos != std::string_view::npos)
-            media_range = trim(media_range.substr(0, semicolon_pos));
-        
-        // Check if this media range accepts JSON
-        if(media_range == "*/*"sv)
-            return true; // Accepts anything
-        
-        if(media_range == "application/*"sv)
-            return true; // Accepts any application/* type (including application/json)
-        
-        if(media_range == "application/json"sv)
-            return true; // Explicitly accepts JSON
-        
-        if(media_range.starts_with("application/json"sv))
-            return true; // application/json with parameters (e.g., application/json;odata=...)
-        
-        // Move to next media range
-        if(comma_pos == std::string::npos)
-            break;
-        start = comma_pos + 1;
+        // Minimal metadata: only @odata.context
+        document["@odata.context"s] = context_url;
+        return document;
     }
     
-    // No matching media range found - JSON is not acceptable
-    return false;
+    // Full metadata: @odata.context, @odata.id, @odata.editLink
+    document["@odata.context"s] = context_url;
+    
+    if(id.has_value())
+    {
+        auto resource_path = "/"s + std::string{collection_name} + "/"s + std::to_string(id.value());
+        document["@odata.id"s] = resource_path;
+        document["@odata.editLink"s] = resource_path;
+    }
+    
+    return document;
+}
+
+// Helper function to add OData metadata to an array response
+// Wraps the array in an object with @odata.context and "value" array
+// For full metadata, also adds metadata to each item in the array
+inline auto add_odata_metadata_to_array(db::object document, odata_metadata_level level,
+                                        std::string_view collection_name) -> db::object
+{
+    if(level == odata_metadata_level::none)
+        return document; // No metadata needed
+    
+    if(!document.is_array())
+        return document; // Not an array, return as-is
+    
+    // Wrap array in object with @odata.context and value
+    auto context_url = "/$metadata#"s + std::string{collection_name};
+    auto wrapped = db::object{};
+    wrapped["@odata.context"s] = context_url;
+    wrapped["value"s] = document;
+    
+    // For full metadata, also add metadata to each item
+    if(level == odata_metadata_level::full)
+    {
+        auto& items = wrapped["value"s].get<db::object::array>();
+        for(auto& item : items)
+        {
+            if(item.has("_id"s))
+            {
+                auto item_id = static_cast<long long>(item["_id"s]);
+                item = add_odata_metadata(item, level, collection_name, item_id);
+            }
+        }
+    }
+    
+    return wrapped;
 }
 
 // Helper function to create 406 Not Acceptable error response
@@ -744,7 +810,16 @@ private:
                         return not_acceptable_response();
 
                     const auto guard = std::lock_guard{m_engine};
-                    return std::make_tuple("200 OK"s, xson::json::stringify({"collections", m_engine.collections()}));
+                    auto response = db::object{"collections", m_engine.collections()};
+                    
+                    // Add OData metadata if requested
+                    auto metadata_level = parse_odata_metadata_level(headers);
+                    if(metadata_level != odata_metadata_level::none)
+                    {
+                        response["@odata.context"s] = "/$metadata#Collections"s;
+                    }
+                    
+                    return std::make_tuple("200 OK"s, xson::json::stringify(response));
                 });
 
         // Create
@@ -777,7 +852,12 @@ private:
                         // Add Location header pointing to the newly created resource
                         auto response_headers = http::headers{};
                         const auto id = static_cast<long long>(document["_id"s]);
-                        response_headers.set("Location", "/"s + collection + "/"s + std::to_string(id));
+                        response_headers.set("location"s, "/"s + collection + "/"s + std::to_string(id));
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                            document = add_odata_metadata(document, metadata_level, collection, id);
                         
                         return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
                     }
@@ -828,6 +908,12 @@ private:
 
                         // Return single object (first element of array)
                         auto document = documents.get<db::object::array>()[0];
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        
                         return std::make_tuple("200 OK"s, xson::json::stringify(document));
                     }
                     catch(const std::exception& e)
@@ -981,6 +1067,22 @@ private:
                             document = apply_expand(document, params["$expand"s], collection_name, m_engine);
                         }
                         
+                        // Add OData metadata if requested
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                        {
+                            if(document.is_array())
+                            {
+                                document = add_odata_metadata_to_array(document, metadata_level, collection_name);
+                            }
+                            else if(document.has("_id"s))
+                            {
+                                // Single object - add metadata directly
+                                auto doc_id = static_cast<long long>(document["_id"s]);
+                                document = add_odata_metadata(document, metadata_level, collection_name, doc_id);
+                            }
+                        }
+                        
                         return std::make_tuple("200 OK"s, xson::json::stringify(document));
                     }
                     catch(const std::exception& e)
@@ -1004,9 +1106,19 @@ private:
                     if(!accepts_json(headers))
                         return not_acceptable_response();
 
-                    // HEAD returns same headers as GET but no body (framework handles this)
+                    // Compute response content for correct Content-Length header (framework won't send body for HEAD)
                     const auto guard = std::lock_guard{m_engine};
-                    return std::make_tuple("200 OK"s, ""s);
+                    auto response = db::object{"collections", m_engine.collections()};
+                    
+                    // Add OData metadata if requested
+                    auto metadata_level = parse_odata_metadata_level(headers);
+                    if(metadata_level != odata_metadata_level::none)
+                    {
+                        response["@odata.context"s] = "/$metadata#Collections"s;
+                    }
+                    
+                    const auto content = xson::json::stringify(response);
+                    return std::make_tuple("200 OK"s, content);
                 });
 
         // HEAD /collection/{id} - Get document headers (same as GET but no body)
@@ -1041,11 +1153,20 @@ private:
                                 {"collection", collection},
                                 {"id", id}
                             };
-                            return std::make_tuple("404 Not Found"s, xson::json::stringify(error));
+                            const auto error_content = xson::json::stringify(error);
+                            return std::make_tuple("404 Not Found"s, error_content);
                         }
 
-                        // HEAD returns same headers as GET but no body (framework handles this)
-                        return std::make_tuple("200 OK"s, ""s);
+                        // Compute response content for correct Content-Length header (framework won't send body for HEAD)
+                        auto document = documents.get<db::object::array>()[0];
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        
+                        const auto content = xson::json::stringify(document);
+                        return std::make_tuple("200 OK"s, content);
                     }
                     catch(const std::exception& e)
                     {
@@ -1058,6 +1179,8 @@ private:
                 });
 
         // HEAD /collection - Get collection headers (same as GET but no body)
+        // Note: We compute the full response to get correct Content-Length header
+        // Framework will use content.length() for Content-Length but won't send body for HEAD
         m_server.head("/[a-z][a-z0-9]*(\\?.*)?"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
@@ -1078,38 +1201,114 @@ private:
                         auto params = parse_query_params(uri);
                         
                         // Handle $top, $skip, $orderby, $filter, $select, $expand (same as GET)
-                        // ... (same logic as GET handler but we don't need to process results)
-                        
-                        // For HEAD, we just need to validate the request and return headers
-                        // The actual query processing is the same, but we return empty body
-                        
-                        const auto guard = std::lock_guard{m_engine};
-                        auto collection_name = validate_collection_name(uri.path[1]);
-                        m_engine.collection(collection_name);
-                        
-                        // Validate query parameters (same validation as GET)
+                        // This is needed to compute correct Content-Length header
                         if(params.contains("$top"s))
                         {
-                            auto top_value = stoll(params["$top"s]);
-                            if(top_value < 0)
-                                throw std::invalid_argument{"$top must be non-negative"};
-                            constexpr auto max_top = 10000;
-                            if(top_value > max_top)
-                                throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(max_top) + ")"};
+                            try
+                            {
+                                auto top_value = stoll(params["$top"s]);
+                                if(top_value < 0)
+                                    throw std::invalid_argument{"$top must be non-negative"};
+                                constexpr auto max_top = 10000;
+                                if(top_value > max_top)
+                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(max_top) + ")"};
+                                selector["$top"s] = top_value;
+                            }
+                            catch(const std::exception&)
+                            {
+                                throw std::invalid_argument{"$top must be a valid integer"};
+                            }
                         }
                         
                         if(params.contains("$skip"s))
                         {
-                            auto skip_value = stoll(params["$skip"s]);
-                            if(skip_value < 0)
-                                throw std::invalid_argument{"$skip must be non-negative"};
-                            constexpr auto max_skip = 100000;
-                            if(skip_value > max_skip)
-                                throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(max_skip) + ")"};
+                            try
+                            {
+                                auto skip_value = stoll(params["$skip"s]);
+                                if(skip_value < 0)
+                                    throw std::invalid_argument{"$skip must be non-negative"};
+                                constexpr auto max_skip = 100000;
+                                if(skip_value > max_skip)
+                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(max_skip) + ")"};
+                                selector["$skip"s] = skip_value;
+                            }
+                            catch(const std::exception&)
+                            {
+                                throw std::invalid_argument{"$skip must be a valid integer"};
+                            }
                         }
                         
-                        // HEAD returns same headers as GET but no body (framework handles this)
-                        return std::make_tuple("200 OK"s, ""s);
+                        if(params.contains("$orderby"s))
+                        {
+                            const auto orderby_value = params["$orderby"s];
+                            auto orderby = trim(std::string_view{orderby_value});
+                            auto field_name = orderby;
+                            if(orderby.ends_with(" desc"sv))
+                                field_name = trim(orderby.substr(0, orderby.size() - 5));
+                            else if(orderby.ends_with(" asc"sv))
+                                field_name = trim(orderby.substr(0, orderby.size() - 4));
+                            if(field_name.empty())
+                                throw std::invalid_argument{"$orderby field name cannot be empty"};
+                            constexpr auto max_field_name_length = 256;
+                            if(field_name.size() > max_field_name_length)
+                                throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(max_field_name_length) + " chars)"};
+                            selector["$orderby"s] = std::string{field_name};
+                            if(orderby.ends_with(" desc"sv) || orderby == "desc"sv)
+                                selector["$desc"s] = true;
+                        }
+                        
+                        auto string_filters = std::vector<string_filter>{};
+                        if(params.contains("$filter"s))
+                        {
+                            try
+                            {
+                                auto [filter_selector, filter_string_filters] = parse_odata_filter(params["$filter"s]);
+                                for(const auto& [key, value] : filter_selector.get<db::object::map>())
+                                    selector[key] = value;
+                                string_filters = std::move(filter_string_filters);
+                            }
+                            catch(const std::exception& e)
+                            {
+                                auto error = db::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Invalid $filter expression: "s + std::string{e.what()}}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                            }
+                        }
+
+                        const auto guard = std::lock_guard{m_engine};
+                        auto collection_name = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection_name);
+                        m_engine.read(selector, document);
+                        
+                        // Post-process: Apply string filters, $select, $expand (same as GET)
+                        if(!string_filters.empty())
+                            document = apply_string_filters(document, string_filters);
+                        if(params.contains("$select"s))
+                            document = apply_select(document, params["$select"s]);
+                        if(params.contains("$expand"s))
+                            document = apply_expand(document, params["$expand"s], collection_name, m_engine);
+                        
+                        // Add OData metadata if requested (same as GET)
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                        {
+                            if(document.is_array())
+                            {
+                                document = add_odata_metadata_to_array(document, metadata_level, collection_name);
+                            }
+                            else if(document.has("_id"s))
+                            {
+                                // Single object - add metadata directly
+                                auto doc_id = static_cast<long long>(document["_id"s]);
+                                document = add_odata_metadata(document, metadata_level, collection_name, doc_id);
+                            }
+                        }
+                        
+                        // Compute response content for correct Content-Length header (framework won't send body for HEAD)
+                        const auto content = xson::json::stringify(document);
+                        return std::make_tuple("200 OK"s, content);
                     }
                     catch(const std::exception& e)
                     {
@@ -1159,13 +1358,18 @@ private:
                         auto response_headers = http::headers{};
                         const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
                         
+                        // Add OData metadata if requested
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        
                         if(exists && !existing_docs.get<db::object::array>().empty())
                         {
                             // Document exists - replace it
                             m_engine.replace(selector, document);
                             
                             // Add Content-Location header for updated resource
-                            response_headers.set("Content-Location", resource_path);
+                            response_headers.set("content-location"s, resource_path);
                             
                             // Return 200 OK for update
                             return std::make_tuple("200 OK"s, xson::json::stringify(document), std::make_optional(response_headers));
@@ -1176,7 +1380,7 @@ private:
                             m_engine.create(document);
                             
                             // Add Location header for newly created resource
-                            response_headers.set("Location", resource_path);
+                            response_headers.set("location"s, resource_path);
                             
                             return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
                         }
@@ -1221,9 +1425,29 @@ private:
                         m_engine.collection(collection);
                         m_engine.upsert(selector,updates,documents);
                         
+                        // Add OData metadata if requested
+                        auto metadata_level = parse_odata_metadata_level(headers);
+                        if(metadata_level != odata_metadata_level::none)
+                        {
+                            if(documents.is_array() && !documents.get<db::object::array>().empty())
+                            {
+                                // PATCH returns array with updated document(s)
+                                auto& items = documents.get<db::object::array>();
+                                for(auto& item : items)
+                                {
+                                    item = add_odata_metadata(item, metadata_level, collection, id);
+                                }
+                            }
+                            else if(!documents.is_array())
+                            {
+                                // Single object
+                                documents = add_odata_metadata(documents, metadata_level, collection, id);
+                            }
+                        }
+                        
                         // Add Content-Location header for updated resource
                         auto response_headers = http::headers{};
-                        response_headers.set("Content-Location", "/"s + collection + "/"s + std::to_string(id));
+                        response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
                         
                         return std::make_tuple("200 OK"s, xson::json::stringify(documents), std::make_optional(response_headers));
                     }

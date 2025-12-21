@@ -57,7 +57,7 @@ All previously identified critical issues have been addressed:
 ### Query Capabilities
 - **✅ Pagination**: `$top=n` now accepts numeric values (e.g., `$top=10`). `$skip` is parsed but not yet implemented in engine.
 - **Filtering**: No query parameters for filtering documents (`$filter` not yet implemented)
-- **✅ Sorting**: `$orderby=field desc` now supported (OData compliant). Legacy `$desc` still supported for backward compatibility.
+- **✅ Sorting**: `$orderby=field desc` now supported (OData compliant).
 - **Projection**: No field selection (`$select` not yet implemented)
 
 ### Advanced Features
@@ -87,7 +87,6 @@ All previously identified critical issues have been addressed:
 **Current Implementation:**
 - **`$top`**: ✅ Now accepts numeric values (e.g., `$top=10`). OData compliant.
 - **`$orderby`**: ✅ Implemented with standard OData syntax (e.g., `$orderby=field desc`). Supports both ascending (default) and descending order.
-- **`$desc`**: ⚠️ Still supported for backward compatibility, but deprecated in favor of `$orderby`.
 - **`$skip`**: ⚠️ Parsed but not yet implemented in the engine (logged as debug message).
 - **Query Parameter Parsing**: ✅ Now properly parses query parameters from `uri.query` instead of relying on regex patterns in route paths.
 - **Missing**: `$filter`, `$select`, `$expand` (not yet implemented).
@@ -102,7 +101,6 @@ All previously identified critical issues have been addressed:
 | `$filter` | `$filter=field eq 'value'` | ❌ Not implemented | ❌ Missing |
 | `$select` | `$select=field1,field2` | ❌ Not implemented | ❌ Missing |
 | `$expand` | `$expand=relatedEntity` | ❌ Not implemented | ❌ Missing |
-| `$desc` | ❌ Not an OData parameter | ⚠️ Deprecated (use `$orderby` instead) | ⚠️ Non-standard (maintained for backward compatibility) |
 
 **Recommendations:**
 - ✅ **DONE**: Query parameter parsing from `uri.query` - **COMPLETED**
@@ -111,7 +109,6 @@ All previously identified critical issues have been addressed:
 - ⚠️ **TODO**: Implement `$skip` in the engine (currently parsed but ignored)
 - ⚠️ **TODO**: Implement `$filter` for filtering capabilities
 - ⚠️ **TODO**: Implement `$select` for field projection
-- ⚠️ **TODO**: Consider removing `$desc` in a future version once `$orderby` is fully adopted
 
 ## Comparison with REST Best Practices
 
@@ -167,7 +164,6 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 - OData-compliant query parameter parsing from uri.query
 - $top parameter with numeric values (e.g., `$top=10`)
 - $orderby parameter with standard OData syntax (e.g., `$orderby=field desc`)
-- Backward compatibility maintained for legacy `$desc` parameter
 
 The API now follows REST best practices and provides a solid foundation for client applications. Remaining improvements are primarily about adding advanced query capabilities (filtering, pagination, sorting) rather than fixing fundamental issues.
 

@@ -21,6 +21,37 @@ inline auto stoll(std::string_view sv)
     return ll;
 }
 
+// Helper function to URL-decode a string
+inline auto url_decode(std::string_view encoded)
+{
+    auto decoded = std::string{};
+    decoded.reserve(encoded.length());
+    
+    for(std::size_t i = 0; i < encoded.length(); ++i)
+    {
+        if(encoded[i] == '%' && i + 2 < encoded.length())
+        {
+            // Try to decode %XX
+            auto hex = encoded.substr(i + 1, 2);
+            auto value = 0;
+            auto [ptr, ec] = std::from_chars(hex.data(), hex.data() + hex.length(), value, 16);
+            if(ec == std::errc() && ptr == hex.data() + hex.length())
+            {
+                decoded += static_cast<char>(value);
+                i += 2; // Skip the %XX
+                continue;
+            }
+        }
+        // Not a valid %XX sequence, or + (which should be space in query strings)
+        if(encoded[i] == '+')
+            decoded += ' ';
+        else
+            decoded += encoded[i];
+    }
+    
+    return decoded;
+}
+
 // Helper function to parse query parameters from URI
 inline auto parse_query_params(const http::uri& uri)
 {
@@ -41,14 +72,14 @@ inline auto parse_query_params(const http::uri& uri)
         auto eq_pos = param.find('=');
         if(eq_pos != std::string_view::npos)
         {
-            auto key = std::string{param.substr(0, eq_pos)};
-            auto value = std::string{param.substr(eq_pos + 1)};
+            auto key = url_decode(param.substr(0, eq_pos));
+            auto value = url_decode(param.substr(eq_pos + 1));
             params[key] = value;
         }
         else
         {
             // Boolean flag (no value)
-            params[std::string{param}] = "true"s;
+            params[url_decode(param)] = "true"s;
         }
     }
     
@@ -201,7 +232,8 @@ private:
                 });
 
         // Read collection with OData query parameters
-        m_server.get("/[a-z]+"s).response(
+        // Route pattern allows optional query string: /[a-z]+(\?.*)?
+        m_server.get("/[a-z]+(\\?.*)?"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -232,7 +264,6 @@ private:
                         }
                         
                         // Handle $orderby (OData: $orderby=field desc or $orderby=field asc)
-                        // Replace old $desc with $orderby
                         if(params.contains("$orderby"s))
                         {
                             auto orderby_value = params["$orderby"s];
@@ -242,11 +273,6 @@ private:
                                 selector["$desc"s] = true;
                             }
                             // If it ends with " asc" or is just a field name, ascending is default
-                        }
-                        else if(params.contains("$desc"s))
-                        {
-                            // Backward compatibility: support old $desc parameter
-                            selector["$desc"s] = true;
                         }
 
                         const auto guard = std::lock_guard{m_engine};

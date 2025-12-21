@@ -21,6 +21,40 @@ inline auto stoll(std::string_view sv)
     return ll;
 }
 
+// Helper function to parse query parameters from URI
+inline auto parse_query_params(const http::uri& uri)
+{
+    auto params = std::map<std::string, std::string>{};
+    
+    // Check if query string exists
+    if(static_cast<std::string_view>(uri.query).empty())
+        return params;
+    
+    // uri.query is indexed_property<'&'>, so it splits by &
+    for(std::size_t i = 0; i < 100; ++i) // Reasonable limit
+    {
+        auto param = uri.query[i];
+        if(param.empty())
+            break;
+            
+        // Split key=value
+        auto eq_pos = param.find('=');
+        if(eq_pos != std::string_view::npos)
+        {
+            auto key = std::string{param.substr(0, eq_pos)};
+            auto value = std::string{param.substr(eq_pos + 1)};
+            params[key] = value;
+        }
+        else
+        {
+            // Boolean flag (no value)
+            params[std::string{param}] = "true"s;
+        }
+    }
+    
+    return params;
+}
+
 class rest_api_server
 {
 public:
@@ -39,7 +73,16 @@ public:
         
         m_listen_thread = std::thread{[this]()
         {
-            m_server.listen(m_port_or_service);
+            try
+            {
+                m_server.listen(m_port_or_service);
+            }
+            catch(const std::exception& e)
+            {
+                // Log error if possible, but don't crash
+                // The server will remain stopped if listen fails
+                slog << error("httpd") << "Failed to start server: " << e.what() << flush;
+            }
         }};
     }
 
@@ -157,91 +200,58 @@ private:
                     }
                 });
 
-        // Read all is ascending order
+        // Read collection with OData query parameters
         m_server.get("/[a-z]+"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
                     slog << debug << "GET /[a-z]+: " << request << flush;
 
-                    auto uri = http::uri{request};
-                    auto document = db::object{};
-                    auto selector = db::object{};
-
-                    const auto guard = std::lock_guard{m_engine};
-                    m_engine.collection(uri.path[1]);
-                    m_engine.read(selector, document);
-                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
-                });
-
-        // Read first
-        m_server.get("/[a-z]+\\?\\$top"s).response(
-            "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-                {
-                    slog << debug << "GET /[a-z]+\\?\\$top: "<< request << flush;
-
-                    auto uri = http::uri{request};
-                    auto document = db::object{};
-                    auto selector = db::object{"$top",1ll};
-
-                    const auto guard = std::lock_guard{m_engine};
-                    m_engine.collection(uri.path[1]);
-                    m_engine.read(selector, document);
-                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
-                });
-
-        // Read all in descending order
-        m_server.get("/[a-z]+\\?\\$desc"s).response(
-            "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-                {
-                    slog << debug << "GET /[a-z]+\\?\\$desc: "<< request << flush;
-
-                    auto uri = http::uri{request};
-                    auto document = db::object{};
-                    auto selector = db::object{"$desc",true};
-
-                    const auto guard = std::lock_guard{m_engine};
-                    m_engine.collection(uri.path[1]);
-                    m_engine.read(selector, document);
-                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
-                });
-
-        // Read last
-        m_server.get("/[a-z]+\\?\\$desc&\\$top"s).response(
-            "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-                {
-                    slog << debug << "GET /[a-z]+\\$desc&\\$top: "<< request << flush;
-
-                    auto uri = http::uri{request};
-                    auto document = db::object{};
-                    auto selector = db::object{{"$desc",true},{"$top",1ll}};
-
-                    const auto guard = std::lock_guard{m_engine};
-                    m_engine.collection(uri.path[1]);
-                    m_engine.read(selector, document);
-                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
-                });
-
-        // Update aka replace _id
-        m_server.put("/[a-z]+/[0-9]+"s).response(
-            "application/json"sv,
-            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
-                {
-                    slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
-
                     try
                     {
                         auto uri = http::uri{request};
-                        auto document = xson::json::parse(body);
-                        auto id = stoll(uri.path[2]);
-                        auto selector = db::object{"_id", id};
+                        auto document = db::object{};
+                        auto selector = db::object{};
+                        
+                        // Parse OData query parameters
+                        auto params = parse_query_params(uri);
+                        
+                        // Handle $top (OData: $top=n)
+                        if(params.contains("$top"s))
+                        {
+                            auto top_value = stoll(params["$top"s]);
+                            selector["$top"s] = top_value;
+                        }
+                        
+                        // Handle $skip (OData: $skip=n)
+                        if(params.contains("$skip"s))
+                        {
+                            // Note: $skip is not yet supported by engine, but we parse it for OData compliance
+                            // For now, we'll ignore it (engine doesn't support skip)
+                            slog << debug << "GET /[a-z]+: $skip parameter parsed but not yet implemented in engine" << flush;
+                        }
+                        
+                        // Handle $orderby (OData: $orderby=field desc or $orderby=field asc)
+                        // Replace old $desc with $orderby
+                        if(params.contains("$orderby"s))
+                        {
+                            auto orderby_value = params["$orderby"s];
+                            // Check if it ends with " desc" or "desc"
+                            if(orderby_value.ends_with(" desc"s) || orderby_value == "desc"s)
+                            {
+                                selector["$desc"s] = true;
+                            }
+                            // If it ends with " asc" or is just a field name, ascending is default
+                        }
+                        else if(params.contains("$desc"s))
+                        {
+                            // Backward compatibility: support old $desc parameter
+                            selector["$desc"s] = true;
+                        }
 
                         const auto guard = std::lock_guard{m_engine};
                         m_engine.collection(uri.path[1]);
-                        m_engine.replace(selector,document);
+                        m_engine.read(selector, document);
                         return std::make_tuple("200 OK"s, xson::json::stringify(document));
                     }
                     catch(const std::exception& e)
@@ -254,8 +264,68 @@ private:
                     }
                 });
 
+        // Update aka replace _id (upsert behavior)
+        m_server.put("/[a-z]+/[0-9]+"s).response_with_headers(
+            "application/json"sv,
+            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto document = xson::json::parse(body);
+                        auto id = stoll(uri.path[2]);
+                        
+                        // Ensure the document has the correct _id from the URL
+                        document["_id"s] = id;
+                        
+                        auto selector = db::object{"_id", id};
+                        auto existing_docs = db::object{};
+
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.collection(uri.path[1]);
+                        
+                        // Check if document exists
+                        auto exists = m_engine.read(selector, existing_docs);
+                        auto response_headers = http::headers{};
+                        const auto collection = uri.path[1];
+                        const auto resource_path = "/"s + std::string{collection} + "/"s + std::to_string(id);
+                        
+                        if(exists && !existing_docs.get<db::object::array>().empty())
+                        {
+                            // Document exists - replace it
+                            m_engine.replace(selector, document);
+                            
+                            // Add Content-Location header for updated resource
+                            response_headers.set("Content-Location", resource_path);
+                            
+                            // Return 200 OK for update
+                            return std::make_tuple("200 OK"s, xson::json::stringify(document), std::make_optional(response_headers));
+                        }
+                        else
+                        {
+                            // Document doesn't exist - create it
+                            m_engine.create(document);
+                            
+                            // Add Location header for newly created resource
+                            response_headers.set("Location", resource_path);
+                            
+                            return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
+                        }
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                    }
+                });
+
         // Update aka modify _id
-        m_server.patch("/[a-z]+/[0-9]+"s).response(
+        m_server.patch("/[a-z]+/[0-9]+"s).response_with_headers(
             "application/json"sv,
             [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -272,7 +342,13 @@ private:
                         const auto guard = std::lock_guard{m_engine};
                         m_engine.collection(uri.path[1]);
                         m_engine.upsert(selector,updates,documents);
-                        return std::make_tuple("200 OK"s, xson::json::stringify(documents));
+                        
+                        // Add Content-Location header for updated resource
+                        auto response_headers = http::headers{};
+                        const auto collection = uri.path[1];
+                        response_headers.set("Content-Location", "/"s + std::string{collection} + "/"s + std::to_string(id));
+                        
+                        return std::make_tuple("200 OK"s, xson::json::stringify(documents), std::make_optional(response_headers));
                     }
                     catch(const std::exception& e)
                     {
@@ -280,7 +356,7 @@ private:
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
-                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
                     }
                 });
 

@@ -112,6 +112,26 @@ auto make_request(const string& port, const string& method, const string& path, 
     return parse_http_response(stream);
 }
 
+// Helper function to make HTTP request with custom Accept header
+auto make_request_with_accept(const string& port, const string& method, const string& path, const string& accept_header, const string& body = ""s)
+{
+    auto stream = connect("localhost"s, port);
+    
+    stream << method << " " << path << " HTTP/1.1" << crlf
+           << "Host: localhost:" << port << crlf
+           << "Accept: " << accept_header << crlf;
+    
+    if(!body.empty())
+    {
+        stream << "Content-Type: application/json" << crlf
+               << "Content-Length: " << body.length() << crlf;
+    }
+    
+    stream << crlf << body << flush;
+
+    return parse_http_response(stream);
+}
+
 auto test_set()
 {
     using namespace tester::basic;
@@ -1142,6 +1162,305 @@ auto test_set()
             const string error_msg = error["error"s];
             require_eq(error_msg, "Bad Request"s);
             require_true(error.has("message"s));
+        };
+    };
+
+    test_case("HEAD method and Accept header content negotiation") = []
+    {
+        const auto test_file = "./httpd_head_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        // Setup: Create a test document
+        section("Setup: Create test document") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "POST"s, "/headtest"s, R"({"name":"HEAD Test","value":100})"s
+            );
+            require_eq(status, "201"s);
+        };
+
+        section("HEAD / returns 200 OK with no body") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "HEAD"s, "/"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+            // HEAD should return no body
+            require_eq(response_body, ""s);
+        };
+
+        section("HEAD /collection returns 200 OK with no body") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "HEAD"s, "/headtest"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+            // HEAD should return no body
+            require_eq(response_body, ""s);
+        };
+
+        section("HEAD /collection/{id} returns 200 OK with no body for existing document") = [setup]
+        {
+            // First get the ID from a GET request
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            require_true(documents.size() > 0);
+            const auto id = static_cast<long long>(documents[0]["_id"s]);
+            
+            // Now test HEAD
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "HEAD"s, "/headtest/"s + std::to_string(id), ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+            // HEAD should return no body
+            require_eq(response_body, ""s);
+        };
+
+        section("HEAD /collection/{id} returns 404 Not Found for non-existent document") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "HEAD"s, "/headtest/99999"s, ""s
+            );
+
+            require_eq(status, "404"s);
+            require_eq(reason, "Not Found"s);
+            // Error response should have body even for HEAD (framework may include it)
+            require_true(headers.contains("content-type"s));
+        };
+
+        section("GET with Accept: application/json returns 200 OK") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "application/json"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+            require_true(!response_body.empty());
+        };
+
+        section("GET with Accept: */* returns 200 OK") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "*/*"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+        };
+
+        section("GET with Accept: application/* returns 200 OK") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "application/*"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+        };
+
+        section("GET with Accept: application/json;odata=fullmetadata returns 200 OK") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "application/json;odata=fullmetadata"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+        };
+
+        section("GET with Accept: application/xml returns 406 Not Acceptable") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest"s, "application/xml"s, ""s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+            require_true(headers.contains("content-type"s));
+            
+            // Should return error message
+            auto error = json::parse(response_body);
+            require_true(error.has("error"s));
+            const string error_msg = error["error"s];
+            require_eq(error_msg, "Not Acceptable"s);
+            require_true(error.has("message"s));
+            const string message = error["message"s];
+            require_eq(message, "Only application/json is supported"s);
+        };
+
+        section("GET with Accept: text/html returns 406 Not Acceptable") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest"s, "text/html"s, ""s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+            
+            // Should return error message
+            auto error = json::parse(response_body);
+            require_true(error.has("error"s));
+            const string error_msg = error["error"s];
+            require_eq(error_msg, "Not Acceptable"s);
+        };
+
+        section("GET with Accept: application/xml, text/html returns 406 Not Acceptable") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "GET"s, "/headtest"s, "application/xml, text/html"s, ""s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("GET without Accept header returns 200 OK (defaults to accept anything)") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->get_port());
+            stream << "GET /headtest?s$top=1 HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->get_port() << crlf
+                   << crlf << flush;
+            
+            auto [status, reason, headers, response_body] = parse_http_response(stream);
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("content-type"s));
+            require_eq(headers["content-type"s], "application/json"s);
+        };
+
+        section("HEAD with Accept: application/xml returns 406 Not Acceptable") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "HEAD"s, "/headtest"s, "application/xml"s, ""s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("POST with Accept: application/xml returns 406 Not Acceptable") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "POST"s, "/headtest"s, "application/xml"s, R"({"name":"Test"})"s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("PUT with Accept: application/xml returns 406 Not Acceptable") = [setup]
+        {
+            // First get an ID
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+            );
+            auto documents = json::parse(get_body);
+            const auto id = static_cast<long long>(documents[0]["_id"s]);
+            
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "PUT"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Updated"})"s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("PATCH with Accept: application/xml returns 406 Not Acceptable") = [setup]
+        {
+            // First get an ID
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+            );
+            auto documents = json::parse(get_body);
+            const auto id = static_cast<long long>(documents[0]["_id"s]);
+            
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "PATCH"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Patched"})"s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("DELETE with Accept: application/xml returns 406 Not Acceptable") = [setup]
+        {
+            // Create a document to delete
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->get_port(), "POST"s, "/headtest"s, R"({"name":"To Delete"})"s
+            );
+            auto created_doc = json::parse(post_body);
+            const auto id = static_cast<long long>(created_doc["_id"s]);
+            
+            auto [status, reason, headers, response_body] = make_request_with_accept(
+                setup->get_port(), "DELETE"s, "/headtest/"s + std::to_string(id), "application/xml"s, ""s
+            );
+
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("HEAD /collection with query parameters validates them") = [setup]
+        {
+            // Valid query parameters should work
+            auto [status1, reason1, headers1, body1] = make_request(
+                setup->get_port(), "HEAD"s, "/headtest?$top=5"s, ""s
+            );
+            require_eq(status1, "200"s);
+
+            // Invalid query parameters should return 400
+            auto [status2, reason2, headers2, body2] = make_request(
+                setup->get_port(), "HEAD"s, "/headtest?$top=-1"s, ""s
+            );
+            require_eq(status2, "400"s);
+        };
+
+        section("HEAD returns same Content-Type header as GET") = [setup]
+        {
+            // GET request
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+            );
+            
+            // HEAD request
+            auto [head_status, head_reason, head_headers, head_body] = make_request(
+                setup->get_port(), "HEAD"s, "/headtest?$top=1"s, ""s
+            );
+
+            require_eq(get_status, "200"s);
+            require_eq(head_status, "200"s);
+            require_true(get_headers.contains("content-type"s));
+            require_true(head_headers.contains("content-type"s));
+            require_eq(get_headers["content-type"s], head_headers["content-type"s]);
+            // HEAD should have no body
+            require_eq(head_body, ""s);
+            // GET should have body
+            require_false(get_body.empty());
         };
     };
 

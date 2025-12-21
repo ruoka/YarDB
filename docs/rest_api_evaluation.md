@@ -20,6 +20,7 @@ All previously identified critical issues have been addressed:
 
 1. **✅ HTTP Status Codes** - Now using proper status codes:
    - `POST /collection` → `201 Created` (with `Location` header)
+   - `PUT /collection/{id}` → `201 Created` (new resource, with `Location` header) or `200 OK` (updated existing resource)
    - `GET /collection/{id}` → `200 OK` (found) or `404 Not Found` (missing)
    - `DELETE /collection/{id}` → `204 No Content` (successful deletion)
    - Invalid input → `400 Bad Request` with structured error response
@@ -48,7 +49,7 @@ All previously identified critical issues have been addressed:
 ## Missing Features 🟡
 
 ### Headers
-- **✅ Location**: Now includes `Location: /collection/{id}` header on `POST`
+- **✅ Location**: Now includes `Location: /collection/{id}` header on `POST` and `PUT` (when creating new resources)
 - **ETag**: For caching and optimistic locking (not yet implemented)
 - **Last-Modified**: For conditional requests (not yet implemented)
 - **Content-Location**: On `PUT`/`PATCH` (not yet implemented)
@@ -68,7 +69,11 @@ All previously identified critical issues have been addressed:
 ## Minor Issues 🟢
 
 ### PUT Semantics
-PUT creates documents if they don't exist (upsert behavior). This is acceptable but non-standard. Should be documented clearly.
+✅ **RESOLVED**: PUT now implements proper upsert behavior:
+- Creates document if it doesn't exist → Returns `201 Created` with `Location` header
+- Updates document if it exists → Returns `200 OK`
+- Fully idempotent and follows HTTP/REST best practices
+- Properly documented and tested
 
 ### OData Compliance
 Claims OData inspiration but only implements a small subset. Consider:
@@ -117,7 +122,8 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 ### Improvements Made ✅
 - Proper HTTP status codes (201, 204, 400, 404)
 - Comprehensive error handling with structured error responses
-- Location header on resource creation
+- Location header on resource creation (POST and PUT)
+- PUT upsert behavior (creates new resources with 201 Created, updates existing with 200 OK)
 - Single object responses from GET /collection/{id}
 - Clear distinction between success and error cases
 

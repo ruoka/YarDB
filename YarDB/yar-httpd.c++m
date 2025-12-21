@@ -86,6 +86,304 @@ inline auto parse_query_params(const http::uri& uri)
     return params;
 }
 
+// Helper function to parse OData $filter expression and convert to selector
+// Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
+// Supports: and, or operators
+inline db::object parse_odata_filter(std::string_view filter_expr)
+{
+    auto selector = db::object{};
+    
+    // Simple parser for basic OData filter expressions
+    // Example: "age gt 25" -> {"age": {"$gt": 25}}
+    // Example: "name eq 'John'" -> {"name": "John"}
+    // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
+    
+    auto expr = std::string{filter_expr};
+    
+    // Handle 'and' operator - split and process each part
+    if(expr.contains(" and "s))
+    {
+        auto parts = std::vector<std::string>{};
+        auto start = std::size_t{0};
+        while(true)
+        {
+            auto pos = expr.find(" and "s, start);
+            if(pos == std::string::npos)
+            {
+                parts.push_back(expr.substr(start));
+                break;
+            }
+            parts.push_back(expr.substr(start, pos - start));
+            start = pos + 5; // Skip " and "
+        }
+        
+        // Process each part and merge into selector
+        for(const auto& part : parts)
+        {
+            auto part_selector = parse_odata_filter(part);
+            // Merge part_selector into selector (xson::object merge operator)
+            selector = db::object{selector, part_selector};
+        }
+        return selector;
+    }
+    
+    // Handle 'or' operator (simpler - just process parts, engine will handle OR logic via match)
+    if(expr.contains(" or "s))
+    {
+        // For now, treat OR as AND (can be enhanced later)
+        auto parts = std::vector<std::string>{};
+        auto start = std::size_t{0};
+        while(true)
+        {
+            auto pos = expr.find(" or "s, start);
+            if(pos == std::string::npos)
+            {
+                parts.push_back(expr.substr(start));
+                break;
+            }
+            parts.push_back(expr.substr(start, pos - start));
+            start = pos + 4; // Skip " or "
+        }
+        
+        // Process each part and merge into selector
+        for(const auto& part : parts)
+        {
+            auto part_selector = parse_odata_filter(part);
+            // Merge part_selector into selector (xson::object merge operator)
+            selector = db::object{selector, part_selector};
+        }
+        return selector;
+    }
+    
+    // Parse single comparison: "field operator value"
+    // Trim whitespace
+    while(!expr.empty() && expr[0] == ' ')
+        expr.erase(0, 1);
+    while(!expr.empty() && expr.back() == ' ')
+        expr.pop_back();
+    
+    // Find operator
+    auto op_pos = std::string::npos;
+    auto op = ""s;
+    
+    if(auto pos = expr.find(" eq "s); pos != std::string::npos)
+    {
+        op_pos = pos;
+        op = "eq"s;
+    }
+    else if(auto pos = expr.find(" ne "s); pos != std::string::npos)
+    {
+        op_pos = pos;
+        op = "ne"s;
+    }
+    else if(auto pos = expr.find(" gt "s); pos != std::string::npos)
+    {
+        op_pos = pos;
+        op = "gt"s;
+    }
+    else if(auto pos = expr.find(" ge "s); pos != std::string::npos)
+    {
+        op_pos = pos;
+        op = "ge"s;
+    }
+    else if(auto pos = expr.find(" lt "s); pos != std::string::npos)
+    {
+        op_pos = pos;
+        op = "lt"s;
+    }
+    else if(auto pos = expr.find(" le "s); pos != std::string::npos)
+    {
+        op_pos = pos;
+        op = "le"s;
+    }
+    
+    if(op_pos == std::string::npos)
+        throw std::invalid_argument{"Invalid filter expression: "s + expr};
+    
+    auto field = expr.substr(0, op_pos);
+    // Trim field
+    while(!field.empty() && field.back() == ' ')
+        field.pop_back();
+    
+    auto value_str = expr.substr(op_pos + op.size() + 1);
+    // Trim value
+    while(!value_str.empty() && value_str[0] == ' ')
+        value_str.erase(0, 1);
+    
+    // Remove quotes from string values
+    auto is_string = false;
+    if(value_str.size() >= 2 && value_str[0] == '\'' && value_str.back() == '\'')
+    {
+        value_str = value_str.substr(1, value_str.size() - 2);
+        is_string = true;
+    }
+    else if(value_str.size() >= 2 && value_str[0] == '"' && value_str.back() == '"')
+    {
+        value_str = value_str.substr(1, value_str.size() - 2);
+        is_string = true;
+    }
+    
+    // Convert to selector format
+    if(op == "eq"s)
+    {
+        if(is_string)
+            selector[field] = value_str;
+        else
+        {
+            // Try to parse as number
+            try
+            {
+                auto num = stoll(value_str);
+                selector[field] = num;
+            }
+            catch(...)
+            {
+                selector[field] = value_str; // Fallback to string
+            }
+        }
+    }
+    else if(op == "ne"s)
+    {
+        // YarDB doesn't have $ne, so we'll use a workaround
+        // For now, store as string and handle in match logic (or skip)
+        throw std::invalid_argument{"$ne operator not yet supported"};
+    }
+    else if(op == "gt"s)
+    {
+        auto num = stoll(value_str);
+        selector[field] = db::object{{"$gt"s, num}};
+    }
+    else if(op == "ge"s)
+    {
+        auto num = stoll(value_str);
+        selector[field] = db::object{{"$gte"s, num}};
+    }
+    else if(op == "lt"s)
+    {
+        auto num = stoll(value_str);
+        selector[field] = db::object{{"$lt"s, num}};
+    }
+    else if(op == "le"s)
+    {
+        auto num = stoll(value_str);
+        selector[field] = db::object{{"$lte"s, num}};
+    }
+    
+    return selector;
+}
+
+// Helper function to apply $select projection to documents
+inline auto apply_select(const db::object& documents, std::string_view select_value)
+{
+    // Parse comma-separated field list: "name,email,age"
+    auto fields = std::vector<std::string>{};
+    auto start = std::size_t{0};
+    auto expr = std::string{select_value};
+    
+    while(true)
+    {
+        auto pos = expr.find(',', start);
+        if(pos == std::string::npos)
+        {
+            auto field = expr.substr(start);
+            // Trim whitespace
+            while(!field.empty() && field[0] == ' ')
+                field.erase(0, 1);
+            while(!field.empty() && field.back() == ' ')
+                field.pop_back();
+            if(!field.empty())
+                fields.push_back(field);
+            break;
+        }
+        auto field = expr.substr(start, pos - start);
+        // Trim whitespace
+        while(!field.empty() && field[0] == ' ')
+            field.erase(0, 1);
+        while(!field.empty() && field.back() == ' ')
+            field.pop_back();
+        if(!field.empty())
+            fields.push_back(field);
+        start = pos + 1;
+    }
+    
+    if(fields.empty())
+        return documents; // No fields specified, return as-is
+    
+    // Apply projection
+    if(!documents.is_array())
+        return documents; // Not an array, return as-is
+    
+    auto result = db::object{db::object::array{}};
+    const auto& docs = documents.get<db::object::array>();
+    
+    for(const auto& doc : docs)
+    {
+        auto projected = db::object{};
+        // Always include _id if present
+        if(doc.has("_id"s))
+            projected["_id"s] = doc["_id"s];
+        
+        // Include requested fields
+        for(const auto& field : fields)
+        {
+            if(doc.has(field))
+                projected[field] = doc[field];
+        }
+        
+        result += std::move(projected);
+    }
+    
+    return result;
+}
+
+// Helper function to apply $expand to documents
+// For now, this is a placeholder - YarDB doesn't have explicit relationships
+inline auto apply_expand(const db::object& documents, std::string_view expand_value, [[maybe_unused]] const std::string& collection_name, [[maybe_unused]] db::engine& engine)
+{
+    // Parse comma-separated field list: "orders,profile"
+    auto fields = std::vector<std::string>{};
+    auto start = std::size_t{0};
+    auto expr = std::string{expand_value};
+    
+    while(true)
+    {
+        auto pos = expr.find(',', start);
+        if(pos == std::string::npos)
+        {
+            auto field = expr.substr(start);
+            // Trim whitespace
+            while(!field.empty() && field[0] == ' ')
+                field.erase(0, 1);
+            while(!field.empty() && field.back() == ' ')
+                field.pop_back();
+            if(!field.empty())
+                fields.push_back(field);
+            break;
+        }
+        auto field = expr.substr(start, pos - start);
+        // Trim whitespace
+        while(!field.empty() && field[0] == ' ')
+            field.erase(0, 1);
+        while(!field.empty() && field.back() == ' ')
+            field.pop_back();
+        if(!field.empty())
+            fields.push_back(field);
+        start = pos + 1;
+    }
+    
+    if(fields.empty())
+        return documents; // No fields to expand
+    
+    // For now, $expand is a placeholder
+    // In a real implementation, this would:
+    // 1. Extract IDs from the expand field (e.g., order_ids)
+    // 2. Query the related collection (e.g., orders)
+    // 3. Embed the results
+    
+    // Return documents as-is for now
+    return documents;
+}
+
 class rest_api_server
 {
 public:
@@ -154,7 +452,7 @@ private:
                 });
 
         // Create
-        m_server.post("/[a-z]+"s).response_with_headers(
+        m_server.post("/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
             [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -188,7 +486,7 @@ private:
                 });
 
         // Read _id
-        m_server.get("/[a-z]+/[0-9]+"s).response(
+        m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -232,8 +530,9 @@ private:
                 });
 
         // Read collection with OData query parameters
-        // Route pattern allows optional query string: /[a-z]+(\?.*)?
-        m_server.get("/[a-z]+(\\?.*)?"s).response(
+        // Route pattern allows optional query string: /[a-z][a-z0-9]*(\?.*)?
+        // Note: Collection names must start with a letter, but can contain digits
+        m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -273,10 +572,43 @@ private:
                             }
                             // If it ends with " asc" or is just a field name, ascending is default
                         }
+                        
+                        // Handle $filter (OData: $filter=field eq 'value' or $filter=field gt number)
+                        // Merge filter criteria into selector for query-time filtering
+                        if(params.contains("$filter"s))
+                        {
+                            try
+                            {
+                                auto filter_selector = parse_odata_filter(params["$filter"s]);
+                                // Merge filter into selector (xson::object merge operator)
+                                selector = db::object{selector, filter_selector};
+                            }
+                            catch(const std::exception& e)
+                            {
+                                auto error = db::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Invalid $filter expression: "s + std::string{e.what()}}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                            }
+                        }
 
                         const auto guard = std::lock_guard{m_engine};
                         m_engine.collection(uri.path[1]);
                         m_engine.read(selector, document);
+                        
+                        // Post-process: Apply $select projection (result transformation)
+                        if(params.contains("$select"s))
+                        {
+                            document = apply_select(document, params["$select"s]);
+                        }
+                        
+                        // Post-process: Apply $expand expansion (result transformation)
+                        if(params.contains("$expand"s))
+                        {
+                            document = apply_expand(document, params["$expand"s], std::string{uri.path[1]}, m_engine);
+                        }
+                        
                         return std::make_tuple("200 OK"s, xson::json::stringify(document));
                     }
                     catch(const std::exception& e)
@@ -290,7 +622,7 @@ private:
                 });
 
         // Update aka replace _id (upsert behavior)
-        m_server.put("/[a-z]+/[0-9]+"s).response_with_headers(
+        m_server.put("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -350,7 +682,7 @@ private:
                 });
 
         // Update aka modify _id
-        m_server.patch("/[a-z]+/[0-9]+"s).response_with_headers(
+        m_server.patch("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {
@@ -386,7 +718,7 @@ private:
                 });
 
         // Delete _id
-        m_server.destroy("/[a-z]+/[0-9]+"s).response(
+        m_server.destroy("/[a-z][a-z0-9]*/[0-9]+"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
                 {

@@ -130,15 +130,15 @@ auto test_set()
                 setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Test Item","value":42})"s
             );
 
-            require_true(status == "201"s);
-            require_true(reason == "Created"s);
+            require_eq(status, "201"s);
+            require_eq(reason, "Created"s);
             require_true(headers.contains("content-type"));
             
             // Verify response body contains the created document
             auto document = json::parse(response_body);
             require_true(document.has("_id"s));
             const string name = document["name"s];
-            require_true(name == "Test Item"s);
+            require_eq(name, "Test Item"s);
         };
 
         section("GET existing document returns 200 OK with single object") = [setup]
@@ -147,7 +147,7 @@ auto test_set()
             auto [post_status, post_reason, post_headers, post_body] = make_request(
                 setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Existing Item"})"s
             );
-            require_true(post_status == "201"s);
+            require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
             const long long id = created_doc["_id"s];
@@ -157,17 +157,17 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems/"s + std::to_string(id), ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify response is a single object (starts with {, not [)
-            require_true(response_body.front() == '{');
-            require_true(response_body.back() == '}');
+            require_eq(response_body.front(), '{');
+            require_eq(response_body.back(), '}');
             
             auto document = json::parse(response_body);
             require_true(document.has("_id"s));
             const long long doc_id = document["_id"s];
-            require_true(doc_id == id);
+            require_eq(doc_id, id);
         };
 
         section("GET non-existent document returns 404 Not Found") = [setup]
@@ -176,14 +176,14 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems/99999"s, ""s
             );
 
-            require_true(status == "404"s);
-            require_true(reason == "Not Found"s);
+            require_eq(status, "404"s);
+            require_eq(reason, "Not Found"s);
             
             // Verify error object structure
             auto error = json::parse(response_body);
             require_true(error.has("error"s));
             const string error_msg = error["error"s];
-            require_true(error_msg == "Not Found"s);
+            require_eq(error_msg, "Not Found"s);
             require_true(error.has("message"s));
             require_true(error.has("collection"s));
             require_true(error.has("id"s));
@@ -195,7 +195,7 @@ auto test_set()
             auto [post_status, post_reason, post_headers, post_body] = make_request(
                 setup->get_port(), "POST"s, "/testitems"s, R"({"name":"To Delete"})"s
             );
-            require_true(post_status == "201"s);
+            require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
             const long long id = created_doc["_id"s];
@@ -205,8 +205,8 @@ auto test_set()
                 setup->get_port(), "DELETE"s, "/testitems/"s + std::to_string(id), ""s
             );
 
-            require_true(status == "204"s);
-            require_true(reason == "No Content"s);
+            require_eq(status, "204"s);
+            require_eq(reason, "No Content"s);
             require_true(response_body.empty());
         };
 
@@ -216,14 +216,14 @@ auto test_set()
                 setup->get_port(), "DELETE"s, "/testitems/99999"s, ""s
             );
 
-            require_true(status == "404"s);
-            require_true(reason == "Not Found"s);
+            require_eq(status, "404"s);
+            require_eq(reason, "Not Found"s);
             
             // Verify error object structure
             auto error = json::parse(response_body);
             require_true(error.has("error"s));
             const string error_msg = error["error"s];
-            require_true(error_msg == "Not Found"s);
+            require_eq(error_msg, "Not Found"s);
         };
 
         section("POST with invalid JSON returns 400 Bad Request") = [setup]
@@ -232,14 +232,14 @@ auto test_set()
                 setup->get_port(), "POST"s, "/testitems"s, R"({"invalid":json})"s
             );
 
-            require_true(status == "400"s);
-            require_true(reason == "Bad Request"s);
+            require_eq(status, "400"s);
+            require_eq(reason, "Bad Request"s);
             
             // Verify error object structure
             auto error = json::parse(response_body);
             require_true(error.has("error"s));
             const string error_msg = error["error"s];
-            require_true(error_msg == "Bad Request"s);
+            require_eq(error_msg, "Bad Request"s);
             require_true(error.has("message"s));
         };
 
@@ -249,7 +249,7 @@ auto test_set()
             auto [post_status, post_reason, post_headers, post_body] = make_request(
                 setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Original"})"s
             );
-            require_true(post_status == "201"s);
+            require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
             const long long id = created_doc["_id"s];
@@ -259,19 +259,19 @@ auto test_set()
                 setup->get_port(), "PUT"s, "/testitems/"s + std::to_string(id), R"({"name":"Updated","value":100})"s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify Content-Location header is present
             require_true(headers.contains("content-location"s));
             const string content_location = headers["content-location"s];
-            require_true(content_location == "/testitems/"s + std::to_string(id));
+            require_eq(content_location, "/testitems/"s + std::to_string(id));
             
             auto document = json::parse(response_body);
             const string name = document["name"s];
-            require_true(name == "Updated"s);
+            require_eq(name, "Updated"s);
             const long long value = document["value"s];
-            require_true(value == 100ll);
+            require_eq(value, 100ll);
         };
 
         section("PUT creates document (upsert) and returns 201 Created") = [setup]
@@ -282,27 +282,27 @@ auto test_set()
                 setup->get_port(), "PUT"s, "/testitems/"s + std::to_string(new_id), R"({"name":"New Item","value":200})"s
             );
 
-            require_true(status == "201"s);
-            require_true(reason == "Created"s);
+            require_eq(status, "201"s);
+            require_eq(reason, "Created"s);
             
             // Verify Location header is present
             require_true(headers.contains("location"s));
             const string location = headers["location"s];
-            require_true(location == "/testitems/"s + std::to_string(new_id));
+            require_eq(location, "/testitems/"s + std::to_string(new_id));
             
             auto document = json::parse(response_body);
             const long long doc_id = document["_id"s];
-            require_true(doc_id == new_id);
+            require_eq(doc_id, new_id);
             const string name = document["name"s];
-            require_true(name == "New Item"s);
+            require_eq(name, "New Item"s);
             const long long value = document["value"s];
-            require_true(value == 200ll);
+            require_eq(value, 200ll);
             
             // Verify we can retrieve it
             auto [get_status, get_reason, get_headers, get_body] = make_request(
                 setup->get_port(), "GET"s, "/testitems/"s + std::to_string(new_id), ""s
             );
-            require_true(get_status == "200"s);
+            require_eq(get_status, "200"s);
         };
 
         section("PATCH updates document and returns 200 OK with Content-Location header") = [setup]
@@ -311,7 +311,7 @@ auto test_set()
             auto [post_status, post_reason, post_headers, post_body] = make_request(
                 setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Original","value":50})"s
             );
-            require_true(post_status == "201"s);
+            require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
             const long long id = created_doc["_id"s];
@@ -321,13 +321,13 @@ auto test_set()
                 setup->get_port(), "PATCH"s, "/testitems/"s + std::to_string(id), R"({"value":75})"s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify Content-Location header is present
             require_true(headers.contains("content-location"s));
             const string content_location = headers["content-location"s];
-            require_true(content_location == "/testitems/"s + std::to_string(id));
+            require_eq(content_location, "/testitems/"s + std::to_string(id));
         };
     };
 
@@ -344,7 +344,7 @@ auto test_set()
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
                     setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                 );
-                require_true(post_status == "201"s);
+                require_eq(post_status, "201"s);
                 // Small delay to ensure server processes request
                 std::this_thread::sleep_for(50ms);
             }
@@ -354,8 +354,8 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems?$top=2"s, ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify response contains at most 2 items
             // Response is an array, not an object with collection name
@@ -373,7 +373,7 @@ auto test_set()
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
                     setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                 );
-                require_true(post_status == "201"s);
+                require_eq(post_status, "201"s);
                 // Small delay to ensure server processes request
                 std::this_thread::sleep_for(50ms);
             }
@@ -384,8 +384,8 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems?$orderby=field%20desc"s, ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify response is valid JSON (array format)
             auto documents = json::parse(response_body);
@@ -407,11 +407,11 @@ auto test_set()
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
                         setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                     );
-                    require_true(retry_status == "201"s);
+                    require_eq(retry_status, "201"s);
                 }
                 else
                 {
-                    require_true(post_status == "201"s);
+                    require_eq(post_status, "201"s);
                 }
                 // Small delay to ensure server processes request
                 std::this_thread::sleep_for(100ms);
@@ -423,8 +423,8 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems?$top=2&$orderby=field%20desc"s, ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify response contains at most 2 items
             // Response is an array, not an object with collection name
@@ -449,11 +449,11 @@ auto test_set()
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
                         setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
                     );
-                    require_true(retry_status == "201"s);
+                    require_eq(retry_status, "201"s);
                 }
                 else
                 {
-                    require_true(post_status == "201"s);
+                    require_eq(post_status, "201"s);
                 }
                 std::this_thread::sleep_for(100ms);
             }
@@ -463,8 +463,8 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems?$skip=3"s, ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify response is an array
             auto documents = json::parse(response_body);
@@ -475,7 +475,7 @@ auto test_set()
             auto [status_all, reason_all, headers_all, response_body_all] = make_request(
                 setup->get_port(), "GET"s, "/testitems"s, ""s
             );
-            require_true(status_all == "200"s);
+            require_eq(status_all, "200"s);
             auto documents_all = json::parse(response_body_all);
             const auto& items_all = documents_all.get<object::array>();
             
@@ -503,11 +503,11 @@ auto test_set()
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
                         setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
                     );
-                    require_true(retry_status == "201"s);
+                    require_eq(retry_status, "201"s);
                 }
                 else
                 {
-                    require_true(post_status == "201"s);
+                    require_eq(post_status, "201"s);
                 }
                 std::this_thread::sleep_for(100ms);
             }
@@ -517,8 +517,8 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems?$skip=3&$top=3"s, ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Verify response contains at most 3 items
             auto documents = json::parse(response_body);
@@ -530,7 +530,7 @@ auto test_set()
             auto [status_all, reason_all, headers_all, response_body_all] = make_request(
                 setup->get_port(), "GET"s, "/testitems"s, ""s
             );
-            require_true(status_all == "200"s);
+            require_eq(status_all, "200"s);
             auto documents_all = json::parse(response_body_all);
             const auto& items_all = documents_all.get<object::array>();
             
@@ -560,11 +560,11 @@ auto test_set()
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
                         setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                     );
-                    require_true(retry_status == "201"s);
+                    require_eq(retry_status, "201"s);
                 }
                 else
                 {
-                    require_true(post_status == "201"s);
+                    require_eq(post_status, "201"s);
                 }
                 std::this_thread::sleep_for(100ms);
             }
@@ -574,14 +574,14 @@ auto test_set()
                 setup->get_port(), "GET"s, "/testitems?$skip=0"s, ""s
             );
 
-            require_true(status == "200"s);
-            require_true(reason == "OK"s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
             
             // Get all items without skip to compare
             auto [status_all, reason_all, headers_all, response_body_all] = make_request(
                 setup->get_port(), "GET"s, "/testitems"s, ""s
             );
-            require_true(status_all == "200"s);
+            require_eq(status_all, "200"s);
             auto documents_all = json::parse(response_body_all);
             const auto& items_all = documents_all.get<object::array>();
             
@@ -591,7 +591,363 @@ auto test_set()
             const auto& items = documents.get<object::array>();
             
             // With $skip=0, we should get the same number of items as without skip
-            require_true(items.size() == items_all.size());
+            require_eq(items.size(), items_all.size());
+        };
+    };
+
+    test_case("OData advanced query parameters") = []
+    {
+        const auto test_file = "./httpd_test_odata_advanced.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET with $filter - age gt 25") = [setup]
+        {
+            // Create test documents with different ages
+            auto test_data = std::vector<std::pair<std::string, int>>{
+                {"Alice"s, 25},
+                {"Bob"s, 30},
+                {"Charlie"s, 35},
+                {"David"s, 20}
+            };
+            
+            for(const auto& [name, age] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/users"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/users"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Filter: age gt 25 (should return Bob and Charlie)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users?$filter=age%20gt%2025"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have 2 items (Bob age 30, Charlie age 35)
+            require_eq(items.size(), 2);
+            
+            // Verify all returned items have age > 25
+            for(const auto& item : items)
+            {
+                require_true(item.has("age"s));
+                const auto age = static_cast<long long>(item["age"s]);
+                require_true(age > 25);
+            }
+        };
+
+        section("GET with $filter - name eq 'Alice'") = [setup]
+        {
+            // Filter: name eq 'Alice' (should return only Alice)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users?$filter=name%20eq%20'Alice'"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have exactly 1 item
+            require_eq(items.size(), 1);
+            
+            // Verify it's Alice
+            require_true(items[0].has("name"s));
+            const string name = items[0]["name"s];
+            require_eq(name, "Alice"s);
+        };
+
+        section("GET with $filter - status eq 'active' and age ge 25") = [setup]
+        {
+            // Add status field to existing documents
+            // First, get all users and update them with status
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/users"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            
+            auto all_docs = json::parse(get_body);
+            const auto& all_items = all_docs.get<object::array>();
+            
+            // Update documents with status (simplified - in real test we'd use PATCH)
+            // For this test, we'll create new documents with status
+            auto test_data = std::vector<std::tuple<std::string, int, std::string>>{
+                {"Alice2"s, 25, "active"s},
+                {"Bob2"s, 30, "active"s},
+                {"Charlie2"s, 35, "inactive"s},
+                {"David2"s, 20, "active"s}
+            };
+            
+            for(const auto& [name, age, status] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Filter: status eq 'active' and age ge 25
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users2?$filter=status%20eq%20'active'%20and%20age%20ge%2025"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at least 2 items (Alice2 and Bob2)
+            // (might have more if leftover data from previous tests)
+            require_true(items.size() >= 2);
+            
+            // Verify all returned items have status='active' and age >= 25
+            for(const auto& item : items)
+            {
+                require_true(item.has("status"s));
+                const string status = item["status"s];
+                require_eq(status, "active"s);
+                require_true(item.has("age"s));
+                const auto age = static_cast<long long>(item["age"s]);
+                require_true(age >= 25);
+            }
+        };
+
+        section("GET with $select - name,email") = [setup]
+        {
+            // Create a document with multiple fields
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->get_port(), "POST"s, "/users3"s, R"({"name":"TestUser", "email":"test@example.com", "age":30, "status":"active"})"s
+            );
+            if(post_status != "201"s)
+            {
+                std::this_thread::sleep_for(100ms);
+                auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                    setup->get_port(), "POST"s, "/users3"s, R"({"name":"TestUser", "email":"test@example.com", "age":30, "status":"active"})"s
+                );
+                require_eq(retry_status, "201"s);
+            }
+            else
+            {
+                require_eq(post_status, "201"s);
+            }
+            std::this_thread::sleep_for(100ms);
+            
+            // Select only name and email fields
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users3?$select=name,email"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Verify projection: should only have _id, name, and email
+            // Check at least one item if collection is not empty
+            if(items.size() > 0)
+            {
+                for(const auto& item : items)
+                {
+                    // _id should always be present
+                    require_true(item.has("_id"s));
+                    
+                    // Selected fields should be present if they exist in the document
+                    // (they might not exist if document was created without them)
+                    if(item.has("name"s) || item.has("email"s))
+                    {
+                        // If name or email exists, verify projection worked
+                        // Other fields should NOT be present
+                        require_true(!item.has("age"s));
+                        require_true(!item.has("status"s));
+                    }
+                }
+            }
+        };
+
+        section("GET with $filter + $select combined") = [setup]
+        {
+            // Filter and select: age gt 25, select name and email
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users?$filter=age%20gt%2025&$select=name,email"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Verify filtering and projection
+            // Check items if any exist (might be empty if no documents match filter)
+            for(const auto& item : items)
+            {
+                // Should have _id
+                require_true(item.has("_id"s));
+                
+                // Verify projection: if age or status existed in source, they should be projected away
+                // But we can't reliably check this without knowing source document structure
+                // So we just verify the response is valid
+            }
+        };
+
+        section("GET with $select + $top combined") = [setup]
+        {
+            // Select name and age, limit to 2 results
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users?$select=name,age&$top=2"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at most 2 items
+            require_true(items.size() <= 2);
+            
+            // Verify projection
+            for(const auto& item : items)
+            {
+                require_true(item.has("_id"s));
+                // Selected fields should be present if they exist in source documents
+                // Other fields should NOT be present (projected away)
+                require_true(!item.has("email"s));
+                require_true(!item.has("status"s));
+            }
+        };
+
+        section("GET with $filter + $select + $top combined") = [setup]
+        {
+            // First ensure we have test data in users2 collection
+            // Create test documents with status field
+            auto test_data = std::vector<std::tuple<std::string, int, std::string>>{
+                {"Alice3"s, 25, "active"s},
+                {"Bob3"s, 30, "active"s},
+                {"Charlie3"s, 35, "inactive"s}
+            };
+            
+            for(const auto& [name, age, status] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // First test simple GET to ensure collection exists
+            auto [test_status, test_reason, test_headers, test_body] = make_request(
+                setup->get_port(), "GET"s, "/users2"s, ""s
+            );
+            require_eq(test_status, "200"s);
+            
+            // Filter, select, and limit: status eq 'active', select name and age, top 2
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users2?$filter=status%20eq%20'active'&$select=name,age&$top=2"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at most 2 items
+            require_true(items.size() <= 2);
+            
+            // Verify filtering and projection
+            for(const auto& item : items)
+            {
+                require_true(item.has("_id"s));
+                // Verify the response is valid (projection worked)
+                // We can't reliably check which fields are absent without knowing source structure
+            }
+        };
+
+        section("GET with $expand (placeholder - should return as-is)") = [setup]
+        {
+            // $expand is a placeholder, should return documents unchanged
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users?$expand=orders"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            
+            // Should return documents (expand is placeholder, doesn't modify)
+            require_true(documents.is_array());
+        };
+
+        section("GET with invalid $filter returns 400 Bad Request") = [setup]
+        {
+            // Invalid filter expression
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users?$filter=invalid"s, ""s
+            );
+
+            require_eq(status, "400"s);
+            require_eq(reason, "Bad Request"s);
+            
+            // Should return error message
+            auto error = json::parse(response_body);
+            require_true(error.has("error"s));
+            const string error_msg = error["error"s];
+            require_eq(error_msg, "Bad Request"s);
+            require_true(error.has("message"s));
         };
     };
 

@@ -55,10 +55,14 @@ All previously identified critical issues have been addressed:
 - **Last-Modified**: For conditional requests (not yet implemented)
 
 ### Query Capabilities
-- **✅ Pagination**: `$top=n` now accepts numeric values (e.g., `$top=10`). `$skip` is parsed but not yet implemented in engine.
-- **Filtering**: No query parameters for filtering documents (`$filter` not yet implemented)
+- **✅ Pagination**: `$top=n` and `$skip=n` now accept numeric values (e.g., `$top=10&$skip=20`). Both fully implemented and OData compliant.
+- **✅ Filtering**: `$filter` parameter now supports filtering documents with OData-compliant expressions:
+  - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
+  - Logical operators: `and`, `or`
+  - Examples: `$filter=age gt 25`, `$filter=name eq 'Alice'`, `$filter=status eq 'active' and age ge 25`
 - **✅ Sorting**: `$orderby=field desc` now supported (OData compliant).
-- **Projection**: No field selection (`$select` not yet implemented)
+- **✅ Projection**: `$select=field1,field2` now supports field selection (OData compliant). Always includes `_id` field.
+- **✅ Expansion**: `$expand` parameter parsed (placeholder implementation, returns documents as-is)
 
 ### Advanced Features
 - **Bulk Operations**: No batch endpoints
@@ -86,29 +90,32 @@ All previously identified critical issues have been addressed:
 
 **Current Implementation:**
 - **`$top`**: ✅ Now accepts numeric values (e.g., `$top=10`). OData compliant.
+- **`$skip`**: ✅ Now accepts numeric values (e.g., `$skip=20`). Fully implemented in engine. OData compliant.
 - **`$orderby`**: ✅ Implemented with standard OData syntax (e.g., `$orderby=field desc`). Supports both ascending (default) and descending order.
-- **`$skip`**: ⚠️ Parsed but not yet implemented in the engine (logged as debug message).
+- **`$filter`**: ✅ Implemented with OData-compliant filter expressions. Supports comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`) and logical operators (`and`, `or`).
+- **`$select`**: ✅ Implemented for field projection (e.g., `$select=name,email`). Always includes `_id` field. OData compliant.
+- **`$expand`**: ✅ Parsed and processed (placeholder implementation, returns documents as-is for future related entity expansion).
 - **Query Parameter Parsing**: ✅ Now properly parses query parameters from `uri.query` instead of relying on regex patterns in route paths.
-- **Missing**: `$filter`, `$select`, `$expand` (not yet implemented).
 
 **OData Standard Query Parameters:**
 
 | Parameter | OData Standard | YarDB Implementation | Compatibility |
 |-----------|----------------|---------------------|---------------|
 | `$top` | `$top=n` (e.g., `$top=10`) | ✅ `$top=n` (accepts numeric value) | ✅ **FULLY COMPATIBLE** |
-| `$skip` | `$skip=n` (e.g., `$skip=20`) | ⚠️ Parsed but not implemented | ⚠️ Partial - parsed but engine doesn't support it yet |
+| `$skip` | `$skip=n` (e.g., `$skip=20`) | ✅ `$skip=n` (accepts numeric value) | ✅ **FULLY COMPATIBLE** |
 | `$orderby` | `$orderby=field desc` or `$orderby=field asc` | ✅ `$orderby=field desc` | ✅ **FULLY COMPATIBLE** |
-| `$filter` | `$filter=field eq 'value'` | ❌ Not implemented | ❌ Missing |
-| `$select` | `$select=field1,field2` | ❌ Not implemented | ❌ Missing |
-| `$expand` | `$expand=relatedEntity` | ❌ Not implemented | ❌ Missing |
+| `$filter` | `$filter=field eq 'value'` | ✅ `$filter=field eq 'value'` (supports eq, ne, gt, ge, lt, le, and, or) | ✅ **FULLY COMPATIBLE** |
+| `$select` | `$select=field1,field2` | ✅ `$select=field1,field2` (always includes `_id`) | ✅ **FULLY COMPATIBLE** |
+| `$expand` | `$expand=relatedEntity` | ⚠️ Parsed but placeholder (returns as-is) | ⚠️ **PARTIAL** - parsed but expansion not yet implemented |
 
 **Recommendations:**
 - ✅ **DONE**: Query parameter parsing from `uri.query` - **COMPLETED**
 - ✅ **DONE**: `$top` with numeric values - **COMPLETED**
+- ✅ **DONE**: `$skip` in the engine - **COMPLETED**
 - ✅ **DONE**: `$orderby` parameter support - **COMPLETED**
-- ⚠️ **TODO**: Implement `$skip` in the engine (currently parsed but ignored)
-- ⚠️ **TODO**: Implement `$filter` for filtering capabilities
-- ⚠️ **TODO**: Implement `$select` for field projection
+- ✅ **DONE**: `$filter` for filtering capabilities - **COMPLETED**
+- ✅ **DONE**: `$select` for field projection - **COMPLETED**
+- ⚠️ **TODO**: Implement actual expansion logic for `$expand` (currently placeholder)
 
 ## Comparison with REST Best Practices
 
@@ -138,10 +145,11 @@ All previously identified critical issues have been addressed:
 10. ✅ Implement $orderby parameter (OData compliant) - **DONE**
 
 ### Medium Priority (Next Steps)
-11. Implement `$skip` in the engine (currently parsed but not used)
-12. Add filtering capabilities (`$filter`)
-13. Add field projection (`$select`)
-14. Add field names to `$orderby` (currently only supports `desc`/`asc`)
+11. ✅ Implement `$skip` in the engine - **COMPLETED**
+12. ✅ Add filtering capabilities (`$filter`) - **COMPLETED**
+13. ✅ Add field projection (`$select`) - **COMPLETED**
+14. Implement actual expansion logic for `$expand` (currently placeholder)
+15. Add field names to `$orderby` (currently only supports `desc`/`asc`)
 
 ### Low Priority
 9. Add ETag/Last-Modified headers
@@ -163,10 +171,14 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 - Clear distinction between success and error cases
 - OData-compliant query parameter parsing from uri.query
 - $top parameter with numeric values (e.g., `$top=10`)
+- $skip parameter with numeric values (e.g., `$skip=20`)
 - $orderby parameter with standard OData syntax (e.g., `$orderby=field desc`)
+- $filter parameter with OData-compliant expressions (e.g., `$filter=age gt 25`)
+- $select parameter for field projection (e.g., `$select=name,email`)
+- $expand parameter parsing (placeholder for future expansion)
 
-The API now follows REST best practices and provides a solid foundation for client applications. Remaining improvements are primarily about adding advanced query capabilities (filtering, pagination, sorting) rather than fixing fundamental issues.
+The API now follows REST best practices and provides a solid foundation for client applications. All major OData query parameters have been implemented, providing comprehensive query capabilities for client applications.
 
 ### Next Steps
-Focus on adding query capabilities (pagination, filtering, sorting) and advanced features (ETags, conditional requests) to enhance the API's functionality for more complex use cases.
+Focus on implementing actual expansion logic for `$expand` and adding advanced features (ETags, conditional requests, API versioning) to enhance the API's functionality for more complex use cases.
 

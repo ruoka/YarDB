@@ -146,6 +146,10 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     if(selector.has("$top"s))
         top = selector["$top"s];
 
+    auto skip = sequence_type{0};
+    if(selector.has("$skip"s))
+        skip = selector["$skip"s];
+
     auto success = false;
     const auto& index = m_index[m_collection];
 
@@ -158,6 +162,13 @@ bool db::engine::read(const db::object& selector, db::object& documents)
         m_storage >> metadata >> document;
         if(document.match(selector))
         {
+            // Skip the first N matching documents
+            if(skip > 0)
+            {
+                --skip;
+                continue;
+            }
+
             documents += std::move(document);
             success = true;
             if(--top == 0) break;

@@ -433,6 +433,166 @@ auto test_set()
             const auto& items = documents.get<object::array>();
             require_true(items.size() <= 2);
         };
+
+        section("GET with $skip query parameter skips first N results") = [setup]
+        {
+            // Create multiple documents
+            for(int i = 1; i <= 10; ++i)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                );
+                // Allow retry if server is busy
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                    );
+                    require_true(retry_status == "201"s);
+                }
+                else
+                {
+                    require_true(post_status == "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Get collection with $skip=3 (should skip first 3 items)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/testitems?$skip=3"s, ""s
+            );
+
+            require_true(status == "200"s);
+            require_true(reason == "OK"s);
+            
+            // Verify response is an array
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Get all items without skip to compare
+            auto [status_all, reason_all, headers_all, response_body_all] = make_request(
+                setup->get_port(), "GET"s, "/testitems"s, ""s
+            );
+            require_true(status_all == "200"s);
+            auto documents_all = json::parse(response_body_all);
+            const auto& items_all = documents_all.get<object::array>();
+            
+            // With $skip=3, we should have fewer items than without skip
+            // (unless there are fewer than 3 items total, but we created 10)
+            require_true(items.size() < items_all.size());
+            
+            // Verify skip is working: the difference should be at least 3 (or equal to total if < 3 items)
+            const auto expected_difference = std::min(static_cast<std::size_t>(3), items_all.size());
+            require_true(items_all.size() - items.size() >= expected_difference);
+        };
+
+        section("GET with $skip and $top combined for pagination") = [setup]
+        {
+            // Create multiple documents
+            for(int i = 1; i <= 10; ++i)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                );
+                // Allow retry if server is busy
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                    );
+                    require_true(retry_status == "201"s);
+                }
+                else
+                {
+                    require_true(post_status == "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Get collection with $skip=3&$top=3 (should return items 4, 5, 6)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/testitems?$skip=3&$top=3"s, ""s
+            );
+
+            require_true(status == "200"s);
+            require_true(reason == "OK"s);
+            
+            // Verify response contains at most 3 items
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_true(items.size() <= 3);
+            
+            // Get all items without skip/top to compare
+            auto [status_all, reason_all, headers_all, response_body_all] = make_request(
+                setup->get_port(), "GET"s, "/testitems"s, ""s
+            );
+            require_true(status_all == "200"s);
+            auto documents_all = json::parse(response_body_all);
+            const auto& items_all = documents_all.get<object::array>();
+            
+            // Verify we got at most 3 items (top limit)
+            require_true(items.size() <= 3);
+            
+            // Verify skip is working: we should have fewer items than without skip
+            // (skip=3 means we skip at least 3, so difference should be >= 3 or equal to total)
+            if(items_all.size() > 3)
+            {
+                require_true(items.size() <= items_all.size() - 3);
+            }
+        };
+
+        section("GET with $skip=0 should return all items") = [setup]
+        {
+            // Create multiple documents
+            for(int i = 1; i <= 5; ++i)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                );
+                // Allow retry if server is busy
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    );
+                    require_true(retry_status == "201"s);
+                }
+                else
+                {
+                    require_true(post_status == "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Get collection with $skip=0 (should return all items, same as no skip)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/testitems?$skip=0"s, ""s
+            );
+
+            require_true(status == "200"s);
+            require_true(reason == "OK"s);
+            
+            // Get all items without skip to compare
+            auto [status_all, reason_all, headers_all, response_body_all] = make_request(
+                setup->get_port(), "GET"s, "/testitems"s, ""s
+            );
+            require_true(status_all == "200"s);
+            auto documents_all = json::parse(response_body_all);
+            const auto& items_all = documents_all.get<object::array>();
+            
+            // Verify response contains all items (skip=0 should return everything)
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // With $skip=0, we should get the same number of items as without skip
+            require_true(items.size() == items_all.size());
+        };
     };
 
     // Note: Server runs in infinite loop, so we can't cleanly stop it

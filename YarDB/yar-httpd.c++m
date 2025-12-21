@@ -258,9 +258,8 @@ private:
                         // Handle $skip (OData: $skip=n)
                         if(params.contains("$skip"s))
                         {
-                            // Note: $skip is not yet supported by engine, but we parse it for OData compliance
-                            // For now, we'll ignore it (engine doesn't support skip)
-                            slog << debug << "GET /[a-z]+: $skip parameter parsed but not yet implemented in engine" << flush;
+                            auto skip_value = stoll(params["$skip"s]);
+                            selector["$skip"s] = skip_value;
                         }
                         
                         // Handle $orderby (OData: $orderby=field desc or $orderby=field asc)

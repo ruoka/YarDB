@@ -178,6 +178,54 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     return success;
 }
 
+std::optional<std::chrono::system_clock::time_point> db::engine::get_metadata_timestamp(const db::object& selector)
+{
+    using xson::fson::operator >>;
+    
+    const auto& index = m_index[m_collection];
+    
+    for(const auto position : index.view(selector))
+    {
+        auto metadata = db::metadata{};
+        auto document = db::object{};
+        m_storage.clear();
+        m_storage.seekg(position, m_storage.beg);
+        m_storage >> metadata >> document;
+        
+        if(document.match(selector))
+        {
+            // Return the timestamp from metadata
+            return metadata.timestamp;
+        }
+    }
+    
+    return std::nullopt; // No matching document found
+}
+
+std::optional<std::int64_t> db::engine::get_metadata_position(const db::object& selector)
+{
+    using xson::fson::operator >>;
+    
+    const auto& index = m_index[m_collection];
+    
+    for(const auto position : index.view(selector))
+    {
+        auto metadata = db::metadata{};
+        auto document = db::object{};
+        m_storage.clear();
+        m_storage.seekg(position, m_storage.beg);
+        m_storage >> metadata >> document;
+        
+        if(document.match(selector))
+        {
+            // Return the position from metadata
+            return metadata.position;
+        }
+    }
+    
+    return std::nullopt; // No matching document found
+}
+
 bool db::engine::update(const db::object& selector, const db::object& updates, db::object& documents)
 {
     using xson::fson::operator >>;

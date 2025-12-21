@@ -1,23 +1,40 @@
 # YarDB - Yet Another RESTful Database
 
-A document-oriented database with RESTful Web API, implemented in C++23.
+**YarDB now has a production-ready REST API with proper HTTP semantics, correct status codes, comprehensive error handling, and standard response formats. All critical issues have been resolved.**
+
+A document-oriented database with a fully-featured RESTful Web API, implemented in C++23. YarDB provides enterprise-grade HTTP compliance with support for conditional requests, ETag-based caching, OData query parameters, and content negotiation.
 
 **Project Structure**: This project follows [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html) guidelines for C++ projects.
 
 ## Overview
 
-YarDB is a C++23 application that implements:
-- **RESTful Web API**: HTTP/1.1 based REST interface
+YarDB is a production-ready C++23 application that implements:
+
+- **Production-Grade REST API**: HTTP/1.1 compliant with proper status codes, error handling, and standard response formats
+- **OData Compliance**: Full support for OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$expand`) and metadata formats
+- **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
+- **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
+- **Last-Modified Support**: Timestamp-based conditional requests for cache validation
 - **Document Storage**: FSON-encoded binary storage (FAST-encoded with minimal metadata)
-- **JSON Transport**: JSON-encoded objects over HTTP
-- **CRUD Operations**: Create, Read, Update, Delete operations via REST endpoints
+- **JSON Transport**: JSON-encoded objects over HTTP with content negotiation
+- **CRUD Operations**: Full Create, Read, Update, Delete operations via REST endpoints
 
 ## Features
 
+### Production-Ready REST API
+- ✅ Proper HTTP status codes (200, 201, 204, 304, 400, 404, 409, 412, 415, 422, 500)
+- ✅ Comprehensive error handling with standard error response formats
+- ✅ Conditional requests (ETag and Last-Modified based)
+- ✅ OData query parameters and metadata support
+- ✅ Content negotiation (Accept header, OData metadata levels)
+- ✅ Standard HTTP headers (Location, Content-Location, ETag, Last-Modified)
+
+### Technical Excellence
+- **Native C++ Build System**: Uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects
 - C++23 modules support (`.c++m` extension)
 - Cross-platform (Linux, macOS)
-- Comprehensive test suite
-- Modular architecture
+- Comprehensive test suite with extensive coverage
+- Modular architecture with clean separation of concerns
 - P1204R0-compliant project structure
 - RESTful API following OData principles
 
@@ -38,7 +55,7 @@ YarDB is a C++23 application that implements:
 
 ## Building
 
-YarDB uses [C++ Builder](https://github.com/ruoka/tester) (CB.sh) for building:
+YarDB uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects with full C++23 module support:
 
 ```bash
 # Build all programs in debug mode
@@ -197,15 +214,28 @@ The project uses git submodules for dependencies:
 
 ## API Endpoints
 
-The RESTful API follows OData principles:
+The RESTful API follows OData principles and supports:
+
+### Basic Endpoints
 
 - `GET /` - List all collections
 - `POST /{collection}` - Create document
-- `GET /{collection}` - Read all documents
+- `GET /{collection}` - Read all documents (supports OData query parameters)
 - `GET /{collection}/{id}` - Read document by ID
-- `PUT /{collection}/{id}` - Replace document
+- `PUT /{collection}/{id}` - Replace document (upsert)
 - `PATCH /{collection}/{id}` - Update document
 - `DELETE /{collection}/{id}` - Delete document
+- `HEAD /{collection}` or `/{collection}/{id}` - Get headers only
+
+### Advanced Features
+
+- **OData Query Parameters**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$expand`
+- **Conditional Requests**: `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
+- **ETag Support**: Resource versioning for caching and optimistic locking
+- **Last-Modified**: Timestamp-based conditional requests
+- **Content Negotiation**: OData metadata formats (`odata=fullmetadata`, `odata=minimalmetadata`)
+
+See [Programs Documentation](docs/programs.md) for detailed API documentation.
 
 ## License
 

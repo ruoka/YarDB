@@ -28,6 +28,14 @@ public:
     bool create(db::object& document);
 
     bool read(const db::object& selector, db::object& documents);
+    
+    // Get metadata timestamp for the first document matching the selector
+    // Returns std::nullopt if no document found
+    std::optional<std::chrono::system_clock::time_point> get_metadata_timestamp(const db::object& selector);
+    
+    // Get metadata position for the first document matching the selector
+    // Returns std::nullopt if no document found
+    std::optional<std::int64_t> get_metadata_position(const db::object& selector);
 
     bool update(const db::object& selector, const db::object& updates, db::object& documents);
 

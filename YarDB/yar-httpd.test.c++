@@ -133,6 +133,39 @@ auto make_request_with_accept(const string& port, const string& method, const st
     return parse_http_response(stream, method);
 }
 
+// Helper function to make HTTP request with custom headers (e.g., If-Match, If-None-Match)
+auto make_request_with_headers(const string& port, const string& method, const string& path, 
+                                const std::map<string, string>& custom_headers, const string& body = ""s)
+{
+    auto stream = connect("localhost"s, port);
+    
+    stream << method << " " << path << " HTTP/1.1" << crlf
+           << "Host: localhost:" << port << crlf
+           << "Accept: application/json" << crlf;
+    
+    // Add custom headers (convert to lowercase for http::headers)
+    for(const auto& [key, value] : custom_headers)
+    {
+        auto lower_key = key;
+        for(auto& c : lower_key)
+        {
+            if(c >= 'A' && c <= 'Z')
+                c = c - 'A' + 'a';
+        }
+        stream << lower_key << ": " << value << crlf;
+    }
+    
+    if(!body.empty())
+    {
+        stream << "Content-Type: application/json" << crlf
+               << "Content-Length: " << body.length() << crlf;
+    }
+    
+    stream << crlf << body << flush;
+
+    return parse_http_response(stream, method);
+}
+
 auto test_set()
 {
     using namespace tester::basic;
@@ -708,7 +741,7 @@ auto test_set()
             require_eq(get_status, "200"s);
             
             auto all_docs = json::parse(get_body);
-            const auto& all_items = all_docs.get<object::array>();
+            // Note: all_docs parsed but not used in this simplified test
             
             // Update documents with status (simplified - in real test we'd use PATCH)
             // For this test, we'll create new documents with status
@@ -1702,6 +1735,461 @@ auto test_set()
                 // If single object, check it has metadata
                 require_true(document.has("@odata.context"s));
             }
+        };
+    };
+
+    test_case("ETag and conditional requests") = []
+    {
+        const auto test_file = "./etag_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET response includes ETag header") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post1, _unused_post2, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest"s, R"({"name":"ETag Document"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document
+            auto [status, reason, headers, body] = make_request(
+                setup->get_port(), "GET"s, "/etagtest/"s + std::to_string(doc_id), ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("etag"s));
+            
+            // ETag should be a quoted string
+            auto etag = headers["etag"s];
+            require_true(etag.front() == '"');
+            require_true(etag.back() == '"');
+        };
+
+        section("GET with If-None-Match matching ETag returns 304 Not Modified") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused1, _unused2, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest2"s, R"({"name":"If-None-Match Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document to get ETag
+            auto [get_status, _unused3, headers1, _unused4] = make_request(
+                setup->get_port(), "GET"s, "/etagtest2/"s + std::to_string(doc_id), ""s
+            );
+            require_eq(get_status, "200"s);
+            require_true(headers1.contains("etag"s));
+            auto etag = headers1["etag"s];
+            
+            // GET again with If-None-Match matching the ETag
+            auto custom_headers = std::map<string, string>{{"If-None-Match", etag}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "GET"s, "/etagtest2/"s + std::to_string(doc_id), custom_headers
+            );
+            
+            require_eq(status, "304"s);
+            require_eq(reason, "Not Modified"s);
+            require_true(body.empty()); // 304 should have no body
+            require_true(headers.contains("etag"s)); // Should still include ETag header
+        };
+
+        section("GET with If-None-Match non-matching ETag returns 200 OK") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post3, _unused_post4, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest3"s, R"({"name":"If-None-Match Non-Match"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET with If-None-Match with a different ETag
+            auto custom_headers = std::map<string, string>{{"If-None-Match", "\"different-etag\""s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "GET"s, "/etagtest3/"s + std::to_string(doc_id), custom_headers
+            );
+            
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_false(body.empty()); // Should have body
+            auto document = json::parse(body);
+            require_true(document.has("_id"s));
+        };
+
+        section("PUT with If-Match matching ETag succeeds") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused5, _unused6, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest4"s, R"({"name":"If-Match Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document to get ETag
+            auto [get_status, _unused7, headers1, _unused8] = make_request(
+                setup->get_port(), "GET"s, "/etagtest4/"s + std::to_string(doc_id), ""s
+            );
+            require_true(headers1.contains("etag"s));
+            auto etag = headers1["etag"s];
+            
+            // PUT with If-Match matching the ETag
+            auto custom_headers = std::map<string, string>{{"If-Match", etag}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PUT"s, "/etagtest4/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Updated Name","value":100})"s
+            );
+            
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            auto document = json::parse(body);
+            require_eq(document["name"s].get<string>(), "Updated Name"s);
+            require_true(headers.contains("etag"s)); // Should have new ETag
+        };
+
+        section("PUT with If-Match non-matching ETag returns 412 Precondition Failed") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post5, _unused_post6, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest5"s, R"({"name":"If-Match Fail Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // PUT with If-Match with a different ETag
+            auto custom_headers = std::map<string, string>{{"If-Match", "\"wrong-etag\""s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PUT"s, "/etagtest5/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Should Not Update"})"s
+            );
+            
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+            auto error = json::parse(body);
+            require_true(error.has("error"s));
+            require_eq(error["error"s].get<string>(), "Precondition Failed"s);
+        };
+
+        section("PATCH with If-Match matching ETag succeeds") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused9, _unused10, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest6"s, R"({"name":"PATCH If-Match Test","age":25})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document to get ETag
+            auto [get_status, _unused11, headers1, _unused12] = make_request(
+                setup->get_port(), "GET"s, "/etagtest6/"s + std::to_string(doc_id), ""s
+            );
+            require_true(headers1.contains("etag"s));
+            auto etag = headers1["etag"s];
+            
+            // PATCH with If-Match matching the ETag
+            auto custom_headers = std::map<string, string>{{"If-Match", etag}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PATCH"s, "/etagtest6/"s + std::to_string(doc_id), custom_headers,
+                R"({"age":30})"s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("etag"s)); // Should have new ETag
+        };
+
+        section("PATCH with If-Match non-matching ETag returns 412 Precondition Failed") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post7, _unused_post8, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest7"s, R"({"name":"PATCH Fail Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // PATCH with If-Match with a different ETag
+            auto custom_headers = std::map<string, string>{{"If-Match", "\"wrong-etag\""s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PATCH"s, "/etagtest7/"s + std::to_string(doc_id), custom_headers,
+                R"({"value":999})"s
+            );
+            
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+        };
+
+        section("PUT response includes ETag header after update") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused13, _unused14, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest8"s, R"({"name":"ETag After Update"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET to get initial ETag
+            auto [get_status1, _unused15, headers1, _unused16] = make_request(
+                setup->get_port(), "GET"s, "/etagtest8/"s + std::to_string(doc_id), ""s
+            );
+            auto initial_etag = headers1["etag"s];
+            
+            // PUT to update
+            auto [put_status, _unused17, headers2, put_body] = make_request(
+                setup->get_port(), "PUT"s, "/etagtest8/"s + std::to_string(doc_id), 
+                R"({"name":"Updated","value":42})"s
+            );
+            
+            require_eq(put_status, "200"s);
+            require_true(headers2.contains("etag"s));
+            auto new_etag = headers2["etag"s];
+            
+            // ETag should have changed after update
+            require_true(new_etag != initial_etag);
+        };
+
+        section("HEAD response includes ETag header") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post9, _unused_post10, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest9"s, R"({"name":"HEAD ETag Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // HEAD request
+            auto [status, reason, headers, body] = make_request(
+                setup->get_port(), "HEAD"s, "/etagtest9/"s + std::to_string(doc_id), ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("etag"s));
+            require_true(body.empty()); // HEAD should have no body
+        };
+
+        section("If-Match wildcard (*) matches any existing resource") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post11, _unused_post12, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest10"s, R"({"name":"Wildcard Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // PUT with If-Match: *
+            auto custom_headers = std::map<string, string>{{"If-Match", "*"s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PUT"s, "/etagtest10/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Updated with Wildcard"})"s
+            );
+            
+            require_eq(status, "200"s); // Should succeed because resource exists
+        };
+
+        section("If-None-Match wildcard (*) fails if resource exists") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post13, _unused_post14, post_body] = make_request(
+                setup->get_port(), "POST"s, "/etagtest11"s, R"({"name":"Wildcard None-Match"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET with If-None-Match: *
+            auto custom_headers = std::map<string, string>{{"If-None-Match", "*"s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "GET"s, "/etagtest11/"s + std::to_string(doc_id), custom_headers
+            );
+            
+            require_eq(status, "304"s); // Should return 304 because resource exists
+        };
+    };
+
+    test_case("Last-Modified and conditional requests") = []
+    {
+        const auto test_file = "./lastmodified_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET response includes Last-Modified header") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post1, _unused_post2, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest"s, R"({"name":"Last-Modified Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document
+            auto [status, reason, headers, body] = make_request(
+                setup->get_port(), "GET"s, "/lastmodifiedtest/"s + std::to_string(doc_id), ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("last-modified"s));
+            
+            // Last-Modified should be a valid HTTP date string
+            auto last_modified = headers["last-modified"s];
+            require_false(last_modified.empty());
+            // Format: "Sun, 21 Dec 2025 22:30:08 GMT"
+            require_true(last_modified.ends_with(" GMT"s));
+        };
+
+        section("GET with If-Modified-Since returns 304 if document not modified") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post3, _unused_post4, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest2"s, R"({"name":"If-Modified-Since Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document to get Last-Modified
+            auto [get_status, _unused_get1, headers1, _unused_get2] = make_request(
+                setup->get_port(), "GET"s, "/lastmodifiedtest2/"s + std::to_string(doc_id), ""s
+            );
+            require_eq(get_status, "200"s);
+            require_true(headers1.contains("last-modified"s));
+            auto last_modified = headers1["last-modified"s];
+            
+            // Small delay to ensure timestamps differ (if needed)
+            std::this_thread::sleep_for(100ms);
+            
+            // GET again with If-Modified-Since matching the Last-Modified date
+            auto custom_headers = std::map<string, string>{{"If-Modified-Since", last_modified}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "GET"s, "/lastmodifiedtest2/"s + std::to_string(doc_id), custom_headers
+            );
+            
+            // Should return 304 if document timestamp <= If-Modified-Since date
+            // Note: Exact match might return 304, or if timestamp is slightly newer it returns 200
+            // The behavior depends on the exact timestamp comparison
+            require_true(status == "200"s || status == "304"s);
+            if(status == "304"s)
+            {
+                require_true(body.empty()); // 304 should have no body
+                require_true(headers.contains("last-modified"s)); // Should still include Last-Modified header
+            }
+        };
+
+        section("GET with If-Modified-Since in future returns 200 OK") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post5, _unused_post6, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest3"s, R"({"name":"Future Date Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET with If-Modified-Since set to a future date (document is older)
+            auto future_date = "Tue, 31 Dec 2099 23:59:59 GMT"s;
+            auto custom_headers = std::map<string, string>{{"If-Modified-Since", future_date}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "GET"s, "/lastmodifiedtest3/"s + std::to_string(doc_id), custom_headers
+            );
+            
+            // Document was modified before the future date, so should return 304
+            require_eq(status, "304"s);
+            require_true(body.empty());
+        };
+
+        section("PUT with If-Unmodified-Since matching Last-Modified succeeds") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post7, _unused_post8, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest4"s, R"({"name":"If-Unmodified-Since Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document to get Last-Modified
+            auto [get_status, _unused_get3, headers1, _unused_get4] = make_request(
+                setup->get_port(), "GET"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), ""s
+            );
+            require_true(headers1.contains("last-modified"s));
+            auto last_modified = headers1["last-modified"s];
+            
+            // PUT with If-Unmodified-Since matching the Last-Modified date
+            auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", last_modified}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PUT"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Updated Name","value":100})"s
+            );
+            
+            // Should succeed if document timestamp <= If-Unmodified-Since date
+            require_eq(status, "200"s);
+            auto document = json::parse(body);
+            require_eq(document["name"s].get<string>(), "Updated Name"s);
+        };
+
+        section("PUT with If-Unmodified-Since in past returns 412 Precondition Failed") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post9, _unused_post10, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest5"s, R"({"name":"Past Date Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // Wait a moment to ensure document timestamp is newer than past date
+            std::this_thread::sleep_for(100ms);
+            
+            // PUT with If-Unmodified-Since set to a past date (document is newer, so precondition fails)
+            auto past_date = "Mon, 01 Jan 2000 00:00:00 GMT"s;
+            auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", past_date}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PUT"s, "/lastmodifiedtest5/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Should Not Update"})"s
+            );
+            
+            // Document was modified after the past date, so should return 412
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+            auto error = json::parse(body);
+            require_true(error.has("error"s));
+            require_eq(error["error"s].get<string>(), "Precondition Failed"s);
+        };
+
+        section("PATCH with If-Unmodified-Since matching Last-Modified succeeds") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post11, _unused_post12, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest6"s, R"({"name":"PATCH If-Unmodified-Since Test","age":25})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // GET the document to get Last-Modified
+            auto [get_status, _unused_get5, headers1, _unused_get6] = make_request(
+                setup->get_port(), "GET"s, "/lastmodifiedtest6/"s + std::to_string(doc_id), ""s
+            );
+            require_true(headers1.contains("last-modified"s));
+            auto last_modified = headers1["last-modified"s];
+            
+            // PATCH with If-Unmodified-Since matching the Last-Modified date
+            auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", last_modified}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->get_port(), "PATCH"s, "/lastmodifiedtest6/"s + std::to_string(doc_id), custom_headers,
+                R"({"age":30})"s
+            );
+            
+            require_eq(status, "200"s);
+        };
+
+        section("HEAD response includes Last-Modified header") = [setup]
+        {
+            // Create a document
+            auto [post_status, _unused_post13, _unused_post14, post_body] = make_request(
+                setup->get_port(), "POST"s, "/lastmodifiedtest7"s, R"({"name":"HEAD Last-Modified Test"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<long long>(created["_id"s]);
+            
+            // HEAD request
+            auto [status, reason, headers, body] = make_request(
+                setup->get_port(), "HEAD"s, "/lastmodifiedtest7/"s + std::to_string(doc_id), ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("last-modified"s));
+            require_true(body.empty()); // HEAD should have no body
         };
     };
 

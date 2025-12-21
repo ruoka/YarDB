@@ -67,9 +67,111 @@ Once running, `yardb` provides the following REST endpoints:
 - `POST /{collection}` - Create a new document
 - `GET /{collection}` - Read all documents in collection
 - `GET /{collection}/{id}` - Read document by ID
-- `PUT /{collection}/{id}` - Replace document by ID
+- `PUT /{collection}/{id}` - Replace document by ID (upsert: creates if not exists, updates if exists)
 - `PATCH /{collection}/{id}` - Update/Upsert document by ID
 - `DELETE /{collection}/{id}` - Delete document by ID
+- `HEAD /{collection}` - Get collection headers (same as GET but no body)
+- `HEAD /{collection}/{id}` - Get document headers (same as GET but no body)
+
+### HTTP Methods and Status Codes
+
+- **POST**: Creates new document → `201 Created` (with `Location` header)
+- **GET**: Retrieves document(s) → `200 OK` (or `404 Not Found` if not found)
+- **PUT**: Creates or replaces document → `201 Created` (new) or `200 OK` (updated, with `Content-Location` header)
+- **PATCH**: Updates document → `200 OK` (with `Content-Location` header)
+- **DELETE**: Deletes document → `204 No Content`
+- **HEAD**: Returns headers only → `200 OK` (no body)
+
+### Response Headers
+
+- **Location**: Included on `POST` and `PUT` (when creating new resources) - `Location: /collection/{id}`
+- **Content-Location**: Included on `PUT` (updates) and `PATCH` - `Content-Location: /collection/{id}`
+- **ETag**: Included in all GET, HEAD, PUT, PATCH responses - `ETag: "hex-encoded-position"`
+- **Last-Modified**: Included in all GET, HEAD, PUT, PATCH responses - `Last-Modified: <RFC 7231 date>`
+- **Content-Type**: Always `application/json` for JSON responses
+
+### Conditional Requests
+
+YarDB supports conditional HTTP requests for efficient caching and optimistic locking:
+
+#### ETag-Based Conditionals
+
+- **If-Match**: Used with PUT/PATCH/DELETE
+  - Example: `PUT /users/123` with `If-Match: "abc123"`
+  - Returns `412 Precondition Failed` if ETag doesn't match (document was modified)
+  - Supports wildcard: `If-Match: *` (matches any existing resource)
+
+- **If-None-Match**: Used with GET/HEAD/POST/PUT
+  - Example: `GET /users/123` with `If-None-Match: "abc123"`
+  - Returns `304 Not Modified` if ETag matches (resource unchanged)
+  - Supports wildcard: `If-None-Match: *` (fails if resource exists)
+
+#### Date-Based Conditionals
+
+- **If-Modified-Since**: Used with GET/HEAD
+  - Example: `GET /users/123` with `If-Modified-Since: Wed, 21 Oct 2015 07:28:00 GMT`
+  - Returns `304 Not Modified` if document hasn't been modified since the date
+
+- **If-Unmodified-Since**: Used with PUT/PATCH/DELETE
+  - Example: `PUT /users/123` with `If-Unmodified-Since: Wed, 21 Oct 2015 07:28:00 GMT`
+  - Returns `412 Precondition Failed` if document was modified after the date
+
+### OData Query Parameters
+
+YarDB implements OData-compliant query parameters for advanced querying:
+
+- **`$top=n`** - Limit number of results (pagination)
+  - Example: `GET /users?$top=10`
+
+- **`$skip=n`** - Skip number of results (pagination)
+  - Example: `GET /users?$skip=20`
+
+- **`$orderby=field [desc]`** - Sort results
+  - Example: `GET /users?$orderby=age desc`
+
+- **`$filter=expression`** - Filter documents
+  - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
+  - Logical operators: `and`, `or`
+  - String functions: `startswith(field, 'prefix')`, `endswith(field, 'suffix')`, `contains(field, 'substring')`
+  - Example: `GET /users?$filter=age gt 25 and status eq 'active'`
+
+- **`$select=field1,field2`** - Project specific fields
+  - Example: `GET /users?$select=name,email`
+  - Note: `_id` field is always included
+
+- **`$expand=relatedEntity`** - Expand related entities (parsed, placeholder implementation)
+
+### OData Metadata
+
+YarDB supports OData metadata formats via the `Accept` header:
+
+- **`application/json;odata=fullmetadata`** - Includes `@odata.context`, `@odata.id`, `@odata.editLink`
+- **`application/json;odata=minimalmetadata`** - Includes only `@odata.context`
+- **`application/json;odata=nometadata`** or default - Plain JSON (no metadata)
+
+Example request:
+```
+GET /users/1
+Accept: application/json;odata=fullmetadata
+```
+
+Response:
+```json
+{
+  "@odata.context": "/$metadata#users/$entity",
+  "@odata.id": "/users/1",
+  "@odata.editLink": "/users/1",
+  "_id": 1,
+  "name": "John",
+  "email": "john@example.com"
+}
+```
+
+### Content Negotiation
+
+- YarDB accepts `Accept` header for content type negotiation
+- Supported content types: `application/json`, `application/json;odata=fullmetadata`, `application/json;odata=minimalmetadata`
+- Returns `406 Not Acceptable` for unsupported content types
 
 ## yarsh - Interactive Shell
 

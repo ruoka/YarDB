@@ -16,12 +16,126 @@ inline auto stoll(std::string_view sv)
 {
     auto ll = 0ll;
     auto [ptr, ec] = std::from_chars(sv.begin(),sv.end(),ll);
+    if(ec == std::errc::result_out_of_range)
+        throw std::invalid_argument{"Number out of range: "s + std::string{sv}};
     if(ec != std::errc() || ptr != sv.end())
         throw std::invalid_argument{"Invalid ID format: "s + std::string{sv}};
     return ll;
 }
 
+// Helper function to validate collection name from URI
+// Collection names must: start with a letter, contain only lowercase letters/digits/underscore, max 256 chars
+inline auto validate_collection_name(std::string_view collection_name)
+{
+    if(collection_name.empty())
+        throw std::invalid_argument{"Collection name cannot be empty"};
+    
+    constexpr auto max_collection_name_length = 256;
+    if(collection_name.size() > max_collection_name_length)
+        throw std::invalid_argument{"Collection name too long (max "s + std::to_string(max_collection_name_length) + " chars)"};
+    
+    // Must start with a letter
+    if(collection_name[0] < 'a' || collection_name[0] > 'z')
+        throw std::invalid_argument{"Collection name must start with a lowercase letter"};
+    
+    // Must contain only lowercase letters, digits, and underscores
+    for(auto c : collection_name)
+    {
+        if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
+    }
+    
+    return std::string{collection_name};
+}
+
+// Helper function to trim leading whitespace from a string_view (handles space, tab, newline, carriage return)
+constexpr auto trim_start(std::string_view sv)
+{
+    auto start = sv.find_first_not_of(" \t\n\r");
+    return start == std::string_view::npos ? sv : sv.substr(start);
+}
+
+// Helper function to trim trailing whitespace from a string_view (handles space, tab, newline, carriage return)
+constexpr auto trim_end(std::string_view sv)
+{
+    auto end = sv.find_last_not_of(" \t\n\r");
+    return end == std::string_view::npos ? sv : sv.substr(0, end + 1);
+}
+
+// Helper function to trim both leading and trailing whitespace from a string_view
+constexpr auto trim(std::string_view sv)
+{
+    return trim_start(trim_end(sv));
+}
+
+// Helper function to trim trailing whitespace and convert to std::string
+inline auto trim_end_to_string(std::string_view sv)
+{
+    return std::string{trim_end(sv)};
+}
+
+// Helper function to trim leading whitespace and convert to std::string
+inline auto trim_start_to_string(std::string_view sv)
+{
+    return std::string{trim_start(sv)};
+}
+
+// Helper function to extract field name from function arguments (e.g., "field, 'value'" -> "field")
+constexpr auto parse_field_from_function_args(std::string_view args, std::size_t comma_pos)
+{
+    return trim_end(args.substr(0, comma_pos));
+}
+
+// Helper function to extract value without quotes from function arguments (e.g., "field, 'value'" -> "value")
+constexpr auto parse_value_from_function_args(std::string_view args, std::size_t comma_pos)
+{
+    auto value_trimmed = trim_start(args.substr(comma_pos + 1));
+    
+    // Remove quotes if present using string_view operations
+    if(value_trimmed.size() >= 2)
+    {
+        if((value_trimmed.starts_with('\'') && value_trimmed.ends_with('\'')) ||
+           (value_trimmed.starts_with('"') && value_trimmed.ends_with('"')))
+        {
+            return value_trimmed.substr(1, value_trimmed.size() - 2);
+        }
+    }
+    
+    return value_trimmed;
+}
+
+// Helper function to parse comma-separated list of fields (e.g., "name,email,age" -> ["name", "email", "age"])
+// Limits: max 1000 fields per list
+inline auto parse_comma_separated_list(std::string_view list_value)
+{
+    auto fields = std::vector<std::string_view>{};
+    constexpr auto max_fields = 1000;
+    auto start = std::size_t{0};
+    
+    while(true)
+    {
+        if(fields.size() >= max_fields)
+            throw std::invalid_argument{"Too many fields in list (max 1000)"};
+        
+        auto pos = list_value.find(',', start);
+        if(pos == std::string_view::npos)
+        {
+            auto field = trim(list_value.substr(start));
+            if(!field.empty())
+                fields.push_back(field);
+            break;
+        }
+        auto field = trim(list_value.substr(start, pos - start));
+        if(!field.empty())
+            fields.push_back(field);
+        start = pos + 1;
+    }
+    
+    return fields;
+}
+
 // Helper function to URL-decode a string
+// Handles %XX hex encoding and + as space
 inline auto url_decode(std::string_view encoded)
 {
     auto decoded = std::string{};
@@ -31,16 +145,18 @@ inline auto url_decode(std::string_view encoded)
     {
         if(encoded[i] == '%' && i + 2 < encoded.length())
         {
-            // Try to decode %XX
+            // Try to decode %XX - need at least 2 hex digits
             auto hex = encoded.substr(i + 1, 2);
             auto value = 0;
             auto [ptr, ec] = std::from_chars(hex.data(), hex.data() + hex.length(), value, 16);
+            // from_chars validates hex characters, so we don't need manual validation
             if(ec == std::errc() && ptr == hex.data() + hex.length())
             {
                 decoded += static_cast<char>(value);
                 i += 2; // Skip the %XX
                 continue;
             }
+            // Invalid %XX sequence - include the % as-is (fall through)
         }
         // Not a valid %XX sequence, or + (which should be space in query strings)
         if(encoded[i] == '+')
@@ -53,33 +169,66 @@ inline auto url_decode(std::string_view encoded)
 }
 
 // Helper function to parse query parameters from URI
+// Limits: max 100 parameters, max 1024 chars per param name/value, max 64KB total query string
 inline auto parse_query_params(const http::uri& uri)
 {
     auto params = std::map<std::string, std::string>{};
     
     // Check if query string exists
-    if(static_cast<std::string_view>(uri.query).empty())
+    auto query_str = static_cast<std::string_view>(uri.query);
+    if(query_str.empty())
         return params;
     
+    // Validate total query string size (64KB limit)
+    constexpr auto max_query_size = 64 * 1024;
+    if(query_str.size() > max_query_size)
+        throw std::invalid_argument{"Query string too large (max 64KB)"};
+    
     // uri.query is indexed_property<'&'>, so it splits by &
-    for(std::size_t i = 0; i < 100; ++i) // Reasonable limit
+    constexpr auto max_params = 100;
+    constexpr auto max_param_size = 1024;
+    
+    for(std::size_t i = 0; i < max_params; ++i)
     {
         auto param = uri.query[i];
         if(param.empty())
             break;
+        
+        // Validate parameter size
+        if(param.size() > max_param_size)
+            throw std::invalid_argument{"Parameter too large (max 1024 chars)"};
             
         // Split key=value
         auto eq_pos = param.find('=');
         if(eq_pos != std::string_view::npos)
         {
-            auto key = url_decode(param.substr(0, eq_pos));
-            auto value = url_decode(param.substr(eq_pos + 1));
+            auto key_view = param.substr(0, eq_pos);
+            auto value_view = param.substr(eq_pos + 1);
+            
+            // Validate key and value sizes
+            if(key_view.size() > max_param_size || value_view.size() > max_param_size)
+                throw std::invalid_argument{"Parameter key or value too large (max 1024 chars)"};
+            
+            auto key = url_decode(key_view);
+            auto value = url_decode(value_view);
+            
+            // Validate decoded sizes
+            if(key.size() > max_param_size || value.size() > max_param_size)
+                throw std::invalid_argument{"Decoded parameter key or value too large (max 1024 chars)"};
+            
             params[key] = value;
         }
         else
         {
             // Boolean flag (no value)
-            params[url_decode(param)] = "true"s;
+            if(param.size() > max_param_size)
+                throw std::invalid_argument{"Parameter name too large (max 1024 chars)"};
+            
+            auto key = url_decode(param);
+            if(key.size() > max_param_size)
+                throw std::invalid_argument{"Decoded parameter name too large (max 1024 chars)"};
+            
+            params[key] = "true"s;
         }
     }
     
@@ -89,15 +238,36 @@ inline auto parse_query_params(const http::uri& uri)
 // String filter function type for post-processing
 struct string_filter
 {
-    std::string function;  // "startswith", "contains", "endswith"
-    std::string field;
-    std::string value;
+    std::string_view function;  // "startswith", "contains", "endswith" (string literals)
+    std::string_view field;     // Field name (from parsed filter expression, points into original filter string)
+    std::string_view value;     // Filter value (from parsed filter expression, points into original filter string)
 };
+
+// Helper function to split filter expression by operator and process parts
+inline auto split_and_process_filter_parts(std::string_view expr, std::string_view op_str, std::size_t op_len)
+{
+    auto parts = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    
+    while(true)
+    {
+        auto pos = expr.find(op_str, start);
+        if(pos == std::string_view::npos)
+        {
+            parts.push_back(expr.substr(start));
+            break;
+        }
+        parts.push_back(expr.substr(start, pos - start));
+        start = pos + op_len;
+    }
+    
+    return parts;
+}
 
 // Helper function to parse OData $filter expression and convert to selector
 // Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
 // Supports: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
-// Supports: and, or operators
+// Supports: and operator (OR operator is not yet supported)
 // Returns: pair of (selector, vector of string filters for post-processing)
 inline std::pair<db::object, std::vector<string_filter>> parse_odata_filter(std::string_view filter_expr)
 {
@@ -110,24 +280,14 @@ inline std::pair<db::object, std::vector<string_filter>> parse_odata_filter(std:
     // Example: "startswith(name, 'John')" -> string filter for post-processing
     // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
     
-    auto expr = std::string{filter_expr};
+    // Trim whitespace from filter_expr using string_view
+    auto expr = trim(filter_expr);
     
     // Handle 'and' operator - split and process each part
-    if(expr.contains(" and "s))
+    if(expr.contains(" and "))
     {
-        auto parts = std::vector<std::string>{};
-        auto start = std::size_t{0};
-        while(true)
-        {
-            auto pos = expr.find(" and "s, start);
-            if(pos == std::string::npos)
-            {
-                parts.push_back(expr.substr(start));
-                break;
-            }
-            parts.push_back(expr.substr(start, pos - start));
-            start = pos + 5; // Skip " and "
-        }
+        constexpr auto op_str = " and "sv;
+        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
         
         // Process each part and merge into selector
         for(const auto& part : parts)
@@ -144,228 +304,181 @@ inline std::pair<db::object, std::vector<string_filter>> parse_odata_filter(std:
         return std::make_pair(selector, string_filters);
     }
     
-    // Handle 'or' operator (simpler - just process parts, engine will handle OR logic via match)
-    if(expr.contains(" or "s))
+    // Handle 'or' operator
+    // NOTE: OR operator is not yet supported - YarDB selector model uses AND semantics
+    // Reject queries with OR to avoid confusion
+    if(expr.contains(" or "))
     {
-        // For now, treat OR as AND (can be enhanced later)
-        auto parts = std::vector<std::string>{};
-        auto start = std::size_t{0};
-        while(true)
-        {
-            auto pos = expr.find(" or "s, start);
-            if(pos == std::string::npos)
-            {
-                parts.push_back(expr.substr(start));
-                break;
-            }
-            parts.push_back(expr.substr(start, pos - start));
-            start = pos + 4; // Skip " or "
-        }
-        
-        // Process each part and merge into selector
-        for(const auto& part : parts)
-        {
-            auto [part_selector, part_string_filters] = parse_odata_filter(part);
-            // Merge part_selector into selector by copying fields
-            for(const auto& [key, value] : part_selector.get<db::object::map>())
-            {
-                selector[key] = value;
-            }
-            // Collect string filters
-            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
-        }
-        return std::make_pair(selector, string_filters);
+        throw std::invalid_argument{"OR operator not yet supported in $filter expressions"};
     }
-    
-    // Parse single comparison: "field operator value" or "function(field, 'value')"
-    // Trim whitespace
-    while(!expr.empty() && expr[0] == ' ')
-        expr.erase(0, 1);
-    while(!expr.empty() && expr.back() == ' ')
-        expr.pop_back();
     
     // Check for string functions: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
-    if(expr.starts_with("startswith("s) && expr.back() == ')')
+    constexpr auto startswith_prefix = "startswith("sv;
+    constexpr auto contains_prefix = "contains("sv;
+    constexpr auto endswith_prefix = "endswith("sv;
+    
+    if(expr.starts_with(startswith_prefix) && expr.back() == ')')
     {
         // Parse: startswith(field, 'value')
-        auto inner = expr.substr(11, expr.size() - 12); // Remove "startswith(" and ")"
+        auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
         auto comma_pos = inner.find(',');
-        if(comma_pos == std::string::npos)
-            throw std::invalid_argument{"Invalid startswith expression: "s + expr};
+        if(comma_pos == std::string_view::npos)
+            throw std::invalid_argument{"Invalid startswith expression: " + std::string{expr}};
         
-        auto field = inner.substr(0, comma_pos);
-        // Trim field
-        while(!field.empty() && field.back() == ' ')
-            field.pop_back();
+        auto field = parse_field_from_function_args(inner, comma_pos);
+        auto value = parse_value_from_function_args(inner, comma_pos);
         
-        auto value_str = inner.substr(comma_pos + 1);
-        // Trim value
-        while(!value_str.empty() && value_str[0] == ' ')
-            value_str.erase(0, 1);
-        
-        // Remove quotes
-        if(value_str.size() >= 2 && ((value_str[0] == '\'' && value_str.back() == '\'') || (value_str[0] == '"' && value_str.back() == '"')))
-            value_str = value_str.substr(1, value_str.size() - 2);
-        
-        string_filters.push_back({"startswith"s, field, value_str});
+        string_filters.push_back({"startswith", field, value});
         return std::make_pair(selector, string_filters);
     }
-    else if(expr.starts_with("contains("s) && expr.back() == ')')
+    else if(expr.starts_with(contains_prefix) && expr.back() == ')')
     {
         // Parse: contains(field, 'value')
-        auto inner = expr.substr(9, expr.size() - 10); // Remove "contains(" and ")"
+        auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
         auto comma_pos = inner.find(',');
-        if(comma_pos == std::string::npos)
-            throw std::invalid_argument{"Invalid contains expression: "s + expr};
+        if(comma_pos == std::string_view::npos)
+            throw std::invalid_argument{"Invalid contains expression: " + std::string{expr}};
         
-        auto field = inner.substr(0, comma_pos);
-        // Trim field
-        while(!field.empty() && field.back() == ' ')
-            field.pop_back();
+        auto field = parse_field_from_function_args(inner, comma_pos);
+        auto value = parse_value_from_function_args(inner, comma_pos);
         
-        auto value_str = inner.substr(comma_pos + 1);
-        // Trim value
-        while(!value_str.empty() && value_str[0] == ' ')
-            value_str.erase(0, 1);
-        
-        // Remove quotes
-        if(value_str.size() >= 2 && ((value_str[0] == '\'' && value_str.back() == '\'') || (value_str[0] == '"' && value_str.back() == '"')))
-            value_str = value_str.substr(1, value_str.size() - 2);
-        
-        string_filters.push_back({"contains"s, field, value_str});
+        string_filters.push_back({"contains", field, value});
         return std::make_pair(selector, string_filters);
     }
-    else if(expr.starts_with("endswith("s) && expr.back() == ')')
+    else if(expr.starts_with(endswith_prefix) && expr.back() == ')')
     {
         // Parse: endswith(field, 'value')
-        auto inner = expr.substr(9, expr.size() - 10); // Remove "endswith(" (9 chars) and ")" (1 char)
+        auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
         auto comma_pos = inner.find(',');
-        if(comma_pos == std::string::npos)
-            throw std::invalid_argument{"Invalid endswith expression: "s + expr};
+        if(comma_pos == std::string_view::npos)
+            throw std::invalid_argument{"Invalid endswith expression: " + std::string{expr}};
         
-        auto field = inner.substr(0, comma_pos);
-        // Trim field
-        while(!field.empty() && field.back() == ' ')
-            field.pop_back();
+        auto field = parse_field_from_function_args(inner, comma_pos);
+        auto value = parse_value_from_function_args(inner, comma_pos);
         
-        auto value_str = inner.substr(comma_pos + 1);
-        // Trim value
-        while(!value_str.empty() && value_str[0] == ' ')
-            value_str.erase(0, 1);
-        
-        // Remove quotes
-        if(value_str.size() >= 2 && ((value_str[0] == '\'' && value_str.back() == '\'') || (value_str[0] == '"' && value_str.back() == '"')))
-            value_str = value_str.substr(1, value_str.size() - 2);
-        
-        string_filters.push_back({"endswith"s, field, value_str});
+        string_filters.push_back({"endswith", field, value});
         return std::make_pair(selector, string_filters);
     }
     
     // Find operator for comparison expressions
-    auto op_pos = std::string::npos;
-    auto op = ""s;
+    // Operators are searched in order of specificity (longer first to avoid partial matches)
+    constexpr std::string_view operators[] = {" ge ", " le ", " gt ", " lt ", " ne ", " eq "};
+    constexpr std::string_view op_names[] = {"ge", "le", "gt", "lt", "ne", "eq"};
     
-    if(auto pos = expr.find(" eq "s); pos != std::string::npos)
+    auto op_pos = std::string_view::npos;
+    std::string_view op;
+    
+    for(std::size_t i = 0; i < std::size(operators); ++i)
     {
-        op_pos = pos;
-        op = "eq"s;
-    }
-    else if(auto pos = expr.find(" ne "s); pos != std::string::npos)
-    {
-        op_pos = pos;
-        op = "ne"s;
-    }
-    else if(auto pos = expr.find(" gt "s); pos != std::string::npos)
-    {
-        op_pos = pos;
-        op = "gt"s;
-    }
-    else if(auto pos = expr.find(" ge "s); pos != std::string::npos)
-    {
-        op_pos = pos;
-        op = "ge"s;
-    }
-    else if(auto pos = expr.find(" lt "s); pos != std::string::npos)
-    {
-        op_pos = pos;
-        op = "lt"s;
-    }
-    else if(auto pos = expr.find(" le "s); pos != std::string::npos)
-    {
-        op_pos = pos;
-        op = "le"s;
+        // Operators include spaces (" ge ", " eq ", etc.) so find() is safe - won't match partial words
+        // e.g., "age" won't match " ge " because it lacks the leading space
+        if(auto pos = expr.find(operators[i]); pos != std::string_view::npos)
+        {
+            op_pos = pos;
+            op = op_names[i];
+            break;
+        }
     }
     
-    if(op_pos == std::string::npos)
-        throw std::invalid_argument{"Invalid filter expression: "s + expr};
+    if(op_pos == std::string_view::npos)
+        throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
     
-    auto field = expr.substr(0, op_pos);
-    // Trim field
-    while(!field.empty() && field.back() == ' ')
-        field.pop_back();
+    auto field = trim_end_to_string(expr.substr(0, op_pos));
+    auto value = trim_start_to_string(expr.substr(op_pos + op.size() + 1));
     
-    auto value_str = expr.substr(op_pos + op.size() + 1);
-    // Trim value
-    while(!value_str.empty() && value_str[0] == ' ')
-        value_str.erase(0, 1);
+    // Validate field name is not empty
+    if(field.empty())
+        throw std::invalid_argument{"Field name cannot be empty in filter expression: "s + std::string{expr}};
     
-    // Remove quotes from string values
+    // Remove quotes from string values first
     auto is_string = false;
-    if(value_str.size() >= 2 && value_str[0] == '\'' && value_str.back() == '\'')
+    if(value.size() >= 2 && value[0] == '\'' && value.back() == '\'')
     {
-        value_str = value_str.substr(1, value_str.size() - 2);
+        value = value.substr(1, value.size() - 2);
         is_string = true;
     }
-    else if(value_str.size() >= 2 && value_str[0] == '"' && value_str.back() == '"')
+    else if(value.size() >= 2 && value[0] == '"' && value.back() == '"')
     {
-        value_str = value_str.substr(1, value_str.size() - 2);
+        value = value.substr(1, value.size() - 2);
         is_string = true;
     }
+    
+    // Validate value is not empty (empty strings are allowed for string comparisons)
+    if(value.empty() && !is_string)
+        throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
     
     // Convert to selector format
-    if(op == "eq"s)
+    if(op == "eq")
     {
         if(is_string)
-            selector[field] = value_str;
+            selector[field] = value;
         else
         {
             // Try to parse as number
             try
             {
-                auto num = stoll(value_str);
+                auto num = stoll(value);
                 selector[field] = num;
             }
             catch(...)
             {
-                selector[field] = value_str; // Fallback to string
+                selector[field] = value; // Fallback to string
             }
         }
     }
-    else if(op == "ne"s)
+    else if(op == "ne")
     {
         // YarDB doesn't have $ne, so we'll use a workaround
         // For now, store as string and handle in match logic (or skip)
         throw std::invalid_argument{"$ne operator not yet supported"};
     }
-    else if(op == "gt"s)
+    else if(op == "gt")
     {
-        auto num = stoll(value_str);
-        selector[field] = db::object{{"$gt"s, num}};
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = db::object{{"$gt"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'gt' requires numeric value in filter expression: "s + std::string{expr}};
+        }
     }
-    else if(op == "ge"s)
+    else if(op == "ge")
     {
-        auto num = stoll(value_str);
-        selector[field] = db::object{{"$gte"s, num}};
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = db::object{{"$gte"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'ge' requires numeric value in filter expression: "s + std::string{expr}};
+        }
     }
-    else if(op == "lt"s)
+    else if(op == "lt")
     {
-        auto num = stoll(value_str);
-        selector[field] = db::object{{"$lt"s, num}};
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = db::object{{"$lt"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'lt' requires numeric value in filter expression: "s + std::string{expr}};
+        }
     }
-    else if(op == "le"s)
+    else if(op == "le")
     {
-        auto num = stoll(value_str);
-        selector[field] = db::object{{"$lte"s, num}};
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = db::object{{"$lte"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'le' requires numeric value in filter expression: "s + std::string{expr}};
+        }
     }
     
     return std::make_pair(selector, string_filters);
@@ -375,35 +488,7 @@ inline std::pair<db::object, std::vector<string_filter>> parse_odata_filter(std:
 inline auto apply_select(const db::object& documents, std::string_view select_value)
 {
     // Parse comma-separated field list: "name,email,age"
-    auto fields = std::vector<std::string>{};
-    auto start = std::size_t{0};
-    auto expr = std::string{select_value};
-    
-    while(true)
-    {
-        auto pos = expr.find(',', start);
-        if(pos == std::string::npos)
-        {
-            auto field = expr.substr(start);
-            // Trim whitespace
-            while(!field.empty() && field[0] == ' ')
-                field.erase(0, 1);
-            while(!field.empty() && field.back() == ' ')
-                field.pop_back();
-            if(!field.empty())
-                fields.push_back(field);
-            break;
-        }
-        auto field = expr.substr(start, pos - start);
-        // Trim whitespace
-        while(!field.empty() && field[0] == ' ')
-            field.erase(0, 1);
-        while(!field.empty() && field.back() == ' ')
-            field.pop_back();
-        if(!field.empty())
-            fields.push_back(field);
-        start = pos + 1;
-    }
+    auto fields = parse_comma_separated_list(select_value);
     
     if(fields.empty())
         return documents; // No fields specified, return as-is
@@ -463,32 +548,37 @@ inline auto apply_string_filters(const db::object& documents, const std::vector<
                 break;
             }
             
-            // Get string value from object - direct conversion works like in tests
-            const std::string field_str = field_value;
+            // Get string value from object - use get() to get const reference, then create string_view
+            const std::string_view field = field_value.get<std::string>();
             
-            if(filter.function == "startswith"s)
+            if(filter.function == "startswith")
             {
-                if(!field_str.starts_with(filter.value))
+                if(!field.starts_with(filter.value))
                 {
                     matches = false;
                     break;
                 }
             }
-            else if(filter.function == "contains"s)
+            else if(filter.function == "contains")
             {
-                if(!field_str.contains(filter.value))
+                if(!field.contains(filter.value))
                 {
                     matches = false;
                     break;
                 }
             }
-            else if(filter.function == "endswith"s)
+            else if(filter.function == "endswith")
             {
-                if(!field_str.ends_with(filter.value))
+                if(!field.ends_with(filter.value))
                 {
                     matches = false;
                     break;
                 }
+            }
+            else
+            {
+                // Unknown filter function - reject document to be safe
+                throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
             }
         }
         
@@ -501,47 +591,14 @@ inline auto apply_string_filters(const db::object& documents, const std::vector<
 
 // Helper function to apply $expand to documents
 // For now, this is a placeholder - YarDB doesn't have explicit relationships
-inline auto apply_expand(const db::object& documents, std::string_view expand_value, [[maybe_unused]] const std::string& collection_name, [[maybe_unused]] db::engine& engine)
+inline auto apply_expand(const db::object& documents, [[maybe_unused]] std::string_view expand_value, [[maybe_unused]] const std::string& collection_name, [[maybe_unused]] db::engine& engine)
 {
-    // Parse comma-separated field list: "orders,profile"
-    auto fields = std::vector<std::string>{};
-    auto start = std::size_t{0};
-    auto expr = std::string{expand_value};
-    
-    while(true)
-    {
-        auto pos = expr.find(',', start);
-        if(pos == std::string::npos)
-        {
-            auto field = expr.substr(start);
-            // Trim whitespace
-            while(!field.empty() && field[0] == ' ')
-                field.erase(0, 1);
-            while(!field.empty() && field.back() == ' ')
-                field.pop_back();
-            if(!field.empty())
-                fields.push_back(field);
-            break;
-        }
-        auto field = expr.substr(start, pos - start);
-        // Trim whitespace
-        while(!field.empty() && field[0] == ' ')
-            field.erase(0, 1);
-        while(!field.empty() && field.back() == ' ')
-            field.pop_back();
-        if(!field.empty())
-            fields.push_back(field);
-        start = pos + 1;
-    }
-    
-    if(fields.empty())
-        return documents; // No fields to expand
-    
     // For now, $expand is a placeholder
     // In a real implementation, this would:
-    // 1. Extract IDs from the expand field (e.g., order_ids)
-    // 2. Query the related collection (e.g., orders)
-    // 3. Embed the results
+    // 1. Parse comma-separated field list: "orders,profile"
+    // 2. Extract IDs from the expand field (e.g., order_ids)
+    // 3. Query the related collection (e.g., orders)
+    // 4. Embed the results
     
     // Return documents as-is for now
     return documents;
@@ -627,14 +684,14 @@ private:
                         auto document = xson::json::parse(body);
 
                         const auto guard = std::lock_guard{m_engine};
-                        m_engine.collection(uri.path[1]);
+                        auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
                         m_engine.create(document);
                         
                         // Add Location header pointing to the newly created resource
                         auto response_headers = http::headers{};
-                        const auto collection = uri.path[1];
                         const auto id = static_cast<long long>(document["_id"s]);
-                        response_headers.set("Location", "/"s + std::string{collection} + "/"s + std::to_string(id));
+                        response_headers.set("Location", "/"s + collection + "/"s + std::to_string(id));
                         
                         return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
                     }
@@ -663,7 +720,8 @@ private:
                         auto selector = db::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
-                        m_engine.collection(uri.path[1]);
+                        auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
                         auto found = m_engine.read(selector, documents);
 
                         // Check if document was found
@@ -672,7 +730,7 @@ private:
                             auto error = db::object{
                                 {"error", "Not Found"s},
                                 {"message", "Document not found"s},
-                                {"collection", std::string{uri.path[1]}},
+                                {"collection", collection},
                                 {"id", id}
                             };
                             return std::make_tuple("404 Not Found"s, xson::json::stringify(error));
@@ -713,23 +771,67 @@ private:
                         // Handle $top (OData: $top=n)
                         if(params.contains("$top"s))
                         {
-                            auto top_value = stoll(params["$top"s]);
-                            selector["$top"s] = top_value;
+                            try
+                            {
+                                auto top_value = stoll(params["$top"s]);
+                                if(top_value < 0)
+                                    throw std::invalid_argument{"$top must be non-negative"};
+                                constexpr auto max_top = 10000;
+                                if(top_value > max_top)
+                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(max_top) + ")"};
+                                selector["$top"s] = top_value;
+                            }
+                            catch(const std::exception&)
+                            {
+                                throw std::invalid_argument{"$top must be a valid integer"};
+                            }
                         }
                         
                         // Handle $skip (OData: $skip=n)
                         if(params.contains("$skip"s))
                         {
-                            auto skip_value = stoll(params["$skip"s]);
-                            selector["$skip"s] = skip_value;
+                            try
+                            {
+                                auto skip_value = stoll(params["$skip"s]);
+                                if(skip_value < 0)
+                                    throw std::invalid_argument{"$skip must be non-negative"};
+                                constexpr auto max_skip = 100000;
+                                if(skip_value > max_skip)
+                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(max_skip) + ")"};
+                                selector["$skip"s] = skip_value;
+                            }
+                            catch(const std::exception&)
+                            {
+                                throw std::invalid_argument{"$skip must be a valid integer"};
+                            }
                         }
                         
                         // Handle $orderby (OData: $orderby=field desc or $orderby=field asc)
                         if(params.contains("$orderby"s))
                         {
-                            auto orderby_value = params["$orderby"s];
-                            // Check if it ends with " desc" or "desc"
-                            if(orderby_value.ends_with(" desc"s) || orderby_value == "desc"s)
+                            const auto orderby_value = params["$orderby"s];
+                            auto orderby = trim(std::string_view{orderby_value});
+                            
+                            // Extract field name (remove " desc" or " asc" suffix if present)
+                            auto field_name = orderby;
+                            if(orderby.ends_with(" desc"sv))
+                                field_name = trim(orderby.substr(0, orderby.size() - 5));
+                            else if(orderby.ends_with(" asc"sv))
+                                field_name = trim(orderby.substr(0, orderby.size() - 4));
+                            
+                            // Validate field name
+                            if(field_name.empty())
+                                throw std::invalid_argument{"$orderby field name cannot be empty"};
+                            
+                            constexpr auto max_field_name_length = 256;
+                            if(field_name.size() > max_field_name_length)
+                                throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(max_field_name_length) + " chars)"};
+                            
+                            // Store field name for ordering
+                            selector["$orderby"s] = std::string{field_name};
+                            
+                            // Check if it ends with " desc" or is just "desc"
+                            if(orderby.ends_with(" desc"sv) || orderby == "desc"sv)
                             {
                                 selector["$desc"s] = true;
                             }
@@ -763,7 +865,8 @@ private:
                         }
 
                         const auto guard = std::lock_guard{m_engine};
-                        m_engine.collection(uri.path[1]);
+                        auto collection_name = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection_name);
                         m_engine.read(selector, document);
                         
                         // Post-process: Apply string filters (startswith, contains, endswith)
@@ -781,7 +884,7 @@ private:
                         // Post-process: Apply $expand expansion (result transformation)
                         if(params.contains("$expand"s))
                         {
-                            document = apply_expand(document, params["$expand"s], std::string{uri.path[1]}, m_engine);
+                            document = apply_expand(document, params["$expand"s], collection_name, m_engine);
                         }
                         
                         return std::make_tuple("200 OK"s, xson::json::stringify(document));
@@ -816,13 +919,13 @@ private:
                         auto existing_docs = db::object{};
 
                         const auto guard = std::lock_guard{m_engine};
-                        m_engine.collection(uri.path[1]);
+                        auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
                         
                         // Check if document exists
                         auto exists = m_engine.read(selector, existing_docs);
                         auto response_headers = http::headers{};
-                        const auto collection = uri.path[1];
-                        const auto resource_path = "/"s + std::string{collection} + "/"s + std::to_string(id);
+                        const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
                         
                         if(exists && !existing_docs.get<db::object::array>().empty())
                         {
@@ -872,13 +975,13 @@ private:
                         auto selector = db::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
-                        m_engine.collection(uri.path[1]);
+                        auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
                         m_engine.upsert(selector,updates,documents);
                         
                         // Add Content-Location header for updated resource
                         auto response_headers = http::headers{};
-                        const auto collection = uri.path[1];
-                        response_headers.set("Content-Location", "/"s + std::string{collection} + "/"s + std::to_string(id));
+                        response_headers.set("Content-Location", "/"s + collection + "/"s + std::to_string(id));
                         
                         return std::make_tuple("200 OK"s, xson::json::stringify(documents), std::make_optional(response_headers));
                     }
@@ -907,7 +1010,8 @@ private:
                         auto selector = db::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
-                        m_engine.collection(uri.path[1]);
+                        auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
                         auto deleted = m_engine.destroy(selector,documents);
 
                         if(!deleted)
@@ -915,7 +1019,7 @@ private:
                             auto error = db::object{
                                 {"error", "Not Found"s},
                                 {"message", "Document not found"s},
-                                {"collection", std::string{uri.path[1]}},
+                                {"collection", collection},
                                 {"id", id}
                             };
                             return std::make_tuple("404 Not Found"s, xson::json::stringify(error));

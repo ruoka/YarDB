@@ -915,6 +915,200 @@ auto test_set()
             }
         };
 
+        section("GET with $filter - startswith(name, 'A')") = [setup]
+        {
+            // Create test documents with different names
+            auto test_data = std::vector<std::pair<std::string, std::string>>{
+                {"Alice"s, "alice@example.com"s},
+                {"Bob"s, "bob@test.com"s},
+                {"Charlie"s, "charlie@example.org"s},
+                {"David"s, "david@test.org"s}
+            };
+            
+            for(const auto& [name, email] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/users3"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"("})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/users3"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"("})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Filter: startswith(name, 'A') (should return Alice)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users3?$filter=startswith(name,'A')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at least 1 item (Alice)
+            require_true(items.size() >= 1);
+            
+            // Verify all returned items have names starting with 'A'
+            for(const auto& item : items)
+            {
+                require_true(item.has("name"s));
+                const string name = item["name"s];
+                require_true(name.starts_with("A"s));
+            }
+        };
+
+        section("GET with $filter - contains(email, '@example')") = [setup]
+        {
+            // Filter: contains(email, '@example') (should return Alice and Charlie)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users3?$filter=contains(email,'@example')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at least 2 items (Alice and Charlie)
+            require_true(items.size() >= 2);
+            
+            // Verify all returned items have emails containing '@example'
+            for(const auto& item : items)
+            {
+                require_true(item.has("email"s));
+                const string email = item["email"s];
+                require_true(email.find("@example"s) != std::string::npos);
+            }
+        };
+
+        section("GET with $filter - endswith(path, '.pdf')") = [setup]
+        {
+            // Create test documents with different file paths
+            auto test_data = std::vector<std::tuple<std::string, std::string, std::string>>{
+                {"Alice4"s, "alice@example.com"s, "/documents/file.pdf"s},
+                {"Bob4"s, "bob@test.com"s, "/images/photo.jpg"s},
+                {"Charlie4"s, "charlie@example.org"s, "/documents/report.pdf"s},
+                {"David4"s, "david@test.org"s, "/videos/movie.mp4"s}
+            };
+            
+            for(const auto& [name, email, path] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/users4"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"(", "path":")"s + path + R"("})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/users4"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"(", "path":")"s + path + R"("})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Filter: endswith(path, '.pdf') (should return Alice4 and Charlie4)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users4?$filter=endswith(path,'.pdf')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at least 2 items (Alice4 and Charlie4)
+            require_true(items.size() >= 2);
+            
+            // Verify all returned items have paths ending with '.pdf'
+            for(const auto& item : items)
+            {
+                require_true(item.has("path"s));
+                const string path = item["path"s];
+                require_true(path.ends_with(".pdf"s));
+            }
+        };
+
+        section("GET with $filter - startswith(name, 'C') and endswith(path, '.pdf')") = [setup]
+        {
+            // Combined filter: startswith(name, 'C') and endswith(path, '.pdf')
+            // Should return Charlie4
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users4?$filter=startswith(name,'C')%20and%20endswith(path,'.pdf')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at least 1 item (Charlie4)
+            require_true(items.size() >= 1);
+            
+            // Verify all returned items match both conditions
+            for(const auto& item : items)
+            {
+                require_true(item.has("name"s));
+                require_true(item.has("path"s));
+                const string name = item["name"s];
+                const string path = item["path"s];
+                require_true(name.starts_with("C"s));
+                require_true(path.ends_with(".pdf"s));
+            }
+        };
+
+        section("GET with $filter - contains(email, '@example') and startswith(name, 'A')") = [setup]
+        {
+            // Combined filter: contains(email, '@example') and startswith(name, 'A')
+            // Should return Alice
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/users3?$filter=contains(email,'@example')%20and%20startswith(name,'A')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            
+            // Should have at least 1 item (Alice)
+            require_true(items.size() >= 1);
+            
+            // Verify all returned items match both conditions
+            for(const auto& item : items)
+            {
+                require_true(item.has("name"s));
+                require_true(item.has("email"s));
+                const string name = item["name"s];
+                const string email = item["email"s];
+                require_true(name.starts_with("A"s));
+                require_true(email.find("@example"s) != std::string::npos);
+            }
+        };
+
         section("GET with $expand (placeholder - should return as-is)") = [setup]
         {
             // $expand is a placeholder, should return documents unchanged

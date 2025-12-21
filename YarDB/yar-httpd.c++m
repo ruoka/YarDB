@@ -15,199 +15,347 @@ using namespace net;
 inline auto stoll(std::string_view sv)
 {
     auto ll = 0ll;
-    std::from_chars(sv.begin(),sv.end(),ll);
+    auto [ptr, ec] = std::from_chars(sv.begin(),sv.end(),ll);
+    if(ec != std::errc() || ptr != sv.end())
+        throw std::invalid_argument{"Invalid ID format: "s + std::string{sv}};
     return ll;
 }
 
+class rest_api_server
+{
+public:
+    rest_api_server(std::string_view file, std::string_view port_or_service) :
+        m_file{file},
+        m_port_or_service{port_or_service},
+        m_engine{file}
+    {
+        setup_routes();
+    }
+
+    void start()
+    {
+        if(m_listen_thread.joinable())
+            return; // Already started
+        
+        m_listen_thread = std::thread{[this]()
+        {
+            m_server.listen(m_port_or_service);
+        }};
+    }
+
+    void stop()
+    {
+        // Signal the server to stop
+        m_server.stop();
+        // Wait for the listen thread to finish
+        if(m_listen_thread.joinable())
+        {
+            m_listen_thread.join();
+        }
+    }
+
+    // For backward compatibility - blocks forever
+    void listen()
+    {
+        m_server.listen(m_port_or_service);
+    }
+
+    ~rest_api_server()
+    {
+        stop(); // Stop server and wait for thread to finish
+    }
+
+private:
+    void setup_routes()
+    {
+        // List all collections
+        m_server.get("/"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "GET /: "<< request << flush;
+
+                    const auto guard = std::lock_guard{m_engine};
+                    return std::make_tuple("200 OK"s, xson::json::stringify({"collections", m_engine.collections()}));
+                });
+
+        // Create
+        m_server.post("/[a-z]+"s).response_with_headers(
+            "application/json"sv,
+            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "POST /[a-z]+: "<< request << " <- " << body << flush;
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto document = xson::json::parse(body);
+
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.collection(uri.path[1]);
+                        m_engine.create(document);
+                        
+                        // Add Location header pointing to the newly created resource
+                        auto response_headers = http::headers{};
+                        const auto collection = uri.path[1];
+                        const auto id = static_cast<long long>(document["_id"s]);
+                        response_headers.set("Location", "/"s + std::string{collection} + "/"s + std::to_string(id));
+                        
+                        return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                    }
+                });
+
+        // Read _id
+        m_server.get("/[a-z]+/[0-9]+"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto id = stoll(uri.path[2]);
+                        auto documents = db::object{};
+                        auto selector = db::object{"_id", id};
+
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.collection(uri.path[1]);
+                        auto found = m_engine.read(selector, documents);
+
+                        // Check if document was found
+                        if(!found || documents.get<db::object::array>().empty())
+                        {
+                            auto error = db::object{
+                                {"error", "Not Found"s},
+                                {"message", "Document not found"s},
+                                {"collection", std::string{uri.path[1]}},
+                                {"id", id}
+                            };
+                            return std::make_tuple("404 Not Found"s, xson::json::stringify(error));
+                        }
+
+                        // Return single object (first element of array)
+                        auto document = documents.get<db::object::array>()[0];
+                        return std::make_tuple("200 OK"s, xson::json::stringify(document));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                    }
+                });
+
+        // Read all is ascending order
+        m_server.get("/[a-z]+"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "GET /[a-z]+: " << request << flush;
+
+                    auto uri = http::uri{request};
+                    auto document = db::object{};
+                    auto selector = db::object{};
+
+                    const auto guard = std::lock_guard{m_engine};
+                    m_engine.collection(uri.path[1]);
+                    m_engine.read(selector, document);
+                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
+                });
+
+        // Read first
+        m_server.get("/[a-z]+\\?\\$top"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "GET /[a-z]+\\?\\$top: "<< request << flush;
+
+                    auto uri = http::uri{request};
+                    auto document = db::object{};
+                    auto selector = db::object{"$top",1ll};
+
+                    const auto guard = std::lock_guard{m_engine};
+                    m_engine.collection(uri.path[1]);
+                    m_engine.read(selector, document);
+                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
+                });
+
+        // Read all in descending order
+        m_server.get("/[a-z]+\\?\\$desc"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "GET /[a-z]+\\?\\$desc: "<< request << flush;
+
+                    auto uri = http::uri{request};
+                    auto document = db::object{};
+                    auto selector = db::object{"$desc",true};
+
+                    const auto guard = std::lock_guard{m_engine};
+                    m_engine.collection(uri.path[1]);
+                    m_engine.read(selector, document);
+                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
+                });
+
+        // Read last
+        m_server.get("/[a-z]+\\?\\$desc&\\$top"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "GET /[a-z]+\\$desc&\\$top: "<< request << flush;
+
+                    auto uri = http::uri{request};
+                    auto document = db::object{};
+                    auto selector = db::object{{"$desc",true},{"$top",1ll}};
+
+                    const auto guard = std::lock_guard{m_engine};
+                    m_engine.collection(uri.path[1]);
+                    m_engine.read(selector, document);
+                    return std::make_tuple("200 OK"s, xson::json::stringify(document));
+                });
+
+        // Update aka replace _id
+        m_server.put("/[a-z]+/[0-9]+"s).response(
+            "application/json"sv,
+            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto document = xson::json::parse(body);
+                        auto id = stoll(uri.path[2]);
+                        auto selector = db::object{"_id", id};
+
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.collection(uri.path[1]);
+                        m_engine.replace(selector,document);
+                        return std::make_tuple("200 OK"s, xson::json::stringify(document));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                    }
+                });
+
+        // Update aka modify _id
+        m_server.patch("/[a-z]+/[0-9]+"s).response(
+            "application/json"sv,
+            [this](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto updates = xson::json::parse(body);
+                        auto documents = db::object{};
+                        auto id = stoll(uri.path[2]);
+                        auto selector = db::object{"_id", id};
+
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.collection(uri.path[1]);
+                        m_engine.upsert(selector,updates,documents);
+                        return std::make_tuple("200 OK"s, xson::json::stringify(documents));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                    }
+                });
+
+        // Delete _id
+        m_server.destroy("/[a-z]+/[0-9]+"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
+
+                    try
+                    {
+                        auto uri = http::uri{request};
+                        auto id = stoll(uri.path[2]);
+                        auto documents = db::object{};
+                        auto selector = db::object{"_id", id};
+
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.collection(uri.path[1]);
+                        auto deleted = m_engine.destroy(selector,documents);
+
+                        if(!deleted)
+                        {
+                            auto error = db::object{
+                                {"error", "Not Found"s},
+                                {"message", "Document not found"s},
+                                {"collection", std::string{uri.path[1]}},
+                                {"id", id}
+                            };
+                            return std::make_tuple("404 Not Found"s, xson::json::stringify(error));
+                        }
+
+                        // Return 204 No Content for successful deletion
+                        return std::make_tuple("204 No Content"s, ""s);
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = db::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error));
+                    }
+                });
+
+        // Delete first
+        m_server.destroy("/[a-z]+\\?\\$top"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+                {
+                    slog << debug << "DELETE /[a-z]+?\\$top: " << request << flush;
+
+                    auto uri = http::uri{request};
+                    auto documents = db::object{};
+                    auto selector = db::object{"$top",1ll};
+
+                    const auto guard = std::lock_guard{m_engine};
+                    m_engine.collection(uri.path[1]);
+                    m_engine.destroy(selector,documents);
+                    return std::make_tuple("200 OK"s, xson::json::stringify(documents));
+                });
+    }
+
+    std::string m_file;
+    std::string m_port_or_service;
+    ext::lockable<db::engine> m_engine;
+    http::server m_server;
+    std::thread m_listen_thread;
+};
+
+// Backward compatibility wrapper function (blocks forever)
 export void restful_web_server(std::string_view file, const std::string_view port_or_service)
 {
-    auto server = http::server{};
-
-    auto engine = ext::lockable<db::engine>{file};
-
-    // List all collections
-    server.get("/"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "GET /: "<< request << flush;
-
-                const auto guard = std::lock_guard{engine};
-                return std::make_tuple("200 OK"s, xson::json::stringify({"collections", engine.collections()}));
-            });
-
-    // Create
-    server.post("/[a-z]+"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "POST /[a-z]+: "<< request << " <- " << body << flush;
-
-                auto uri = http::uri{request};
-                auto document = xson::json::parse(body);
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.create(document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-    // Read _id
-    server.get("/[a-z]+/[0-9]+"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
-
-                auto uri = http::uri{request};
-                auto document = db::object{};
-                auto selector = db::object{"_id", stoll(uri.path[2])};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.read(selector, document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-
-    // Read all is ascending order
-    server.get("/[a-z]+"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "GET /[a-z]+: " << request << flush;
-
-                auto uri = http::uri{request};
-                auto document = db::object{};
-                auto selector = db::object{};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.read(selector, document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-    // Read first
-    server.get("/[a-z]+\\?\\$top"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "GET /[a-z]+\\?\\$top: "<< request << flush;
-
-                auto uri = http::uri{request};
-                auto document = db::object{};
-                auto selector = db::object{"$top",1ll};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.read(selector, document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-    // Read all in descending order
-    server.get("/[a-z]+\\?\\$desc"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "GET /[a-z]+\\?\\$desc: "<< request << flush;
-
-                auto uri = http::uri{request};
-                auto document = db::object{};
-                auto selector = db::object{"$desc",true};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.read(selector, document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-    // Read last
-    server.get("/[a-z]+\\?\\$desc&\\$top"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "GET /[a-z]+\\$desc&\\$top: "<< request << flush;
-
-                auto uri = http::uri{request};
-                auto document = db::object{};
-                auto selector = db::object{{"$desc",true},{"$top",1ll}};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.read(selector, document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-    // Update aka replace _id
-    server.put("/[a-z]+/[0-9]+"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
-
-                auto uri = http::uri{request};
-                auto document = xson::json::parse(body);
-                auto selector = db::object{"_id",stoll(uri.path[2])};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.replace(selector,document);
-                return std::make_tuple("200 OK"s, xson::json::stringify(document));
-            });
-
-    // Update aka modify _id
-    server.patch("/[a-z]+/[0-9]+"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
-
-                auto uri = http::uri{request};
-                auto updates = xson::json::parse(body);
-                auto documents = db::object{};
-                auto selector = db::object{"_id",stoll(uri.path[2])};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.upsert(selector,updates,documents);
-                return std::make_tuple("200 OK"s, xson::json::stringify(documents));
-            });
-
-    // Delete _id
-    server.destroy("/[a-z]+/[0-9]+"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
-
-                auto uri = http::uri{request};
-                auto documents = db::object{};
-                auto selector = db::object{"_id",stoll(uri.path[2])};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.destroy(selector,documents);
-                return std::make_tuple("200 OK"s, xson::json::stringify(documents));
-            });
-
-    // Delete first
-    server.destroy("/[a-z]+\\?\\$top"s).response(
-        "application/json"sv,
-        [&engine](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
-            {
-                slog << debug << "DELETE /[a-z]+?\\$top: " << request << flush;
-
-                auto uri = http::uri{request};
-                auto documents = db::object{};
-                auto selector = db::object{"$top",1ll};
-
-                const auto guard = std::lock_guard{engine};
-                engine.collection(uri.path[1]);
-                engine.destroy(selector,documents);
-                return std::make_tuple("200 OK"s, xson::json::stringify(documents));
-            });
-
-    server.listen(port_or_service);
+    auto server = rest_api_server{file, port_or_service};
+    server.listen(); // Blocks forever
 }
 
 } // namespace db

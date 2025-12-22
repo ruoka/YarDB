@@ -1197,6 +1197,98 @@ auto test_set()
             require_eq(error_msg, "Bad Request"s);
             require_true(error.has("message"s));
         };
+
+        section("GET with $count=true returns count only") = [setup]
+        {
+            // Create test documents
+            auto test_data = std::vector<std::pair<std::string, int>>{
+                {"CountUser1"s, 25},
+                {"CountUser2"s, 30},
+                {"CountUser3"s, 35}
+            };
+            
+            for(const auto& [name, age] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->get_port(), "POST"s, "/counttest"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->get_port(), "POST"s, "/counttest"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+            
+            // Get count with $count=true
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/counttest?$count=true"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            // Response should be just a number (JSON number)
+            // Parse as integer
+            auto count = std::stoll(response_body);
+            require_true(count >= 3); // Should have at least 3 documents we just created
+            
+            // Verify it matches the actual count by getting all documents
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/counttest"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_eq(static_cast<long long>(items.size()), count);
+        };
+
+        section("GET with $count=true and $filter returns filtered count") = [setup]
+        {
+            // Count with filter: age gt 25 (should return count of users with age > 25)
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/counttest?$count=true&$filter=age%20gt%2025"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            // Response should be just a number
+            auto count = std::stoll(response_body);
+            require_true(count >= 2); // Should have at least 2 documents (CountUser2 age 30, CountUser3 age 35)
+            
+            // Verify it matches the filtered count
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/counttest?$filter=age%20gt%2025"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_eq(static_cast<long long>(items.size()), count);
+        };
+
+        section("GET with $count=true on empty collection returns 0") = [setup]
+        {
+            // Count on empty collection
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "GET"s, "/emptycollection?$count=true"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            // Response should be "0"
+            require_eq(response_body, "0"s);
+        };
     };
 
     test_case("HEAD method and Accept header content negotiation") = []

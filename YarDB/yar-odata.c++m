@@ -1,0 +1,519 @@
+export module yar:odata;
+import :helper;
+import :engine;
+import :constants;
+import std;
+import net;
+import xson;
+
+// OData protocol support for HTTP server
+// This module contains all OData-specific functionality
+
+namespace yar::http::odata {
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+using namespace net;
+using namespace yar::http::helpers; // Use functions from helper module
+
+// Enum for OData metadata level
+enum class metadata_level
+{
+    none,           // No metadata (plain JSON)
+    minimal,        // Only @odata.context
+    full            // All metadata (@odata.context, @odata.type, @odata.id, etc.)
+};
+
+// Helper function to parse OData metadata level from Accept header
+// Returns the metadata level requested, or 'none' if not specified
+// Note: Header values are already normalized (lowercase) by the http::headers class
+inline auto parse_metadata_level(const ::http::headers& headers) -> metadata_level
+{
+    if(!headers.contains("accept"s))
+        return metadata_level::none;
+    
+    const auto accept_value = headers["accept"s];
+    
+    // Check for odata=fullmetadata
+    if(accept_value.contains("odata=fullmetadata"s))
+        return metadata_level::full;
+    
+    // Check for odata=minimalmetadata
+    if(accept_value.contains("odata=minimalmetadata"s))
+        return metadata_level::minimal;
+    
+    // Check for odata=nometadata (explicit no metadata)
+    if(accept_value.contains("odata=nometadata"s))
+        return metadata_level::none;
+    
+    // Default: no metadata
+    return metadata_level::none;
+}
+
+// Helper function to add OData metadata to a document based on metadata level
+// For minimal metadata: adds @odata.context
+// For full metadata: adds @odata.context, @odata.id, @odata.editLink
+inline auto add_metadata(xson::object document, metadata_level level, 
+                         std::string_view collection_name,
+                         std::optional<long long> id = std::nullopt) -> xson::object
+{
+    if(level == metadata_level::none)
+        return document; // No metadata needed
+    
+    // OData context format:
+    // - For entity sets (arrays): /$metadata#EntitySetName
+    // - For single entities: /$metadata#EntitySetName/$entity
+    auto context_url = "/$metadata#"s + std::string{collection_name};
+    if(id.has_value())
+        context_url += "/$entity"s; // Single entity
+    
+    if(level == metadata_level::minimal)
+    {
+        // Minimal metadata: only @odata.context
+        document["@odata.context"s] = context_url;
+        return document;
+    }
+    
+    // Full metadata: @odata.context, @odata.id, @odata.editLink
+    document["@odata.context"s] = context_url;
+    
+    if(id.has_value())
+    {
+        auto resource_path = "/"s + std::string{collection_name} + "/"s + std::to_string(id.value());
+        document["@odata.id"s] = resource_path;
+        document["@odata.editLink"s] = resource_path;
+    }
+    
+    return document;
+}
+
+// Helper function to add OData metadata to an array response
+// Wraps the array in an object with @odata.context and "value" array
+// For full metadata, also adds metadata to each item in the array
+inline auto add_metadata_to_array(xson::object document, metadata_level level,
+                                   std::string_view collection_name) -> xson::object
+{
+    if(level == metadata_level::none)
+        return document; // No metadata needed
+    
+    if(!document.is_array())
+        return document; // Not an array, return as-is
+    
+    // Wrap array in object with @odata.context and value
+    auto context_url = "/$metadata#"s + std::string{collection_name};
+    auto wrapped = xson::object{};
+    wrapped["@odata.context"s] = context_url;
+    wrapped["value"s] = document;
+    
+    // For full metadata, also add metadata to each item
+    if(level == metadata_level::full)
+    {
+        auto& items = wrapped["value"s].get<xson::object::array>();
+        for(auto& item : items)
+        {
+            if(item.has("_id"s))
+            {
+                auto item_id = static_cast<long long>(item["_id"s]);
+                item = add_metadata(item, level, collection_name, item_id);
+            }
+        }
+    }
+    
+    return wrapped;
+}
+
+// Helper function to extract field name from function arguments (e.g., "field, 'value'" -> "field")
+constexpr auto parse_field_from_function_args(std::string_view args, std::size_t comma_pos)
+{
+    return trim_end(args.substr(0, comma_pos));
+}
+
+// Helper function to extract value without quotes from function arguments (e.g., "field, 'value'" -> "value")
+constexpr auto parse_value_from_function_args(std::string_view args, std::size_t comma_pos)
+{
+    auto value_trimmed = trim_start(args.substr(comma_pos + 1));
+    
+    // Remove quotes if present using string_view operations
+    if(value_trimmed.size() >= 2)
+    {
+        if((value_trimmed.starts_with('\'') && value_trimmed.ends_with('\'')) ||
+           (value_trimmed.starts_with('"') && value_trimmed.ends_with('"')))
+        {
+            return value_trimmed.substr(1, value_trimmed.size() - 2);
+        }
+    }
+    
+    return value_trimmed;
+}
+
+// String filter function type for post-processing
+export struct string_filter
+{
+    std::string_view function;  // "startswith", "contains", "endswith" (string literals)
+    std::string_view field;     // Field name (from parsed filter expression, points into original filter string)
+    std::string_view value;     // Filter value (from parsed filter expression, points into original filter string)
+};
+
+// Helper function to split filter expression by operator and process parts
+inline auto split_and_process_filter_parts(std::string_view expr, std::string_view op_str, std::size_t op_len)
+{
+    auto parts = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    
+    while(true)
+    {
+        auto pos = expr.find(op_str, start);
+        if(pos == std::string_view::npos)
+        {
+            parts.push_back(expr.substr(start));
+            break;
+        }
+        parts.push_back(expr.substr(start, pos - start));
+        start = pos + op_len;
+    }
+    
+    return parts;
+}
+
+// Helper function to parse OData $filter expression and convert to selector
+// Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
+// Supports: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
+// Supports: and operator (OR operator is not yet supported)
+// Returns: pair of (selector, vector of string filters for post-processing)
+inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::string_view filter_expr)
+{
+    auto selector = xson::object{};
+    auto string_filters = std::vector<string_filter>{};
+    
+    // Simple parser for basic OData filter expressions
+    // Example: "age gt 25" -> {"age": {"$gt": 25}}
+    // Example: "name eq 'John'" -> {"name": "John"}
+    // Example: "startswith(name, 'John')" -> string filter for post-processing
+    // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
+    
+    // Trim whitespace from filter_expr using string_view
+    auto expr = trim(filter_expr);
+    
+    // Handle 'and' operator - split and process each part
+    if(expr.contains(" and "))
+    {
+        constexpr auto op_str = " and "sv;
+        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
+        
+        // Process each part and merge into selector
+        for(const auto& part : parts)
+        {
+            auto [part_selector, part_string_filters] = parse_filter(part);
+            // Merge part_selector into selector by copying fields
+            for(const auto& [key, value] : part_selector.get<db::object::map>())
+            {
+                selector[key] = value;
+            }
+            // Collect string filters
+            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
+        }
+        return std::make_pair(selector, string_filters);
+    }
+    
+    // Handle 'or' operator
+    // NOTE: OR operator is not yet supported - YarDB selector model uses AND semantics
+    // Reject queries with OR to avoid confusion
+    if(expr.contains(" or "))
+    {
+        throw std::invalid_argument{"OR operator not yet supported in $filter expressions"};
+    }
+    
+    // Check for string functions: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
+    constexpr auto startswith_prefix = "startswith("sv;
+    constexpr auto contains_prefix = "contains("sv;
+    constexpr auto endswith_prefix = "endswith("sv;
+    
+    if(expr.starts_with(startswith_prefix) && expr.back() == ')')
+    {
+        // Parse: startswith(field, 'value')
+        auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
+        auto comma_pos = inner.find(',');
+        if(comma_pos == std::string_view::npos)
+            throw std::invalid_argument{"Invalid startswith expression: " + std::string{expr}};
+        
+        auto field = parse_field_from_function_args(inner, comma_pos);
+        auto value = parse_value_from_function_args(inner, comma_pos);
+        
+        string_filters.push_back({"startswith", field, value});
+        return std::make_pair(selector, string_filters);
+    }
+    else if(expr.starts_with(contains_prefix) && expr.back() == ')')
+    {
+        // Parse: contains(field, 'value')
+        auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
+        auto comma_pos = inner.find(',');
+        if(comma_pos == std::string_view::npos)
+            throw std::invalid_argument{"Invalid contains expression: " + std::string{expr}};
+        
+        auto field = parse_field_from_function_args(inner, comma_pos);
+        auto value = parse_value_from_function_args(inner, comma_pos);
+        
+        string_filters.push_back({"contains", field, value});
+        return std::make_pair(selector, string_filters);
+    }
+    else if(expr.starts_with(endswith_prefix) && expr.back() == ')')
+    {
+        // Parse: endswith(field, 'value')
+        auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
+        auto comma_pos = inner.find(',');
+        if(comma_pos == std::string_view::npos)
+            throw std::invalid_argument{"Invalid endswith expression: " + std::string{expr}};
+        
+        auto field = parse_field_from_function_args(inner, comma_pos);
+        auto value = parse_value_from_function_args(inner, comma_pos);
+        
+        string_filters.push_back({"endswith", field, value});
+        return std::make_pair(selector, string_filters);
+    }
+    
+    // Find operator for comparison expressions
+    // Operators are searched in order of specificity (longer first to avoid partial matches)
+    constexpr std::string_view operators[] = {" ge ", " le ", " gt ", " lt ", " ne ", " eq "};
+    constexpr std::string_view op_names[] = {"ge", "le", "gt", "lt", "ne", "eq"};
+    
+    auto op_pos = std::string_view::npos;
+    std::string_view op;
+    
+    for(std::size_t i = 0; i < std::size(operators); ++i)
+    {
+        // Operators include spaces (" ge ", " eq ", etc.) so find() is safe - won't match partial words
+        // e.g., "age" won't match " ge " because it lacks the leading space
+        if(auto pos = expr.find(operators[i]); pos != std::string_view::npos)
+        {
+            op_pos = pos;
+            op = op_names[i];
+            break;
+        }
+    }
+    
+    if(op_pos == std::string_view::npos)
+        throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
+    
+    auto field = trim_end_to_string(expr.substr(0, op_pos));
+    auto value = trim_start_to_string(expr.substr(op_pos + op.size() + 1));
+    
+    // Validate field name is not empty
+    if(field.empty())
+        throw std::invalid_argument{"Field name cannot be empty in filter expression: "s + std::string{expr}};
+    
+    // Remove quotes from string values first
+    auto is_string = false;
+    if(value.size() >= 2 && value[0] == '\'' && value.back() == '\'')
+    {
+        value = value.substr(1, value.size() - 2);
+        is_string = true;
+    }
+    else if(value.size() >= 2 && value[0] == '"' && value.back() == '"')
+    {
+        value = value.substr(1, value.size() - 2);
+        is_string = true;
+    }
+    
+    // Validate value is not empty (empty strings are allowed for string comparisons)
+    if(value.empty() && !is_string)
+        throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
+    
+    // Convert to selector format
+    if(op == "eq")
+    {
+        if(is_string)
+            selector[field] = value;
+        else
+        {
+            // Try to parse as number
+            try
+            {
+                auto num = stoll(value);
+                selector[field] = num;
+            }
+            catch(...)
+            {
+                selector[field] = value; // Fallback to string
+            }
+        }
+    }
+    else if(op == "ne")
+    {
+        // YarDB doesn't have $ne, so we'll use a workaround
+        // For now, store as string and handle in match logic (or skip)
+        throw std::invalid_argument{"$ne operator not yet supported"};
+    }
+    else if(op == "gt")
+    {
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = xson::object{{"$gt"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'gt' requires numeric value in filter expression: "s + std::string{expr}};
+        }
+    }
+    else if(op == "ge")
+    {
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = xson::object{{"$gte"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'ge' requires numeric value in filter expression: "s + std::string{expr}};
+        }
+    }
+    else if(op == "lt")
+    {
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = xson::object{{"$lt"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'lt' requires numeric value in filter expression: "s + std::string{expr}};
+        }
+    }
+    else if(op == "le")
+    {
+        try
+        {
+            auto num = stoll(value);
+            selector[field] = xson::object{{"$lte"s, num}};
+        }
+        catch(const std::exception&)
+        {
+            throw std::invalid_argument{"Numeric operator 'le' requires numeric value in filter expression: "s + std::string{expr}};
+        }
+    }
+    
+    return std::make_pair(selector, string_filters);
+}
+
+// Helper function to apply $select projection to documents
+inline auto apply_select(const xson::object& documents, std::string_view select_value)
+{
+    // Parse comma-separated field list: "name,email,age"
+    auto fields = parse_comma_separated_list(select_value);
+    
+    if(fields.empty())
+        return documents; // No fields specified, return as-is
+    
+    // Apply projection
+    if(!documents.is_array())
+        return documents; // Not an array, return as-is
+    
+    auto result = xson::object{xson::object::array{}};
+    const auto& docs = documents.get<xson::object::array>();
+    
+    for(const auto& doc : docs)
+    {
+        auto projected = xson::object{};
+        // Always include _id if present
+        if(doc.has("_id"s))
+            projected["_id"s] = doc["_id"s];
+        
+        // Include requested fields
+        for(const auto& field : fields)
+        {
+            if(doc.has(field))
+                projected[field] = doc[field];
+        }
+        
+        result += std::move(projected);
+    }
+    
+    return result;
+}
+
+// Helper function to apply string filters to documents (post-processing)
+inline auto apply_string_filters(const xson::object& documents, const std::vector<string_filter>& filters)
+{
+    if(filters.empty() || !documents.is_array())
+        return documents;
+    
+    auto result = xson::object{xson::object::array{}};
+    const auto& docs = documents.get<xson::object::array>();
+    
+    for(const auto& doc : docs)
+    {
+        auto matches = true;
+        
+        for(const auto& filter : filters)
+        {
+            if(!doc.has(filter.field))
+            {
+                matches = false;
+                break;
+            }
+            
+            const auto field_value = doc[filter.field];
+            if(!field_value.is_string())
+            {
+                matches = false;
+                break;
+            }
+            
+            // Get string value from object - use get() to get const reference, then create string_view
+            const std::string_view field = field_value.get<std::string>();
+            
+            if(filter.function == "startswith")
+            {
+                if(!field.starts_with(filter.value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            else if(filter.function == "contains")
+            {
+                if(!field.contains(filter.value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            else if(filter.function == "endswith")
+            {
+                if(!field.ends_with(filter.value))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+            else
+            {
+                // Unknown filter function - reject document to be safe
+                throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+            }
+        }
+        
+        if(matches)
+            result += doc;
+    }
+    
+    return result;
+}
+
+// Helper function to apply $expand to documents
+// For now, this is a placeholder - YarDB doesn't have explicit relationships
+inline auto apply_expand(const xson::object& documents, [[maybe_unused]] std::string_view expand_value, [[maybe_unused]] const std::string& collection_name, [[maybe_unused]] yar::db::engine& engine)
+{
+    // For now, $expand is a placeholder
+    // In a real implementation, this would:
+    // 1. Parse comma-separated field list: "orders,profile"
+    // 2. Extract IDs from the expand field (e.g., order_ids)
+    // 3. Query the related collection (e.g., orders)
+    // 4. Embed the results
+    
+    // Return documents as-is for now
+    return documents;
+}
+
+} // namespace yar::http::odata
+

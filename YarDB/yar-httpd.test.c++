@@ -1291,6 +1291,229 @@ auto test_set()
         };
     };
 
+    test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes") = []
+    {
+        const auto test_file = "./httpd_test_indexes.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("PUT /_db/{collection_name} creates index configuration") = [setup]
+        {
+            // Create some test documents first
+            auto [post_status1, _unused1, _unused2, post_body1] = make_request(
+                setup->get_port(), "POST"s, "/indextest"s, R"({"name":"Alice","email":"alice@example.com","status":"active"})"s
+            );
+            require_eq(post_status1, "201"s);
+            
+            auto [post_status2, _unused3, _unused4, post_body2] = make_request(
+                setup->get_port(), "POST"s, "/indextest"s, R"({"name":"Bob","email":"bob@example.com","status":"inactive"})"s
+            );
+            require_eq(post_status2, "201"s);
+            
+            // Add secondary indexes
+            auto [status, reason, headers, response_body] = make_request(
+                setup->get_port(), "PUT"s, "/_db/indextest"s, R"({"keys":["email","status"]})"s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            
+            // Verify response contains index configuration
+            auto config = json::parse(response_body);
+            require_true(config.has("collection"s));
+            require_eq(config["collection"s].get<string>(), "indextest"s);
+            require_true(config.has("keys"s));
+            auto keys = config["keys"s].get<object::array>();
+            require_eq(keys.size(), 2u);
+            
+            // Verify Location header
+            require_true(headers.contains("location"s));
+            require_eq(headers["location"s], "/_db/indextest"s);
+        };
+
+        section("PUT /_db/{collection_name} with invalid keys returns 400") = [setup]
+        {
+            // Missing keys field
+            auto [status1, reason1, _unused1, body1] = make_request(
+                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({})"s
+            );
+            require_eq(status1, "400"s);
+            auto error1 = json::parse(body1);
+            require_eq(error1["error"s].get<string>(), "Bad Request"s);
+            
+            // Keys not an array
+            auto [status2, reason2, _unused2, body2] = make_request(
+                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":"email"})"s
+            );
+            require_eq(status2, "400"s);
+            auto error2 = json::parse(body2);
+            require_eq(error2["error"s].get<string>(), "Bad Request"s);
+            
+            // Empty keys array
+            auto [status3, reason3, _unused3, body3] = make_request(
+                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":[]})"s
+            );
+            require_eq(status3, "400"s);
+            auto error3 = json::parse(body3);
+            require_eq(error3["error"s].get<string>(), "Bad Request"s);
+            
+            // Invalid key (not a string)
+            auto [status4, reason4, _unused4, body4] = make_request(
+                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":[123]})"s
+            );
+            require_eq(status4, "400"s);
+            auto error4 = json::parse(body4);
+            require_eq(error4["error"s].get<string>(), "Bad Request"s);
+            
+            // Reserved field name
+            auto [status5, reason5, _unused5, body5] = make_request(
+                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":["_id"]})"s
+            );
+            require_eq(status5, "400"s);
+            auto error5 = json::parse(body5);
+            require_eq(error5["error"s].get<string>(), "Bad Request"s);
+        };
+
+        section("PUT /_db/{collection_name} enables querying by indexed fields") = [setup]
+        {
+            // Create test documents
+            auto [post_status1, _unused1, _unused2, post_body1] = make_request(
+                setup->get_port(), "POST"s, "/querytest"s, R"({"name":"User1","email":"user1@test.com","age":25})"s
+            );
+            require_eq(post_status1, "201"s);
+            
+            auto [post_status2, _unused3, _unused4, post_body2] = make_request(
+                setup->get_port(), "POST"s, "/querytest"s, R"({"name":"User2","email":"user2@test.com","age":30})"s
+            );
+            require_eq(post_status2, "201"s);
+            
+            // Add index on email field
+            auto [put_status, _unused5, _unused6, _unused7] = make_request(
+                setup->get_port(), "PUT"s, "/_db/querytest"s, R"({"keys":["email"]})"s
+            );
+            require_eq(put_status, "200"s);
+            
+            // Query by indexed field
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->get_port(), "GET"s, "/querytest?$filter=email%20eq%20'user1@test.com'"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(items[0]["email"s].get<string>(), "user1@test.com"s);
+        };
+
+        section("PATCH /_db/{collection_name} adds indexes incrementally") = [setup]
+        {
+            // First, add some indexes with PUT
+            auto [put_status1, _unused1, _unused2, put_body1] = make_request(
+                setup->get_port(), "PUT"s, "/_db/patchtest"s, R"({"keys":["email"]})"s
+            );
+            require_eq(put_status1, "200"s);
+            auto config1 = json::parse(put_body1);
+            auto keys1 = config1["keys"s].get<object::array>();
+            require_eq(keys1.size(), 1u);
+            
+            // PATCH to add more indexes
+            auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
+                setup->get_port(), "PATCH"s, "/_db/patchtest"s, R"({"keys":["status","age"]})"s
+            );
+            require_eq(patch_status, "200"s);
+            
+            // Verify all indexes are present (email + status + age)
+            auto config2 = json::parse(patch_body);
+            auto keys2 = config2["keys"s].get<object::array>();
+            require_eq(keys2.size(), 3u);
+            
+            // Verify Location header
+            require_true(patch_headers.contains("location"s));
+            require_eq(patch_headers["location"s], "/_db/patchtest"s);
+        };
+
+        section("PATCH /_db/{collection_name} ignores duplicate keys") = [setup]
+        {
+            // Add indexes with PUT
+            auto [put_status, _unused1, _unused2, _unused3] = make_request(
+                setup->get_port(), "PUT"s, "/_db/duptest"s, R"({"keys":["email","status"]})"s
+            );
+            require_eq(put_status, "200"s);
+            
+            // PATCH with duplicate keys (email already exists)
+            auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
+                setup->get_port(), "PATCH"s, "/_db/duptest"s, R"({"keys":["email","age"]})"s
+            );
+            require_eq(patch_status, "200"s);
+            
+            // Verify only new key (age) was added, email was not duplicated
+            auto config = json::parse(patch_body);
+            auto keys = config["keys"s].get<object::array>();
+            require_eq(keys.size(), 3u); // email, status, age
+            
+            // Verify all three keys are present
+            auto keys_set = std::set<string>{};
+            for(const auto& key : keys)
+                keys_set.insert(key.get<string>());
+            require_true(keys_set.contains("email"s));
+            require_true(keys_set.contains("status"s));
+            require_true(keys_set.contains("age"s));
+        };
+
+        section("PATCH /_db/{collection_name} with all duplicate keys returns existing config") = [setup]
+        {
+            // Add indexes with PUT
+            auto [put_status, _unused1, _unused2, put_body] = make_request(
+                setup->get_port(), "PUT"s, "/_db/allduptest"s, R"({"keys":["email","status"]})"s
+            );
+            require_eq(put_status, "200"s);
+            auto original_config = json::parse(put_body);
+            
+            // PATCH with all duplicate keys
+            auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
+                setup->get_port(), "PATCH"s, "/_db/allduptest"s, R"({"keys":["email","status"]})"s
+            );
+            require_eq(patch_status, "200"s);
+            
+            // Should return existing configuration unchanged
+            auto config = json::parse(patch_body);
+            require_eq(config["collection"s].get<string>(), original_config["collection"s].get<string>());
+            auto keys = config["keys"s].get<object::array>();
+            auto original_keys = original_config["keys"s].get<object::array>();
+            require_eq(keys.size(), original_keys.size());
+        };
+
+        section("PUT /_db/{collection_name} with invalid Accept header returns 406") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->get_port());
+            stream << "PUT /_db/accepttest HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->get_port() << crlf
+                   << "Accept: application/xml" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << R"({"keys":["email"]})"s.length() << crlf
+                   << crlf << R"({"keys":["email"]})"s << flush;
+            
+            auto [status, reason, headers, body] = parse_http_response(stream, "PUT"s);
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+
+        section("PATCH /_db/{collection_name} with invalid Accept header returns 406") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->get_port());
+            stream << "PATCH /_db/accepttest2 HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->get_port() << crlf
+                   << "Accept: application/xml" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << R"({"keys":["email"]})"s.length() << crlf
+                   << crlf << R"({"keys":["email"]})"s << flush;
+            
+            auto [status, reason, headers, body] = parse_http_response(stream, "PATCH"s);
+            require_eq(status, "406"s);
+            require_eq(reason, "Not Acceptable"s);
+        };
+    };
+
     test_case("HEAD method and Accept header content negotiation") = []
     {
         const auto test_file = "./httpd_head_test.db";

@@ -83,13 +83,7 @@ private:
 
                     // Check Accept header
                     if(!accepts_json(headers))
-                    {
-                        auto error = xson::object{
-                            {"error", "Not Acceptable"s},
-                            {"message", "Only application/json is supported"s}
-                        };
-                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
+                        return not_acceptable_response_with_headers();
 
                     try
                     {
@@ -564,6 +558,346 @@ private:
                     }
                 });
 
+        // PUT /_db/{collection_name} - Add/update secondary indexes for a collection
+        m_server.put("/_db/[a-z][a-z0-9]*"s).response_with_headers(
+            "application/json"sv,
+            [this](std::string_view request, std::string_view body, const ::http::headers& headers)
+                {
+                    slog << debug << "PUT /_db/[a-z]+: "<< request << " <- " << body << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response_with_headers();
+
+                    try
+                    {
+                        auto uri = ::http::uri{request};
+                        auto request_body = xson::json::parse(body);
+                        
+                        // Validate request body has "keys" field
+                        if(!request_body.has("keys"s))
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body must contain 'keys' field with array of field names"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        // Extract and validate keys
+                        auto keys_value = request_body["keys"s];
+                        if(!keys_value.is_array())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' must be an array of field names"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        auto keys_array = keys_value.get<xson::object::array>();
+                        if(keys_array.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' array cannot be empty"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        // Convert keys array to vector of strings
+                        auto keys = std::vector<std::string>{};
+                        for(const auto& key : keys_array)
+                        {
+                            if(!key.is_string())
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "All keys must be strings"s}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                            
+                            auto key_str = static_cast<std::string>(key);
+                            // Validate key name (basic validation)
+                            if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                            
+                            // Don't allow reserved field names
+                            if(key_str == yar::db::reserved_field_id)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Cannot index reserved field: "s + key_str}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                            
+                            keys.push_back(key_str);
+                        }
+                        
+                        // Extract collection name from path (e.g., /_db/users -> users)
+                        auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
+                        
+                        const auto guard = std::lock_guard{m_engine};
+                        
+                        // Switch to target collection
+                        m_engine.collection(collection_name);
+                        
+                        // Add keys to index (this updates the index structure)
+                        m_engine.index(keys);
+                        
+                        // Reindex to populate the new indexes
+                        m_engine.reindex();
+                        
+                        // Get the updated _db document to return
+                        auto selector = xson::object{"collection"s, collection_name};
+                        auto db_documents = xson::object{};
+                        m_engine.collection("_db"s); // Switch to _db collection
+                        auto found = m_engine.read(selector, db_documents);
+                        m_engine.collection(collection_name); // Restore original collection
+                        
+                        if(!found || db_documents.get<xson::object::array>().empty())
+                        {
+                            // This shouldn't happen, but handle it gracefully
+                            auto error = xson::object{
+                                {"error", "Internal Server Error"s},
+                                {"message", "Failed to retrieve index configuration after update"s}
+                            };
+                            return std::make_tuple("500 Internal Server Error"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        auto result_document = db_documents.get<xson::object::array>()[0];
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                        {
+                            auto doc_id = static_cast<long long>(result_document["_id"s]);
+                            result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+                        }
+                        
+                        // Determine if this was a create (201) or update (200)
+                        // We can check if the document was just created by checking if it's the first one
+                        // For simplicity, we'll return 200 OK (the index() method uses upsert)
+                        auto response_headers = ::http::headers{};
+                        response_headers.set("location"s, "/_db/"s + collection_name);
+                        
+                        return std::make_tuple("200 OK"s, xson::json::stringify(result_document), std::make_optional(response_headers));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = xson::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                    }
+                });
+
+        // PATCH /_db/{collection_name} - Add secondary indexes incrementally (merge with existing)
+        m_server.patch("/_db/[a-z][a-z0-9]*"s).response_with_headers(
+            "application/json"sv,
+            [this](std::string_view request, std::string_view body, const ::http::headers& headers)
+                {
+                    slog << debug << "PATCH /_db/[a-z]+: "<< request << " <- " << body << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response_with_headers();
+
+                    try
+                    {
+                        auto uri = ::http::uri{request};
+                        auto request_body = xson::json::parse(body);
+                        
+                        // Validate request body has "keys" field
+                        if(!request_body.has("keys"s))
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body must contain 'keys' field with array of field names"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        // Extract and validate keys
+                        auto keys_value = request_body["keys"s];
+                        if(!keys_value.is_array())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' must be an array of field names"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        auto keys_array = keys_value.get<xson::object::array>();
+                        if(keys_array.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' array cannot be empty"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        // Extract collection name from path
+                        auto collection_name = validate_collection_name(uri.path[2]);
+                        
+                        const auto guard = std::lock_guard{m_engine};
+                        
+                        // Get existing keys from _db collection (if any)
+                        auto selector = xson::object{"collection"s, collection_name};
+                        auto existing_docs = xson::object{};
+                        m_engine.collection("_db"s);
+                        auto has_existing = m_engine.read(selector, existing_docs);
+                        
+                        // Build set of existing keys to avoid duplicates
+                        auto existing_keys_set = std::set<std::string>{};
+                        if(has_existing && !existing_docs.get<xson::object::array>().empty())
+                        {
+                            auto existing_doc = existing_docs.get<xson::object::array>()[0];
+                            if(existing_doc.has("keys"s))
+                            {
+                                auto existing_keys_array = existing_doc["keys"s].get<xson::object::array>();
+                                for(const auto& key : existing_keys_array)
+                                {
+                                    if(key.is_string())
+                                        existing_keys_set.insert(static_cast<std::string>(key));
+                                }
+                            }
+                        }
+                        
+                        // Convert new keys array to vector, validating and deduplicating
+                        auto new_keys = std::vector<std::string>{};
+                        for(const auto& key : keys_array)
+                        {
+                            if(!key.is_string())
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "All keys must be strings"s}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                            
+                            auto key_str = static_cast<std::string>(key);
+                            
+                            // Validate key name
+                            if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                            
+                            // Don't allow reserved field names
+                            if(key_str == yar::db::reserved_field_id)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Cannot index reserved field: "s + key_str}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                            
+                            // Only add if not already in existing keys (deduplicate)
+                            if(existing_keys_set.find(key_str) == existing_keys_set.end())
+                            {
+                                new_keys.push_back(key_str);
+                                existing_keys_set.insert(key_str); // Track for this request too
+                            }
+                        }
+                        
+                        // If no new keys to add, return existing document
+                        if(new_keys.empty())
+                        {
+                            if(has_existing && !existing_docs.get<xson::object::array>().empty())
+                            {
+                                auto result_document = existing_docs.get<xson::object::array>()[0];
+                                
+                                // Add OData metadata if requested
+                                auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                                if(metadata_level != yar::http::odata::metadata_level::none)
+                                {
+                                    auto doc_id = static_cast<long long>(result_document["_id"s]);
+                                    result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+                                }
+                                
+                                auto response_headers = ::http::headers{};
+                                response_headers.set("location"s, "/_db/"s + collection_name);
+                                return std::make_tuple("200 OK"s, xson::json::stringify(result_document), std::make_optional(response_headers));
+                            }
+                            else
+                            {
+                                // No existing document and no new keys - this shouldn't happen but handle gracefully
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "All specified keys already exist or no keys to add"s}
+                                };
+                                return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                            }
+                        }
+                        
+                        // Switch to target collection
+                        m_engine.collection(collection_name);
+                        
+                        // Add new keys to index (this merges with existing)
+                        m_engine.index(new_keys);
+                        
+                        // Reindex to populate the new indexes
+                        m_engine.reindex();
+                        
+                        // Get the updated _db document to return
+                        m_engine.collection("_db"s);
+                        auto db_documents = xson::object{};
+                        auto found = m_engine.read(selector, db_documents);
+                        m_engine.collection(collection_name); // Restore original collection
+                        
+                        if(!found || db_documents.get<xson::object::array>().empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Internal Server Error"s},
+                                {"message", "Failed to retrieve index configuration after update"s}
+                            };
+                            return std::make_tuple("500 Internal Server Error"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        auto result_document = db_documents.get<xson::object::array>()[0];
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                        {
+                            auto doc_id = static_cast<long long>(result_document["_id"s]);
+                            result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+                        }
+                        
+                        auto response_headers = ::http::headers{};
+                        response_headers.set("location"s, "/_db/"s + collection_name);
+                        
+                        // Return 200 OK for update (PATCH is always an update operation)
+                        return std::make_tuple("200 OK"s, xson::json::stringify(result_document), std::make_optional(response_headers));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = xson::object{
+                            {"error", "Bad Request"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                    }
+                });
+
         // HEAD /collection - Get collection headers (same as GET but no body)
         // Note: We compute the full response to get correct Content-Length header
         // Framework will use content.length() for Content-Length but won't send body for HEAD
@@ -713,13 +1047,7 @@ private:
 
                     // Check Accept header
                     if(!accepts_json(headers))
-                    {
-                        auto error = xson::object{
-                            {"error", "Not Acceptable"s},
-                            {"message", "Only application/json is supported"s}
-                        };
-                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
+                        return not_acceptable_response_with_headers();
 
                     try
                     {
@@ -845,13 +1173,7 @@ private:
 
                     // Check Accept header
                     if(!accepts_json(headers))
-                    {
-                        auto error = xson::object{
-                            {"error", "Not Acceptable"s},
-                            {"message", "Only application/json is supported"s}
-                        };
-                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
+                        return not_acceptable_response_with_headers();
 
                     try
                     {

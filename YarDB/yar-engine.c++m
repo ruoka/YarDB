@@ -167,6 +167,13 @@ public:
 
 private:
 
+    // First pass: Set up index structure by discovering secondary keys from _db collection
+    // and updating sequence counters for all documents
+    void setup_index_structure();
+
+    // Second pass: Populate indexes with document positions
+    void populate_indexes();
+
     std::string m_db;
 
     std::string m_collection;

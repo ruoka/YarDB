@@ -78,8 +78,8 @@ yar::db::engine::engine(std::string_view db) :
         m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
     if(!m_storage.is_open())
         throw std::runtime_error{"Failed to open/create DB "s + m_db};
-    reindex();
-    reindex(); // Intentional double
+    setup_index_structure();
+    populate_indexes();
 }
 
 yar::db::engine::engine(yar::db::engine&& e) :
@@ -94,7 +94,9 @@ yar::db::engine::~engine()
     ::unlock(m_db);
 }
 
-void yar::db::engine::reindex()
+// First pass: Set up index structure by discovering secondary keys from _db collection
+// and updating sequence counters for all documents
+void yar::db::engine::setup_index_structure()
 {
     using xson::fson::operator >>;
 
@@ -112,24 +114,52 @@ void yar::db::engine::reindex()
 
         auto& index = m_index[metadata.collection];
 
+        // Update sequence counter for all documents
         index.update(document);
 
+        // Process _db collection documents to set up secondary keys for other collections
+        if(metadata.collection == "_db"s)
+        {
+            auto collection = document["collection"s];
+            auto keys = document["keys"s];
+            auto temp = std::vector<std::string>{};
+            for(const auto& k : keys.get<yar::db::object::array>())
+                temp.push_back(k);
+
+            m_index[collection].add(temp);
+        }
+    }
+}
+
+// Second pass: Populate indexes with document positions
+void yar::db::engine::populate_indexes()
+{
+    using xson::fson::operator >>;
+
+    m_storage.clear();
+    m_storage.seekg(0, m_storage.beg);
+
+    while(m_storage)
+    {
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        m_storage >> metadata >> document;
+
+        if(m_storage.fail())
+            break;
+
+        // Skip deleted or updated documents (they're not in the current index)
         if(metadata.status == metadata::deleted || metadata.status == metadata::updated)
             continue;
 
+        auto& index = m_index[metadata.collection];
         index.insert(document, metadata.position);
-
-        if(metadata.collection != "_db"s)
-            continue;
-
-        auto collection = document["collection"s];
-        auto keys = document["keys"s];
-        auto temp = std::vector<std::string>{};
-        for(const auto& k : keys.get<yar::db::object::array>())
-            temp.push_back(k);
-
-        m_index[collection].add(temp);
     }
+}
+
+void yar::db::engine::reindex()
+{
+    populate_indexes();
 }
 
 void yar::db::engine::index(std::vector<std::string> keys)

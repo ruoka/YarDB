@@ -41,14 +41,14 @@ public:
 private:
     std::string file;
     std::string port;
-    db::rest_api_server server;
+    yar::http::rest_api_server server;
 };
 
 // Helper function to parse HTTP status line and headers
 auto parse_http_response(net::endpointstream& stream, const string& method = ""s)
 {
     auto version = ""s, status_code = ""s, reason = ""s;
-    auto headers = http::headers{};
+    auto headers = ::http::headers{};
     auto body = ""s;
 
     // Read status line: "HTTP/1.1 201 Created\r\n"
@@ -1528,7 +1528,7 @@ auto test_set()
             require_true(response["value"s].is_array());
             
             // Items in array should NOT have metadata (minimal only adds context at root)
-            auto& items = response["value"s].get<db::object::array>();
+            auto& items = response["value"s].get<xson::object::array>();
             require_false(items.empty());
             require_false(items[0].has("@odata.context"s));
         };
@@ -1549,7 +1549,7 @@ auto test_set()
             
             // Should have value array
             require_true(response.has("value"s));
-            auto& items = response["value"s].get<db::object::array>();
+            auto& items = response["value"s].get<xson::object::array>();
             require_false(items.empty());
             
             // Each item should have full metadata
@@ -1573,7 +1573,7 @@ auto test_set()
                 setup->get_port(), "GET"s, "/odatatest"s, ""s
             );
             auto all_docs = json::parse(get_body);
-            auto& items = all_docs.get<db::object::array>();
+            auto& items = all_docs.get<xson::object::array>();
             require_false(items.empty());
             auto doc_id = static_cast<long long>(items[0]["_id"s]);
             
@@ -1602,7 +1602,7 @@ auto test_set()
                 setup->get_port(), "GET"s, "/odatatest"s, ""s
             );
             auto all_docs = json::parse(get_body);
-            auto& items = all_docs.get<db::object::array>();
+            auto& items = all_docs.get<xson::object::array>();
             require_false(items.empty());
             auto doc_id = static_cast<long long>(items[0]["_id"s]);
             
@@ -1726,7 +1726,7 @@ auto test_set()
             if(document.is_array())
             {
                 // If array, check first element has metadata
-                auto& items = document.get<db::object::array>();
+                auto& items = document.get<xson::object::array>();
                 require_false(items.empty());
                 require_true(items[0].has("@odata.context"s));
             }

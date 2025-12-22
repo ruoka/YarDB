@@ -27,7 +27,7 @@ private:
     std::string file;
 };
 
-void dump(db::engine& engine)
+void dump(yar::db::engine& engine)
 {
     auto all = object{}, documents = object{};
     engine.read(all, documents);
@@ -46,7 +46,7 @@ auto test_set()
 
         section("Create1") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 selector = object{},
                 documents = object{};
@@ -61,7 +61,7 @@ auto test_set()
 
         section("Create9") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             engine.collection("Create9"s);
             for(auto i = 1u; i < 10u; ++i)
             {
@@ -78,7 +78,7 @@ auto test_set()
 
         section("ReadEmptyCollection") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto selector = object{}, documents = object{};
             engine.collection("ReadEmptyCollection"s);
             require_false(engine.read(selector, documents));
@@ -88,7 +88,7 @@ auto test_set()
 
         section("UpdateEmptyCollection") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto selector = object{}, document = object{}, documents = object{};
             engine.collection("UpdateEmptyCollection"s);
             require_false(engine.update(selector, document));
@@ -99,7 +99,7 @@ auto test_set()
 
         section("Update1ByID") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 4}, {"D"s, 5}, {"E"s, 6}},
                 selector = object{"_id"s, 1ll},
@@ -117,7 +117,7 @@ auto test_set()
 
         section("Update2ByValue") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document3 = object{{"A"s, 3}, {"B"s, 3}, {"C"s, 4}},
@@ -146,7 +146,7 @@ auto test_set()
 
         section("Update1ByKey") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 2}, {"B"s, 2}, {"C"s, 3}},
                 document3 = object{{"A"s, 3}, {"B"s, 3}, {"C"s, 4}},
@@ -177,7 +177,7 @@ auto test_set()
 
         section("DestroyEmptyCollection") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto selector = object{"id"s, 1ll},
                 documents = object{};
             engine.collection("DestroyEmptyCollection"s);
@@ -189,7 +189,7 @@ auto test_set()
 
         section("Destroy1ByID") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document3 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
@@ -214,7 +214,7 @@ auto test_set()
 
         section("Destroy2ByValue") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document3 = object{{"A"s, 2}, {"B"s, 3}, {"C"s, 4}},
@@ -240,7 +240,7 @@ auto test_set()
 
         section("History") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}},
                 document2 = object{{"A"s, 1}, {"B"s, 2}},
                 document3 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
@@ -268,7 +268,7 @@ auto test_set()
 
         section("Create2Collections") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"D"s, 4}, {"E"s, 5}, {"F"s, 6}},
                 document3 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
@@ -301,7 +301,7 @@ auto test_set()
 
         section("Create2Keys") = [test_file]
         {
-            auto engine = db::engine{test_file};
+            auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 4}, {"C"s, 3}},
                 document2 = object{{"A"s, 2}, {"B"s, 5}, {"C"s, 3}},
                 document3 = object{{"A"s, 3}, {"B"s, 6}, {"C"s, 3}},

@@ -74,7 +74,7 @@ try
     }
 
     slog << notice << "Starting up server" << flush;
-    db::restful_web_server(file, service_or_port);
+    yar::http::restful_web_server(file, service_or_port);
     slog << notice << "Shutting down server" << flush;
     return 0;
 }

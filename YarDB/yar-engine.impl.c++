@@ -44,14 +44,14 @@ inline void lock(std::string_view db)
 
 // Helper template to extract metadata value from first matching document
 template<typename T, typename Extractor>
-auto get_metadata_value_impl(std::fstream& storage, const db::index_view& view, const db::object& selector, Extractor extractor) -> std::optional<T>
+auto get_metadata_value_impl(std::fstream& storage, const yar::db::index_view& view, const yar::db::object& selector, Extractor extractor) -> std::optional<T>
 {
     using xson::fson::operator >>;
     
     for(const auto position : view)
     {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
         storage.clear();
         storage.seekg(position, storage.beg);
         storage >> metadata >> document;
@@ -66,7 +66,7 @@ auto get_metadata_value_impl(std::fstream& storage, const db::index_view& view, 
 
 } // namespace
 
-db::engine::engine(std::string_view db) :
+yar::db::engine::engine(std::string_view db) :
     m_db{db},
     m_collection{"_db"s},
     m_index{},
@@ -82,19 +82,19 @@ db::engine::engine(std::string_view db) :
     reindex(); // Intentional double
 }
 
-db::engine::engine(db::engine&& e) :
+yar::db::engine::engine(yar::db::engine&& e) :
     m_db{std::move(e.m_db)},
     m_collection{std::move(e.m_collection)},
     m_index{std::move(e.m_index)},
     m_storage{std::move(e.m_storage)}
 {}
 
-db::engine::~engine()
+yar::db::engine::~engine()
 {
     ::unlock(m_db);
 }
 
-void db::engine::reindex()
+void yar::db::engine::reindex()
 {
     using xson::fson::operator >>;
 
@@ -103,8 +103,8 @@ void db::engine::reindex()
 
     while(m_storage)
     {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
         m_storage >> metadata >> document;
 
         if(m_storage.fail())
@@ -125,31 +125,31 @@ void db::engine::reindex()
         auto collection = document["collection"s];
         auto keys = document["keys"s];
         auto temp = std::vector<std::string>{};
-        for(const auto& k : keys.get<object::array>())
+        for(const auto& k : keys.get<yar::db::object::array>())
             temp.push_back(k);
 
         m_index[collection].add(temp);
     }
 }
 
-void db::engine::index(std::vector<std::string> keys)
+void yar::db::engine::index(std::vector<std::string> keys)
 {
     auto& index = m_index[m_collection];
     index.add(keys);
-    auto selector = db::object{"collection"s, m_collection};
-    auto document = db::object{selector, {"keys"s, index.keys()}};
+    auto selector = yar::db::object{"collection"s, m_collection};
+    auto document = yar::db::object{selector, {"keys"s, index.keys()}};
     auto collection = "_db"s;
     std::swap(collection, m_collection);
     upsert(selector, document);
     std::swap(collection, m_collection);
 };
 
-bool db::engine::create(db::object& document)
+bool yar::db::engine::create(yar::db::object& document)
 {
     using xson::fson::operator <<;
 
     auto& index = m_index[m_collection];
-    auto metadata = db::metadata{m_collection};
+    auto metadata = yar::db::metadata{m_collection};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     index.update(document);
@@ -164,12 +164,12 @@ bool db::engine::create(db::object& document)
     return true;
 }
 
-bool db::engine::read(const db::object& selector, db::object& documents)
+bool yar::db::engine::read(const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;
 
-    documents = db::object{db::object::array{}};
-    auto top = std::numeric_limits<sequence_type>::max();
+    documents = yar::db::object{yar::db::object::array{}};
+    auto top = std::numeric_limits<yar::db::sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
 
@@ -182,8 +182,8 @@ bool db::engine::read(const db::object& selector, db::object& documents)
 
     for(const auto position : index.view(selector))
     {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
         m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
@@ -205,32 +205,32 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     return success;
 }
 
-std::optional<std::chrono::system_clock::time_point> db::engine::get_metadata_timestamp(const db::object& selector) const
+std::optional<std::chrono::system_clock::time_point> yar::db::engine::get_metadata_timestamp(const yar::db::object& selector) const
 {
     const auto it = m_index.find(m_collection);
     if(it == m_index.end())
         return std::nullopt;
     const auto& index = it->second;
     return get_metadata_value_impl<std::chrono::system_clock::time_point>(
-        m_storage, index.view(selector), selector, [](const db::metadata& m) { return m.timestamp; });
+        m_storage, index.view(selector), selector, [](const yar::db::metadata& m) { return m.timestamp; });
 }
 
-std::optional<std::int64_t> db::engine::get_metadata_position(const db::object& selector) const
+std::optional<std::int64_t> yar::db::engine::get_metadata_position(const yar::db::object& selector) const
 {
     const auto it = m_index.find(m_collection);
     if(it == m_index.end())
         return std::nullopt;
     const auto& index = it->second;
     return get_metadata_value_impl<std::int64_t>(
-        m_storage, index.view(selector), selector, [](const db::metadata& m) { return m.position; });
+        m_storage, index.view(selector), selector, [](const yar::db::metadata& m) { return m.position; });
 }
 
-bool db::engine::update(const db::object& selector, const db::object& updates, db::object& documents)
+bool yar::db::engine::update(const yar::db::object& selector, const yar::db::object& updates, yar::db::object& documents)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
 
-    documents = db::object{db::object::array{}};
+    documents = yar::db::object{yar::db::object::array{}};
     auto success = false;
     auto& index = m_index[m_collection];
 
@@ -238,8 +238,8 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
     {
         using namespace xson::fson;
 
-        auto metadata = db::metadata{};
-        auto old_document = db::object{};
+        auto metadata = yar::db::metadata{};
+        auto old_document = yar::db::object{};
         m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> old_document;
@@ -247,7 +247,7 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
         {
             m_storage.clear();
             m_storage.seekp(position, m_storage.beg);
-            m_storage << updated;
+            m_storage << yar::db::updated;
 
             auto new_document = updates;
             new_document += std::move(old_document);
@@ -269,12 +269,12 @@ bool db::engine::update(const db::object& selector, const db::object& updates, d
     return success;
 }
 
-bool db::engine::destroy(const db::object& selector, db::object& documents)
+bool yar::db::engine::destroy(const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;
 
-    documents = db::object{db::object::array{}};
-    auto top = std::numeric_limits<sequence_type>::max();
+    documents = yar::db::object{yar::db::object::array{}};
+    auto top = std::numeric_limits<yar::db::sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
 
@@ -283,8 +283,8 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
 
     for(const auto position : index.view(selector))
     {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
         m_storage.clear();
         m_storage.seekg(position, m_storage.beg);
         m_storage >> metadata >> document;
@@ -292,7 +292,7 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
         {
             m_storage.clear();
             m_storage.seekp(position, m_storage.beg);
-            m_storage << deleted;
+            m_storage << yar::db::deleted;
             documents += std::move(document);
             success = true;
 
@@ -303,25 +303,25 @@ bool db::engine::destroy(const db::object& selector, db::object& documents)
     if(success)
         m_storage.flush();
 
-    for(const auto& document : documents.get<object::array>())
+    for(const auto& document : documents.get<yar::db::object::array>())
         index.erase(document);
 
     return success;
 }
 
-bool db::engine::history(const db::object& selector, db::object& documents)
+bool yar::db::engine::history(const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;
 
-    documents = db::object{db::object::array{}};
+    documents = yar::db::object{yar::db::object::array{}};
     auto success = false;
     const auto& index = m_index[m_collection];
 
     for(auto position : index.view(selector))
         while(position >= 0)
         {
-            auto metadata = db::metadata{};
-            auto document = db::object{};
+            auto metadata = yar::db::metadata{};
+            auto document = yar::db::object{};
             m_storage.clear();
             m_storage.seekg(position, m_storage.beg);
             m_storage >> metadata >> document;

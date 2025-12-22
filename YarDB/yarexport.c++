@@ -46,8 +46,8 @@ try
 
     while(storage)
     {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
         storage >> metadata >> document;
         if(storage)
             clog << json::stringify(

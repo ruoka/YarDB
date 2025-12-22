@@ -3,7 +3,7 @@ import :index;
 import std;
 import xson;
 
-export namespace db {
+export namespace yar::db {
 
 using object = xson::object;
 
@@ -42,26 +42,26 @@ public:
     // Automatically assigns _id if not present
     // @param document Document to create (may be modified to add _id)
     // @return true if successful, false on I/O error
-    bool create(db::object& document);
+    bool create(object& document);
 
     // Read documents matching the selector from the current collection
     // Supports OData query parameters: $top, $skip, $filter, $orderby, $select
     // @param selector Query selector (can include OData parameters)
     // @param documents Output array of matching documents
     // @return true if any documents found, false otherwise
-    bool read(const db::object& selector, db::object& documents);
+    bool read(const object& selector, object& documents);
     
     // Get metadata timestamp for the first document matching the selector
     // Used for Last-Modified HTTP header generation
     // @param selector Query selector to find document
     // @return Timestamp if document found, std::nullopt otherwise
-    std::optional<std::chrono::system_clock::time_point> get_metadata_timestamp(const db::object& selector) const;
+    std::optional<std::chrono::system_clock::time_point> get_metadata_timestamp(const object& selector) const;
     
     // Get metadata position for the first document matching the selector
     // Used for ETag HTTP header generation
     // @param selector Query selector to find document
     // @return Position if document found, std::nullopt otherwise
-    std::optional<std::int64_t> get_metadata_position(const db::object& selector) const;
+    std::optional<std::int64_t> get_metadata_position(const object& selector) const;
 
     // Update documents matching the selector
     // Merges updates with existing document fields (existing fields preserved unless overridden)
@@ -70,14 +70,14 @@ public:
     // @param updates Fields to update/add (merged with existing document)
     // @param documents Output array of updated documents
     // @return true if any documents updated, false otherwise
-    bool update(const db::object& selector, const db::object& updates, db::object& documents);
+    bool update(const object& selector, const object& updates, object& documents);
 
     // Delete documents matching the selector
     // Documents are marked as deleted but remain in storage for history tracking
     // @param selector Query selector to find documents to delete
     // @param documents Output array of deleted documents
     // @return true if any documents deleted, false otherwise
-    bool destroy(const db::object& selector, db::object& documents);
+    bool destroy(const object& selector, object& documents);
 
 //  Chain of updates
 
@@ -86,7 +86,7 @@ public:
     // @param selector Query selector to find documents
     // @param documents Output array of all document versions in reverse chronological order
     // @return true if any documents found, false otherwise
-    bool history(const db::object& selector, db::object& documents);
+    bool history(const object& selector, object& documents);
 
 //  For convenience
 
@@ -95,7 +95,7 @@ public:
     // @param updates Document fields (used for update or create)
     // @param documents Output array of updated/created documents
     // @return true if document updated or created
-    bool upsert(const db::object& selector, db::object& updates, db::object& documents)
+    bool upsert(const object& selector, object& updates, object& documents)
     {
         return update(selector, updates, documents) || create(updates);
     }
@@ -104,7 +104,7 @@ public:
     // @param selector Query selector to find existing document
     // @param updates Document fields (used for update or create)
     // @return true if document updated or created
-    bool upsert(const db::object& selector, db::object& updates)
+    bool upsert(const object& selector, object& updates)
     {
         return update(selector, updates) || create(updates);
     }
@@ -114,7 +114,7 @@ public:
     // @param selector Query selector to find document to replace
     // @param document New document to create (will have same _id as replaced document)
     // @return true if document replaced, false if not found
-    bool replace(const db::object& selector, db::object& document)
+    bool replace(const object& selector, object& document)
     {
         return destroy(selector) && create(document);
     }
@@ -123,18 +123,18 @@ public:
     // @param selector Query selector to find documents to update
     // @param updates Fields to update/add
     // @return true if any documents updated, false otherwise
-    bool update(const db::object& selector, const db::object& updates)
+    bool update(const object& selector, const object& updates)
     {
-        auto documents = db::object{};
+        auto documents = object{};
         return update(selector, updates, documents);
     }
 
     // Delete documents matching the selector (without returning documents)
     // @param selector Query selector to find documents to delete
     // @return true if any documents deleted, false otherwise
-    bool destroy(const db::object& selector)
+    bool destroy(const object& selector)
     {
-        auto documents = db::object{};
+        auto documents = object{};
         return destroy(selector, documents);
     }
 
@@ -171,9 +171,9 @@ private:
 
     std::string m_collection;
 
-    std::map<std::string,db::index> m_index;
+    std::map<std::string, yar::db::index> m_index;
 
     mutable std::fstream m_storage;
 };
 
-} // namespace db
+} // namespace yar::db

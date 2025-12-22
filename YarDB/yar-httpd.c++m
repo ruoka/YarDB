@@ -1,1019 +1,21 @@
 export module yar:httpd;
 import :engine;
 import :constants;
+import :helper;
+import :odata;
 import std;
 import net;
 import xson;
 
 // https://www.odata.org/odata-services/
 
-namespace db {
+namespace yar::http {
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
-
-inline auto stoll(std::string_view sv)
-{
-    auto ll = 0ll;
-    auto [ptr, ec] = std::from_chars(sv.begin(),sv.end(),ll);
-    if(ec == std::errc::result_out_of_range)
-        throw std::invalid_argument{"Number out of range: "s + std::string{sv}};
-    if(ec != std::errc() || ptr != sv.end())
-        throw std::invalid_argument{"Invalid ID format: "s + std::string{sv}};
-    return ll;
-}
-
-// Helper function to validate collection name from URI
-// Collection names must: start with a letter, contain only lowercase letters/digits/underscore, max 256 chars
-inline auto validate_collection_name(std::string_view collection_name)
-{
-    if(collection_name.empty())
-        throw std::invalid_argument{"Collection name cannot be empty"};
-    
-    if(collection_name.size() > db::max_collection_name_length)
-        throw std::invalid_argument{"Collection name too long (max "s + std::to_string(db::max_collection_name_length) + " chars)"};
-    
-    // Must start with a letter
-    if(collection_name[0] < 'a' || collection_name[0] > 'z')
-        throw std::invalid_argument{"Collection name must start with a lowercase letter"};
-    
-    // Must contain only lowercase letters, digits, and underscores
-    for(auto c : collection_name)
-    {
-        if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
-            throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
-    }
-    
-    return std::string{collection_name};
-}
-
-// Helper function to trim leading whitespace from a string_view (handles space, tab, newline, carriage return)
-constexpr auto trim_start(std::string_view sv)
-{
-    auto start = sv.find_first_not_of(" \t\n\r");
-    return start == std::string_view::npos ? sv : sv.substr(start);
-}
-
-// Helper function to trim trailing whitespace from a string_view (handles space, tab, newline, carriage return)
-constexpr auto trim_end(std::string_view sv)
-{
-    auto end = sv.find_last_not_of(" \t\n\r");
-    return end == std::string_view::npos ? sv : sv.substr(0, end + 1);
-}
-
-// Helper function to trim both leading and trailing whitespace from a string_view
-constexpr auto trim(std::string_view sv)
-{
-    return trim_start(trim_end(sv));
-}
-
-// Helper function to trim trailing whitespace and convert to std::string
-inline auto trim_end_to_string(std::string_view sv)
-{
-    return std::string{trim_end(sv)};
-}
-
-// Helper function to trim leading whitespace and convert to std::string
-inline auto trim_start_to_string(std::string_view sv)
-{
-    return std::string{trim_start(sv)};
-}
-
-// Helper function to extract field name from function arguments (e.g., "field, 'value'" -> "field")
-constexpr auto parse_field_from_function_args(std::string_view args, std::size_t comma_pos)
-{
-    return trim_end(args.substr(0, comma_pos));
-}
-
-// Helper function to extract value without quotes from function arguments (e.g., "field, 'value'" -> "value")
-constexpr auto parse_value_from_function_args(std::string_view args, std::size_t comma_pos)
-{
-    auto value_trimmed = trim_start(args.substr(comma_pos + 1));
-    
-    // Remove quotes if present using string_view operations
-    if(value_trimmed.size() >= 2)
-    {
-        if((value_trimmed.starts_with('\'') && value_trimmed.ends_with('\'')) ||
-           (value_trimmed.starts_with('"') && value_trimmed.ends_with('"')))
-        {
-            return value_trimmed.substr(1, value_trimmed.size() - 2);
-        }
-    }
-    
-    return value_trimmed;
-}
-
-// Helper function to parse comma-separated list of fields (e.g., "name,email,age" -> ["name", "email", "age"])
-// Limits: max 1000 fields per list
-inline auto parse_comma_separated_list(std::string_view list_value)
-{
-    auto fields = std::vector<std::string_view>{};
-    auto start = std::size_t{0};
-    
-    while(true)
-    {
-        if(fields.size() >= db::max_query_fields)
-            throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(db::max_query_fields) + ")"};
-        
-        auto pos = list_value.find(',', start);
-        if(pos == std::string_view::npos)
-        {
-            auto field = trim(list_value.substr(start));
-            if(!field.empty())
-                fields.push_back(field);
-            break;
-        }
-        auto field = trim(list_value.substr(start, pos - start));
-        if(!field.empty())
-            fields.push_back(field);
-        start = pos + 1;
-    }
-    
-    return fields;
-}
-
-// Helper function to URL-decode a string
-// Handles %XX hex encoding and + as space
-inline auto url_decode(std::string_view encoded)
-{
-    auto decoded = std::string{};
-    decoded.reserve(encoded.length());
-    
-    for(std::size_t i = 0; i < encoded.length(); ++i)
-    {
-        if(encoded[i] == '%' && i + 2 < encoded.length())
-        {
-            // Try to decode %XX - need at least 2 hex digits
-            auto hex = encoded.substr(i + 1, 2);
-            auto value = 0;
-            auto [ptr, ec] = std::from_chars(hex.data(), hex.data() + hex.length(), value, 16);
-            // from_chars validates hex characters, so we don't need manual validation
-            if(ec == std::errc() && ptr == hex.data() + hex.length())
-            {
-                decoded += static_cast<char>(value);
-                i += 2; // Skip the %XX
-                continue;
-            }
-            // Invalid %XX sequence - include the % as-is (fall through)
-        }
-        // Not a valid %XX sequence, or + (which should be space in query strings)
-        if(encoded[i] == '+')
-            decoded += ' ';
-        else
-            decoded += encoded[i];
-    }
-    
-    return decoded;
-}
-
-// Helper function to format timestamp as HTTP date (RFC 7231 format)
-// Format: "Sun, 21 Dec 2025 22:30:00 GMT"
-inline auto format_http_date(std::chrono::system_clock::time_point tp) -> std::string
-{
-    // Format chrono::time_point directly using std::format
-    // Format specifiers: %a=weekday, %d=day, %b=month, %Y=year, %H=%M=%S=time
-    return std::format("{:%a, %d %b %Y %H:%M:%S} GMT"sv, tp);
-}
-
-// Helper function to parse HTTP date string (RFC 7231 format) to time_point
-// Format: "Sun, 21 Dec 2025 22:30:00 GMT"
-// Returns std::nullopt if parsing fails
-inline auto parse_http_date(std::string_view date_str) -> std::optional<std::chrono::system_clock::time_point>
-{
-    using namespace std::chrono;
-    
-    // Parse format: "%a, %d %b %Y %H:%M:%S GMT"
-    // Try to parse using std::chrono::parse or manual parsing
-    // For now, use a simpler approach: parse components manually
-    
-    // Find comma (after weekday)
-    auto comma_pos = date_str.find(',');
-    if(comma_pos == std::string_view::npos || comma_pos == 0)
-        return std::nullopt;
-    
-    // Skip weekday and comma, find date part
-    auto date_part = trim_start(date_str.substr(comma_pos + 1));
-    
-    // Parse: "21 Dec 2025 22:30:08 GMT"
-    // Extract day (first number)
-    auto space1 = date_part.find(' ');
-    if(space1 == std::string_view::npos)
-        return std::nullopt;
-    
-    auto day_str = trim(date_part.substr(0, space1));
-    auto day = 0;
-    auto [ptr1, ec1] = std::from_chars(day_str.data(), day_str.data() + day_str.size(), day);
-    if(ec1 != std::errc() || ptr1 != day_str.data() + day_str.size() || day < 1 || day > 31)
-        return std::nullopt;
-    
-    // Extract month
-    auto month_part = trim_start(date_part.substr(space1 + 1));
-    auto space2 = month_part.find(' ');
-    if(space2 == std::string_view::npos || space2 != 3)
-        return std::nullopt;
-    
-    auto month_str = month_part.substr(0, 3);
-    constexpr const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-    auto month = 0u;
-    for(auto i = 0u; i < 12; ++i)
-    {
-        if(month_str == months[i])
-        {
-            month = i + 1;
-            break;
-        }
-    }
-    if(month == 0)
-        return std::nullopt;
-    
-    // Extract year
-    auto year_part = trim_start(month_part.substr(space2 + 1));
-    auto space3 = year_part.find(' ');
-    if(space3 == std::string_view::npos)
-        return std::nullopt;
-    
-    auto year_str = year_part.substr(0, space3);
-    auto year = 0;
-    auto [ptr2, ec2] = std::from_chars(year_str.data(), year_str.data() + year_str.size(), year);
-    if(ec2 != std::errc() || ptr2 != year_str.data() + year_str.size())
-        return std::nullopt;
-    
-    // Extract time
-    auto time_part = trim_start(year_part.substr(space3 + 1));
-    auto space4 = time_part.find(' ');
-    if(space4 == std::string_view::npos)
-        return std::nullopt;
-    
-    auto time_str = time_part.substr(0, space4);
-    // Parse HH:MM:SS
-    auto colon1 = time_str.find(':');
-    auto colon2 = time_str.find(':', colon1 + 1);
-    if(colon1 == std::string_view::npos || colon2 == std::string_view::npos)
-        return std::nullopt;
-    
-    auto hour_str = time_str.substr(0, colon1);
-    auto minute_str = time_str.substr(colon1 + 1, colon2 - colon1 - 1);
-    auto second_str = time_str.substr(colon2 + 1);
-    
-    auto hour = 0u, minute = 0u, second = 0u;
-    auto [ptr3, ec3] = std::from_chars(hour_str.data(), hour_str.data() + hour_str.size(), hour);
-    auto [ptr4, ec4] = std::from_chars(minute_str.data(), minute_str.data() + minute_str.size(), minute);
-    auto [ptr5, ec5] = std::from_chars(second_str.data(), second_str.data() + second_str.size(), second);
-    
-    if(ec3 != std::errc() || ptr3 != hour_str.data() + hour_str.size() || hour > 23)
-        return std::nullopt;
-    if(ec4 != std::errc() || ptr4 != minute_str.data() + minute_str.size() || minute > 59)
-        return std::nullopt;
-    if(ec5 != std::errc() || ptr5 != second_str.data() + second_str.size() || second > 59)
-        return std::nullopt;
-    
-    // Check for "GMT" suffix
-    auto gmt_part = trim_start(time_part.substr(space4 + 1));
-    if(!gmt_part.starts_with("GMT"sv))
-        return std::nullopt;
-    
-    // Construct time_point
-    try
-    {
-        // Use fully qualified type names to avoid conflict with local variable names (year, month, day)
-        // Cast day to unsigned int to avoid narrowing conversion (std::chrono::day requires unsigned int)
-        auto ymd = std::chrono::year_month_day{
-            std::chrono::year{year}, 
-            std::chrono::month{month}, 
-            std::chrono::day{static_cast<unsigned int>(day)}
-        };
-        auto tp = std::chrono::sys_days{ymd} + 
-                  std::chrono::hours{hour} + 
-                  std::chrono::minutes{minute} + 
-                  std::chrono::seconds{second};
-        // sys_days + duration gives us a system_clock::time_point (with correct precision)
-        return std::chrono::time_point_cast<std::chrono::system_clock::duration>(tp);
-    }
-    catch(...)
-    {
-        return std::nullopt;
-    }
-}
-
-// Helper function to check If-Modified-Since header (for GET/HEAD)
-// Returns std::nullopt if header not present
-// Returns true if document was modified after client's date (send 200 OK)
-// Returns false if document not modified (send 304 Not Modified)
-inline auto check_if_modified_since(
-    const http::headers& headers,
-    std::chrono::system_clock::time_point document_timestamp) -> std::optional<bool>
-{
-    if(!headers.contains("if-modified-since"s))
-        return std::nullopt; // Header not present, proceed normally
-    
-    auto if_modified_since_str = headers["if-modified-since"s];
-    auto client_date = parse_http_date(if_modified_since_str);
-    
-    if(!client_date.has_value())
-        return std::nullopt; // Invalid date format, ignore header
-    
-    // Document is modified if document_timestamp > client_date
-    // Not modified if document_timestamp <= client_date
-    return document_timestamp > client_date.value();
-}
-
-// Helper function to check If-Unmodified-Since header (for PUT/PATCH/DELETE)
-// Returns std::nullopt if header not present
-// Returns true if precondition met (document not modified, process request)
-// Returns false if precondition failed (send 412 Precondition Failed)
-inline auto check_if_unmodified_since(
-    const http::headers& headers,
-    std::chrono::system_clock::time_point document_timestamp) -> std::optional<bool>
-{
-    if(!headers.contains("if-unmodified-since"s))
-        return std::nullopt; // Header not present, proceed normally
-    
-    auto if_unmodified_since_str = headers["if-unmodified-since"s];
-    auto client_date = parse_http_date(if_unmodified_since_str);
-    
-    if(!client_date.has_value())
-        return std::nullopt; // Invalid date format, ignore header
-    
-    // Precondition met if document_timestamp <= client_date
-    // Precondition failed if document_timestamp > client_date
-    return document_timestamp <= client_date.value();
-}
-
-// Helper function to generate ETag from document position
-// ETags are quoted strings containing a unique identifier (hex-encoded position)
-inline auto generate_etag(std::int64_t position) -> std::string
-{
-    // Convert position to hex string
-    constexpr auto hex_digits = "0123456789abcdef"sv;
-    auto etag = std::string{"\""};
-    
-    // Convert int64_t to hex (handle both positive and negative)
-    auto pos = static_cast<std::uint64_t>(position);
-    
-    if(pos == 0)
-    {
-        etag += '0';
-    }
-    else
-    {
-        // Extract hex digits in reverse order
-        auto digits = std::string{};
-        while(pos > 0)
-        {
-            digits += hex_digits[pos & 0xf];
-            pos >>= 4;
-        }
-        // Reverse to get correct order
-        etag.append(digits.rbegin(), digits.rend());
-    }
-    
-    etag += '"';
-    return etag;
-}
-
-// Helper function to trim quotes from ETag string
-inline auto trim_etag_quotes(std::string_view etag) -> std::string_view
-{
-    if(etag.size() >= 2 && etag.front() == '"' && etag.back() == '"')
-        return etag.substr(1, etag.size() - 2);
-    return etag;
-}
-
-// Helper function to check If-Match header (for PUT/PATCH/DELETE)
-// Returns std::nullopt if header not present
-// Returns true if ETag matches (process request)
-// Returns false if ETag doesn't match (send 412 Precondition Failed)
-inline auto check_if_match(
-    const http::headers& headers,
-    const std::string& current_etag) -> std::optional<bool>
-{
-    if(!headers.contains("if-match"s))
-        return std::nullopt; // Header not present, proceed normally
-    
-    auto if_match_value = headers["if-match"s];
-    
-    // Handle "*" wildcard (match any existing resource)
-    if(if_match_value == "*")
-        return true; // Match any existing resource
-    
-    // Compare ETags (remove quotes if present)
-    auto clean_current = trim_etag_quotes(current_etag);
-    auto clean_requested = trim_etag_quotes(if_match_value);
-    
-    return clean_current == clean_requested;
-}
-
-// Helper function to check If-None-Match header (for GET/HEAD/POST/PUT)
-// Returns std::nullopt if header not present
-// Returns true if ETag doesn't match (process request)
-// Returns false if ETag matches (send 304 Not Modified or 412 Precondition Failed)
-inline auto check_if_none_match(
-    const http::headers& headers,
-    const std::string& current_etag) -> std::optional<bool>
-{
-    if(!headers.contains("if-none-match"s))
-        return std::nullopt; // Header not present, proceed normally
-    
-    auto if_none_match_value = headers["if-none-match"s];
-    
-    // Handle "*" wildcard (only if resource doesn't exist - always fails if resource exists)
-    if(if_none_match_value == "*")
-        return false; // Resource exists, precondition failed
-    
-    // Compare ETags (remove quotes if present)
-    auto clean_current = trim_etag_quotes(current_etag);
-    auto clean_requested = trim_etag_quotes(if_none_match_value);
-    
-    // Return true if ETags differ (proceed with request)
-    // Return false if ETags match (skip processing)
-    return clean_current != clean_requested;
-}
-
-// Enum for OData metadata level
-enum class odata_metadata_level
-{
-    none,           // No metadata (plain JSON)
-    minimal,        // Only @odata.context
-    full            // All metadata (@odata.context, @odata.type, @odata.id, etc.)
-};
-
-// Helper function to parse OData metadata level from Accept header
-// Returns the metadata level requested, or 'none' if not specified
-// Note: Header values are already normalized (lowercase) by the http::headers class
-inline auto parse_odata_metadata_level(const http::headers& headers) -> odata_metadata_level
-{
-    if(!headers.contains("accept"s))
-        return odata_metadata_level::none;
-    
-    const auto accept_value = headers["accept"s];
-    
-    // Check for odata=fullmetadata
-    if(accept_value.contains("odata=fullmetadata"s))
-        return odata_metadata_level::full;
-    
-    // Check for odata=minimalmetadata
-    if(accept_value.contains("odata=minimalmetadata"s))
-        return odata_metadata_level::minimal;
-    
-    // Check for odata=nometadata (explicit no metadata)
-    if(accept_value.contains("odata=nometadata"s))
-        return odata_metadata_level::none;
-    
-    // Default: no metadata
-    return odata_metadata_level::none;
-}
-
-// Helper function to check if JSON is acceptable based on Accept header
-// Returns true if JSON is acceptable, false otherwise
-// According to HTTP spec: missing Accept header means accept anything (*/*)
-inline auto accepts_json(const http::headers& headers) -> bool
-{
-    // Headers are stored in lowercase, so check "accept" directly
-    if(!headers.contains("accept"s))
-        return true; // No Accept header means accept anything (including JSON)
-    
-    // Get Accept header value (already lowercase from headers class)
-    const auto accept_value = headers["accept"s];
-    
-    // Check for wildcards that accept anything
-    if(accept_value.contains("*/*"s) || accept_value.contains("application/*"s))
-        return true;
-    
-    // Check if it contains "application/json" (handles all variants including parameters)
-    // Examples that match: "application/json", "application/json;odata=fullmetadata", 
-    //                      "application/json, application/xml", etc.
-    return accept_value.contains("application/json"s);
-}
-
-// Helper function to add OData metadata to a document based on metadata level
-// For minimal metadata: adds @odata.context
-// For full metadata: adds @odata.context, @odata.id, @odata.editLink
-inline auto add_odata_metadata(db::object document, odata_metadata_level level, 
-                                std::string_view collection_name,
-                                std::optional<long long> id = std::nullopt) -> db::object
-{
-    if(level == odata_metadata_level::none)
-        return document; // No metadata needed
-    
-    // OData context format:
-    // - For entity sets (arrays): /$metadata#EntitySetName
-    // - For single entities: /$metadata#EntitySetName/$entity
-    auto context_url = "/$metadata#"s + std::string{collection_name};
-    if(id.has_value())
-        context_url += "/$entity"s; // Single entity
-    
-    if(level == odata_metadata_level::minimal)
-    {
-        // Minimal metadata: only @odata.context
-        document["@odata.context"s] = context_url;
-        return document;
-    }
-    
-    // Full metadata: @odata.context, @odata.id, @odata.editLink
-    document["@odata.context"s] = context_url;
-    
-    if(id.has_value())
-    {
-        auto resource_path = "/"s + std::string{collection_name} + "/"s + std::to_string(id.value());
-        document["@odata.id"s] = resource_path;
-        document["@odata.editLink"s] = resource_path;
-    }
-    
-    return document;
-}
-
-// Helper function to add OData metadata to an array response
-// Wraps the array in an object with @odata.context and "value" array
-// For full metadata, also adds metadata to each item in the array
-inline auto add_odata_metadata_to_array(db::object document, odata_metadata_level level,
-                                        std::string_view collection_name) -> db::object
-{
-    if(level == odata_metadata_level::none)
-        return document; // No metadata needed
-    
-    if(!document.is_array())
-        return document; // Not an array, return as-is
-    
-    // Wrap array in object with @odata.context and value
-    auto context_url = "/$metadata#"s + std::string{collection_name};
-    auto wrapped = db::object{};
-    wrapped["@odata.context"s] = context_url;
-    wrapped["value"s] = document;
-    
-    // For full metadata, also add metadata to each item
-    if(level == odata_metadata_level::full)
-    {
-        auto& items = wrapped["value"s].get<db::object::array>();
-        for(auto& item : items)
-        {
-            if(item.has("_id"s))
-            {
-                auto item_id = static_cast<long long>(item["_id"s]);
-                item = add_odata_metadata(item, level, collection_name, item_id);
-            }
-        }
-    }
-    
-    return wrapped;
-}
-
-// Helper function to create 406 Not Acceptable error response (for .response() handlers)
-inline auto not_acceptable_response() -> std::tuple<std::string, std::string>
-{
-    auto error = db::object{
-        {"error", "Not Acceptable"s},
-        {"message", "Only application/json is supported"s}
-    };
-    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error));
-}
-
-// Helper function to create 406 Not Acceptable error response (for .response_with_headers() handlers)
-inline auto not_acceptable_response_with_headers() -> std::tuple<std::string, std::string, std::optional<http::headers>>
-{
-    auto error = db::object{
-        {"error", "Not Acceptable"s},
-        {"message", "Only application/json is supported"s}
-    };
-    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
-}
-
-// Helper function to parse query parameters from URI
-// Limits: max 100 parameters, max 1024 chars per param name/value, max 64KB total query string
-inline auto parse_query_params(const http::uri& uri)
-{
-    auto params = std::map<std::string, std::string>{};
-    
-    // Check if query string exists
-    auto query_str = static_cast<std::string_view>(uri.query);
-    if(query_str.empty())
-        return params;
-    
-    // Validate total query string size (64KB limit)
-    constexpr auto max_query_size = 64 * 1024;
-    if(query_str.size() > max_query_size)
-        throw std::invalid_argument{"Query string too large (max 64KB)"};
-    
-    // uri.query is indexed_property<'&'>, so it splits by &
-    constexpr auto max_params = 100;
-    constexpr auto max_param_size = 1024;
-    
-    for(std::size_t i = 0; i < max_params; ++i)
-    {
-        auto param = uri.query[i];
-        if(param.empty())
-            break;
-        
-        // Validate parameter size
-        if(param.size() > max_param_size)
-            throw std::invalid_argument{"Parameter too large (max 1024 chars)"};
-            
-        // Split key=value
-        auto eq_pos = param.find('=');
-        if(eq_pos != std::string_view::npos)
-        {
-            auto key_view = param.substr(0, eq_pos);
-            auto value_view = param.substr(eq_pos + 1);
-            
-            // Validate key and value sizes
-            if(key_view.size() > max_param_size || value_view.size() > max_param_size)
-                throw std::invalid_argument{"Parameter key or value too large (max 1024 chars)"};
-            
-            auto key = url_decode(key_view);
-            auto value = url_decode(value_view);
-            
-            // Validate decoded sizes
-            if(key.size() > max_param_size || value.size() > max_param_size)
-                throw std::invalid_argument{"Decoded parameter key or value too large (max 1024 chars)"};
-            
-            params[key] = value;
-        }
-        else
-        {
-            // Boolean flag (no value)
-            if(param.size() > max_param_size)
-                throw std::invalid_argument{"Parameter name too large (max 1024 chars)"};
-            
-            auto key = url_decode(param);
-            if(key.size() > max_param_size)
-                throw std::invalid_argument{"Decoded parameter name too large (max 1024 chars)"};
-            
-            params[key] = "true"s;
-        }
-    }
-    
-    return params;
-}
-
-// String filter function type for post-processing
-struct string_filter
-{
-    std::string_view function;  // "startswith", "contains", "endswith" (string literals)
-    std::string_view field;     // Field name (from parsed filter expression, points into original filter string)
-    std::string_view value;     // Filter value (from parsed filter expression, points into original filter string)
-};
-
-// Helper function to split filter expression by operator and process parts
-inline auto split_and_process_filter_parts(std::string_view expr, std::string_view op_str, std::size_t op_len)
-{
-    auto parts = std::vector<std::string_view>{};
-    auto start = std::size_t{0};
-    
-    while(true)
-    {
-        auto pos = expr.find(op_str, start);
-        if(pos == std::string_view::npos)
-        {
-            parts.push_back(expr.substr(start));
-            break;
-        }
-        parts.push_back(expr.substr(start, pos - start));
-        start = pos + op_len;
-    }
-    
-    return parts;
-}
-
-// Helper function to parse OData $filter expression and convert to selector
-// Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
-// Supports: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
-// Supports: and operator (OR operator is not yet supported)
-// Returns: pair of (selector, vector of string filters for post-processing)
-inline std::pair<db::object, std::vector<string_filter>> parse_odata_filter(std::string_view filter_expr)
-{
-    auto selector = db::object{};
-    auto string_filters = std::vector<string_filter>{};
-    
-    // Simple parser for basic OData filter expressions
-    // Example: "age gt 25" -> {"age": {"$gt": 25}}
-    // Example: "name eq 'John'" -> {"name": "John"}
-    // Example: "startswith(name, 'John')" -> string filter for post-processing
-    // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
-    
-    // Trim whitespace from filter_expr using string_view
-    auto expr = trim(filter_expr);
-    
-    // Handle 'and' operator - split and process each part
-    if(expr.contains(" and "))
-    {
-        constexpr auto op_str = " and "sv;
-        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
-        
-        // Process each part and merge into selector
-        for(const auto& part : parts)
-        {
-            auto [part_selector, part_string_filters] = parse_odata_filter(part);
-            // Merge part_selector into selector by copying fields
-            for(const auto& [key, value] : part_selector.get<db::object::map>())
-            {
-                selector[key] = value;
-            }
-            // Collect string filters
-            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
-        }
-        return std::make_pair(selector, string_filters);
-    }
-    
-    // Handle 'or' operator
-    // NOTE: OR operator is not yet supported - YarDB selector model uses AND semantics
-    // Reject queries with OR to avoid confusion
-    if(expr.contains(" or "))
-    {
-        throw std::invalid_argument{"OR operator not yet supported in $filter expressions"};
-    }
-    
-    // Check for string functions: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
-    constexpr auto startswith_prefix = "startswith("sv;
-    constexpr auto contains_prefix = "contains("sv;
-    constexpr auto endswith_prefix = "endswith("sv;
-    
-    if(expr.starts_with(startswith_prefix) && expr.back() == ')')
-    {
-        // Parse: startswith(field, 'value')
-        auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
-        auto comma_pos = inner.find(',');
-        if(comma_pos == std::string_view::npos)
-            throw std::invalid_argument{"Invalid startswith expression: " + std::string{expr}};
-        
-        auto field = parse_field_from_function_args(inner, comma_pos);
-        auto value = parse_value_from_function_args(inner, comma_pos);
-        
-        string_filters.push_back({"startswith", field, value});
-        return std::make_pair(selector, string_filters);
-    }
-    else if(expr.starts_with(contains_prefix) && expr.back() == ')')
-    {
-        // Parse: contains(field, 'value')
-        auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
-        auto comma_pos = inner.find(',');
-        if(comma_pos == std::string_view::npos)
-            throw std::invalid_argument{"Invalid contains expression: " + std::string{expr}};
-        
-        auto field = parse_field_from_function_args(inner, comma_pos);
-        auto value = parse_value_from_function_args(inner, comma_pos);
-        
-        string_filters.push_back({"contains", field, value});
-        return std::make_pair(selector, string_filters);
-    }
-    else if(expr.starts_with(endswith_prefix) && expr.back() == ')')
-    {
-        // Parse: endswith(field, 'value')
-        auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
-        auto comma_pos = inner.find(',');
-        if(comma_pos == std::string_view::npos)
-            throw std::invalid_argument{"Invalid endswith expression: " + std::string{expr}};
-        
-        auto field = parse_field_from_function_args(inner, comma_pos);
-        auto value = parse_value_from_function_args(inner, comma_pos);
-        
-        string_filters.push_back({"endswith", field, value});
-        return std::make_pair(selector, string_filters);
-    }
-    
-    // Find operator for comparison expressions
-    // Operators are searched in order of specificity (longer first to avoid partial matches)
-    constexpr std::string_view operators[] = {" ge ", " le ", " gt ", " lt ", " ne ", " eq "};
-    constexpr std::string_view op_names[] = {"ge", "le", "gt", "lt", "ne", "eq"};
-    
-    auto op_pos = std::string_view::npos;
-    std::string_view op;
-    
-    for(std::size_t i = 0; i < std::size(operators); ++i)
-    {
-        // Operators include spaces (" ge ", " eq ", etc.) so find() is safe - won't match partial words
-        // e.g., "age" won't match " ge " because it lacks the leading space
-        if(auto pos = expr.find(operators[i]); pos != std::string_view::npos)
-        {
-            op_pos = pos;
-            op = op_names[i];
-            break;
-        }
-    }
-    
-    if(op_pos == std::string_view::npos)
-        throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
-    
-    auto field = trim_end_to_string(expr.substr(0, op_pos));
-    auto value = trim_start_to_string(expr.substr(op_pos + op.size() + 1));
-    
-    // Validate field name is not empty
-    if(field.empty())
-        throw std::invalid_argument{"Field name cannot be empty in filter expression: "s + std::string{expr}};
-    
-    // Remove quotes from string values first
-    auto is_string = false;
-    if(value.size() >= 2 && value[0] == '\'' && value.back() == '\'')
-    {
-        value = value.substr(1, value.size() - 2);
-        is_string = true;
-    }
-    else if(value.size() >= 2 && value[0] == '"' && value.back() == '"')
-    {
-        value = value.substr(1, value.size() - 2);
-        is_string = true;
-    }
-    
-    // Validate value is not empty (empty strings are allowed for string comparisons)
-    if(value.empty() && !is_string)
-        throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
-    
-    // Convert to selector format
-    if(op == "eq")
-    {
-        if(is_string)
-            selector[field] = value;
-        else
-        {
-            // Try to parse as number
-            try
-            {
-                auto num = stoll(value);
-                selector[field] = num;
-            }
-            catch(...)
-            {
-                selector[field] = value; // Fallback to string
-            }
-        }
-    }
-    else if(op == "ne")
-    {
-        // YarDB doesn't have $ne, so we'll use a workaround
-        // For now, store as string and handle in match logic (or skip)
-        throw std::invalid_argument{"$ne operator not yet supported"};
-    }
-    else if(op == "gt")
-    {
-        try
-        {
-            auto num = stoll(value);
-            selector[field] = db::object{{"$gt"s, num}};
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'gt' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
-    else if(op == "ge")
-    {
-        try
-        {
-            auto num = stoll(value);
-            selector[field] = db::object{{"$gte"s, num}};
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'ge' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
-    else if(op == "lt")
-    {
-        try
-        {
-            auto num = stoll(value);
-            selector[field] = db::object{{"$lt"s, num}};
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'lt' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
-    else if(op == "le")
-    {
-        try
-        {
-            auto num = stoll(value);
-            selector[field] = db::object{{"$lte"s, num}};
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'le' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
-    
-    return std::make_pair(selector, string_filters);
-}
-
-// Helper function to apply $select projection to documents
-inline auto apply_select(const db::object& documents, std::string_view select_value)
-{
-    // Parse comma-separated field list: "name,email,age"
-    auto fields = parse_comma_separated_list(select_value);
-    
-    if(fields.empty())
-        return documents; // No fields specified, return as-is
-    
-    // Apply projection
-    if(!documents.is_array())
-        return documents; // Not an array, return as-is
-    
-    auto result = db::object{db::object::array{}};
-    const auto& docs = documents.get<db::object::array>();
-    
-    for(const auto& doc : docs)
-    {
-        auto projected = db::object{};
-        // Always include _id if present
-        if(doc.has("_id"s))
-            projected["_id"s] = doc["_id"s];
-        
-        // Include requested fields
-        for(const auto& field : fields)
-        {
-            if(doc.has(field))
-                projected[field] = doc[field];
-        }
-        
-        result += std::move(projected);
-    }
-    
-    return result;
-}
-
-// Helper function to apply string filters to documents (post-processing)
-inline auto apply_string_filters(const db::object& documents, const std::vector<string_filter>& filters)
-{
-    if(filters.empty() || !documents.is_array())
-        return documents;
-    
-    auto result = db::object{db::object::array{}};
-    const auto& docs = documents.get<db::object::array>();
-    
-    for(const auto& doc : docs)
-    {
-        auto matches = true;
-        
-        for(const auto& filter : filters)
-        {
-            if(!doc.has(filter.field))
-            {
-                matches = false;
-                break;
-            }
-            
-            const auto field_value = doc[filter.field];
-            if(!field_value.is_string())
-            {
-                matches = false;
-                break;
-            }
-            
-            // Get string value from object - use get() to get const reference, then create string_view
-            const std::string_view field = field_value.get<std::string>();
-            
-            if(filter.function == "startswith")
-            {
-                if(!field.starts_with(filter.value))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            else if(filter.function == "contains")
-            {
-                if(!field.contains(filter.value))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            else if(filter.function == "endswith")
-            {
-                if(!field.ends_with(filter.value))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            else
-            {
-                // Unknown filter function - reject document to be safe
-                throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
-            }
-        }
-        
-        if(matches)
-            result += doc;
-    }
-    
-    return result;
-}
-
-// Helper function to apply $expand to documents
-// For now, this is a placeholder - YarDB doesn't have explicit relationships
-inline auto apply_expand(const db::object& documents, [[maybe_unused]] std::string_view expand_value, [[maybe_unused]] const std::string& collection_name, [[maybe_unused]] db::engine& engine)
-{
-    // For now, $expand is a placeholder
-    // In a real implementation, this would:
-    // 1. Parse comma-separated field list: "orders,profile"
-    // 2. Extract IDs from the expand field (e.g., order_ids)
-    // 3. Query the related collection (e.g., orders)
-    // 4. Embed the results
-    
-    // Return documents as-is for now
-    return documents;
-}
+using namespace yar::http::helpers;
+using namespace yar::http::odata;
 
 class rest_api_server
 {
@@ -1071,50 +73,27 @@ public:
 private:
     void setup_routes()
     {
-        // List all collections
-        m_server.get("/"s).response(
-            "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
-                {
-                    slog << debug << "GET /: "<< request << flush;
-
-                    // Check Accept header
-                    if(!accepts_json(headers))
-                        return not_acceptable_response();
-
-                    const auto guard = std::lock_guard{m_engine};
-                    auto response = db::object{"collections", m_engine.collections()};
-                    
-                    // Add OData metadata if requested
-                    auto metadata_level = parse_odata_metadata_level(headers);
-                    if(metadata_level != odata_metadata_level::none)
-                    {
-                        response["@odata.context"s] = "/$metadata#Collections"s;
-                    }
-                    
-                    return std::make_tuple("200 OK"s, xson::json::stringify(response));
-                });
 
         // Create
         m_server.post("/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, std::string_view body, const http::headers& headers)
+            [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "POST /[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Not Acceptable"s},
                             {"message", "Only application/json is supported"s}
                         };
-                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
 
                     try
                     {
-                        auto uri = http::uri{request};
+                        auto uri = ::http::uri{request};
                         auto document = xson::json::parse(body);
 
                         const auto guard = std::lock_guard{m_engine};
@@ -1123,31 +102,31 @@ private:
                         m_engine.create(document);
                         
                         // Add Location header pointing to the newly created resource
-                        auto response_headers = http::headers{};
+                        auto response_headers = ::http::headers{};
                         const auto id = static_cast<long long>(document["_id"s]);
                         response_headers.set("location"s, "/"s + collection + "/"s + std::to_string(id));
                         
                         // Add OData metadata if requested
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
-                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                            document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
                         return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
-                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 });
 
         // Read _id
         m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
 
@@ -1157,10 +136,10 @@ private:
 
                     try
                     {
-                        auto uri = http::uri{request};
+                        auto uri = ::http::uri{request};
                         auto id = stoll(uri.path[2]);
-                        auto documents = db::object{};
-                        auto selector = db::object{"_id", id};
+                        auto documents = xson::object{};
+                        auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
                         auto collection = validate_collection_name(uri.path[1]);
@@ -1168,27 +147,27 @@ private:
                         auto found = m_engine.read(selector, documents);
 
                         // Check if document was found
-                        if(!found || documents.get<db::object::array>().empty())
+                        if(!found || documents.get<xson::object::array>().empty())
                         {
-                            auto error = db::object{
+                            auto error = xson::object{
                                 {"error", "Not Found"s},
                                 {"message", "Document not found"s},
                                 {"collection", collection},
                                 {"id", id}
                             };
-                            return std::make_tuple("404 Not Found"s, xson::json::stringify(error), std::optional<http::headers>{});
+                            return std::make_tuple("404 Not Found"s, xson::json::stringify(error), std::optional<::http::headers>{});
                         }
 
                         // Return single object (first element of array)
-                        auto document = documents.get<db::object::array>()[0];
+                        auto document = documents.get<xson::object::array>()[0];
                         
                         // Add OData metadata if requested
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
-                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                            document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
                         // Get actual document modification time and position from metadata
-                        auto response_headers = http::headers{};
+                        auto response_headers = ::http::headers{};
                         auto metadata_timestamp = m_engine.get_metadata_timestamp(selector);
                         auto metadata_position = m_engine.get_metadata_position(selector);
                         
@@ -1230,11 +209,11 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
-                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 });
 
@@ -1243,7 +222,7 @@ private:
         // Note: Collection names must start with a letter, but can contain digits
         m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "GET /[a-z]+: " << request << flush;
 
@@ -1253,9 +232,9 @@ private:
 
                     try
                     {
-                        auto uri = http::uri{request};
-                        auto document = db::object{};
-                        auto selector = db::object{};
+                        auto uri = ::http::uri{request};
+                        auto document = xson::object{};
+                        auto selector = xson::object{};
                         
                         // Parse OData query parameters
                         auto params = parse_query_params(uri);
@@ -1268,8 +247,8 @@ private:
                                 auto top_value = stoll(params["$top"s]);
                                 if(top_value < 0)
                                     throw std::invalid_argument{"$top must be non-negative"};
-                                if(top_value > db::max_query_top)
-                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(db::max_query_top) + ")"};
+                                if(top_value > yar::db::max_query_top)
+                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(yar::db::max_query_top) + ")"};
                                 selector["$top"s] = top_value;
                             }
                             catch(const std::exception&)
@@ -1286,8 +265,8 @@ private:
                                 auto skip_value = stoll(params["$skip"s]);
                                 if(skip_value < 0)
                                     throw std::invalid_argument{"$skip must be non-negative"};
-                                if(skip_value > db::max_query_skip)
-                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(db::max_query_skip) + ")"};
+                                if(skip_value > yar::db::max_query_skip)
+                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(yar::db::max_query_skip) + ")"};
                                 selector["$skip"s] = skip_value;
                             }
                             catch(const std::exception&)
@@ -1313,8 +292,8 @@ private:
                             if(field_name.empty())
                                 throw std::invalid_argument{"$orderby field name cannot be empty"};
                             
-                            if(field_name.size() > db::max_field_name_length)
-                                throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(db::max_field_name_length) + " chars)"};
+                            if(field_name.size() > yar::db::max_field_name_length)
+                                throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"};
                             
                             // Store field name for ordering
                             selector["$orderby"s] = std::string{field_name};
@@ -1334,9 +313,9 @@ private:
                         {
                             try
                             {
-                                auto [filter_selector, filter_string_filters] = parse_odata_filter(params["$filter"s]);
+                                auto [filter_selector, filter_string_filters] = yar::http::odata::parse_filter(params["$filter"s]);
                                 // Merge filter into selector by copying fields
-                                for(const auto& [key, value] : filter_selector.get<db::object::map>())
+                                for(const auto& [key, value] : filter_selector.get<xson::object::map>())
                                 {
                                     selector[key] = value;
                                 }
@@ -1345,7 +324,7 @@ private:
                             }
                             catch(const std::exception& e)
                             {
-                                auto error = db::object{
+                                auto error = xson::object{
                                     {"error", "Bad Request"s},
                                     {"message", "Invalid $filter expression: "s + std::string{e.what()}}
                                 };
@@ -1361,34 +340,34 @@ private:
                         // Post-process: Apply string filters (startswith, contains, endswith)
                         if(!string_filters.empty())
                         {
-                            document = apply_string_filters(document, string_filters);
+                            document = yar::http::odata::apply_string_filters(document, string_filters);
                         }
                         
                         // Post-process: Apply $select projection (result transformation)
                         if(params.contains("$select"s))
                         {
-                            document = apply_select(document, params["$select"s]);
+                            document = yar::http::odata::apply_select(document, params["$select"s]);
                         }
                         
                         // Post-process: Apply $expand expansion (result transformation)
                         if(params.contains("$expand"s))
                         {
-                            document = apply_expand(document, params["$expand"s], collection_name, m_engine);
+                            document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
                         }
                         
                         // Add OData metadata if requested
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
                         {
                             if(document.is_array())
                             {
-                                document = add_odata_metadata_to_array(document, metadata_level, collection_name);
+                                document = yar::http::odata::add_metadata_to_array(document, metadata_level, collection_name);
                             }
                             else if(document.has("_id"s))
                             {
                                 // Single object - add metadata directly
                                 auto doc_id = static_cast<long long>(document["_id"s]);
-                                document = add_odata_metadata(document, metadata_level, collection_name, doc_id);
+                                document = yar::http::odata::add_metadata(document, metadata_level, collection_name, doc_id);
                             }
                         }
                         
@@ -1396,7 +375,7 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
@@ -1407,7 +386,7 @@ private:
         // HEAD / - List all collections (same as GET but no body)
         m_server.head("/"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "HEAD /: "<< request << flush;
 
@@ -1417,11 +396,11 @@ private:
 
                     // Compute response content for correct Content-Length header (framework won't send body for HEAD)
                     const auto guard = std::lock_guard{m_engine};
-                    auto response = db::object{"collections", m_engine.collections()};
+                    auto response = xson::object{"collections", m_engine.collections()};
                     
                     // Add OData metadata if requested
-                    auto metadata_level = parse_odata_metadata_level(headers);
-                    if(metadata_level != odata_metadata_level::none)
+                    auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                    if(metadata_level != yar::http::odata::metadata_level::none)
                     {
                         response["@odata.context"s] = "/$metadata#Collections"s;
                     }
@@ -1433,7 +412,7 @@ private:
         // HEAD /collection/{id} - Get document headers (same as GET but no body)
         m_server.head("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "HEAD /[a-z]+/[0-9]+: " << request << flush;
 
@@ -1443,10 +422,10 @@ private:
 
                     try
                     {
-                        auto uri = http::uri{request};
+                        auto uri = ::http::uri{request};
                         auto id = stoll(uri.path[2]);
-                        auto documents = db::object{};
-                        auto selector = db::object{"_id", id};
+                        auto documents = xson::object{};
+                        auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
                         auto collection = validate_collection_name(uri.path[1]);
@@ -1454,28 +433,28 @@ private:
                         auto found = m_engine.read(selector, documents);
 
                         // Check if document was found
-                        if(!found || documents.get<db::object::array>().empty())
+                        if(!found || documents.get<xson::object::array>().empty())
                         {
-                            auto error = db::object{
+                            auto error = xson::object{
                                 {"error", "Not Found"s},
                                 {"message", "Document not found"s},
                                 {"collection", collection},
                                 {"id", id}
                             };
                             const auto error_content = xson::json::stringify(error);
-                            return std::make_tuple("404 Not Found"s, error_content, std::optional<http::headers>{});
+                            return std::make_tuple("404 Not Found"s, error_content, std::optional<::http::headers>{});
                         }
 
                         // Compute response content for correct Content-Length header (framework won't send body for HEAD)
-                        auto document = documents.get<db::object::array>()[0];
+                        auto document = documents.get<xson::object::array>()[0];
                         
                         // Add OData metadata if requested
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
-                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                            document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
                         // Get actual document modification time and position from metadata
-                        auto response_headers = http::headers{};
+                        auto response_headers = ::http::headers{};
                         auto metadata_timestamp = m_engine.get_metadata_timestamp(selector);
                         auto metadata_position = m_engine.get_metadata_position(selector);
                         
@@ -1520,11 +499,11 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
-                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 });
 
@@ -1533,7 +512,7 @@ private:
         // Framework will use content.length() for Content-Length but won't send body for HEAD
         m_server.head("/[a-z][a-z0-9]*(\\?.*)?"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "HEAD /[a-z]+: " << request << flush;
 
@@ -1543,9 +522,9 @@ private:
 
                     try
                     {
-                        auto uri = http::uri{request};
-                        auto document = db::object{};
-                        auto selector = db::object{};
+                        auto uri = ::http::uri{request};
+                        auto document = xson::object{};
+                        auto selector = xson::object{};
                         
                         // Parse OData query parameters (same as GET)
                         auto params = parse_query_params(uri);
@@ -1559,8 +538,8 @@ private:
                                 auto top_value = stoll(params["$top"s]);
                                 if(top_value < 0)
                                     throw std::invalid_argument{"$top must be non-negative"};
-                                if(top_value > db::max_query_top)
-                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(db::max_query_top) + ")"};
+                                if(top_value > yar::db::max_query_top)
+                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(yar::db::max_query_top) + ")"};
                                 selector["$top"s] = top_value;
                             }
                             catch(const std::exception&)
@@ -1576,8 +555,8 @@ private:
                                 auto skip_value = stoll(params["$skip"s]);
                                 if(skip_value < 0)
                                     throw std::invalid_argument{"$skip must be non-negative"};
-                                if(skip_value > db::max_query_skip)
-                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(db::max_query_skip) + ")"};
+                                if(skip_value > yar::db::max_query_skip)
+                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(yar::db::max_query_skip) + ")"};
                                 selector["$skip"s] = skip_value;
                             }
                             catch(const std::exception&)
@@ -1610,14 +589,14 @@ private:
                         {
                             try
                             {
-                                auto [filter_selector, filter_string_filters] = parse_odata_filter(params["$filter"s]);
-                                for(const auto& [key, value] : filter_selector.get<db::object::map>())
+                                auto [filter_selector, filter_string_filters] = yar::http::odata::parse_filter(params["$filter"s]);
+                                for(const auto& [key, value] : filter_selector.get<xson::object::map>())
                                     selector[key] = value;
                                 string_filters = std::move(filter_string_filters);
                             }
                             catch(const std::exception& e)
                             {
-                                auto error = db::object{
+                                auto error = xson::object{
                                     {"error", "Bad Request"s},
                                     {"message", "Invalid $filter expression: "s + std::string{e.what()}}
                                 };
@@ -1632,25 +611,25 @@ private:
                         
                         // Post-process: Apply string filters, $select, $expand (same as GET)
                         if(!string_filters.empty())
-                            document = apply_string_filters(document, string_filters);
+                            document = yar::http::odata::apply_string_filters(document, string_filters);
                         if(params.contains("$select"s))
-                            document = apply_select(document, params["$select"s]);
+                            document = yar::http::odata::apply_select(document, params["$select"s]);
                         if(params.contains("$expand"s))
-                            document = apply_expand(document, params["$expand"s], collection_name, m_engine);
+                            document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
                         
                         // Add OData metadata if requested (same as GET)
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
                         {
                             if(document.is_array())
                             {
-                                document = add_odata_metadata_to_array(document, metadata_level, collection_name);
+                                document = yar::http::odata::add_metadata_to_array(document, metadata_level, collection_name);
                             }
                             else if(document.has("_id"s))
                             {
                                 // Single object - add metadata directly
                                 auto doc_id = static_cast<long long>(document["_id"s]);
-                                document = add_odata_metadata(document, metadata_level, collection_name, doc_id);
+                                document = yar::http::odata::add_metadata(document, metadata_level, collection_name, doc_id);
                             }
                         }
                         
@@ -1660,7 +639,7 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
@@ -1671,31 +650,31 @@ private:
         // Update aka replace _id (upsert behavior)
         m_server.put("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, std::string_view body, const http::headers& headers)
+            [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Not Acceptable"s},
                             {"message", "Only application/json is supported"s}
                         };
-                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
 
                     try
                     {
-                        auto uri = http::uri{request};
+                        auto uri = ::http::uri{request};
                         auto document = xson::json::parse(body);
                         auto id = stoll(uri.path[2]);
                         
                         // Ensure the document has the correct _id from the URL
                         document["_id"s] = id;
                         
-                        auto selector = db::object{"_id", id};
-                        auto existing_docs = db::object{};
+                        auto selector = xson::object{"_id", id};
+                        auto existing_docs = xson::object{};
 
                         const auto guard = std::lock_guard{m_engine};
                         auto collection = validate_collection_name(uri.path[1]);
@@ -1703,11 +682,11 @@ private:
                         
                         // Check if document exists
                         auto exists = m_engine.read(selector, existing_docs);
-                        auto response_headers = http::headers{};
+                        auto response_headers = ::http::headers{};
                         const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
                         
                         // Check conditional requests (only if document exists)
-                        if(exists && !existing_docs.get<db::object::array>().empty())
+                        if(exists && !existing_docs.get<xson::object::array>().empty())
                         {
                             // Check If-Match header (ETag-based)
                             auto metadata_position = m_engine.get_metadata_position(selector);
@@ -1718,13 +697,13 @@ private:
                                 if(match_check.has_value() && !match_check.value())
                                 {
                                     // Precondition failed - ETag doesn't match
-                                    auto error = db::object{
+                                    auto error = xson::object{
                                         {"error", "Precondition Failed"s},
                                         {"message", "ETag does not match current resource version"s},
                                         {"collection", collection},
                                         {"id", id}
                                     };
-                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<http::headers>{});
+                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<::http::headers>{});
                                 }
                             }
                             
@@ -1736,23 +715,23 @@ private:
                                 if(unmodified_check.has_value() && !unmodified_check.value())
                                 {
                                     // Precondition failed - document was modified since client's date
-                                    auto error = db::object{
+                                    auto error = xson::object{
                                         {"error", "Precondition Failed"s},
                                         {"message", "Document has been modified since the specified date"s},
                                         {"collection", collection},
                                         {"id", id}
                                     };
-                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<http::headers>{});
+                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<::http::headers>{});
                                 }
                             }
                         }
                         
                         // Add OData metadata if requested
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
-                            document = add_odata_metadata(document, metadata_level, collection, id);
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                            document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
-                        if(exists && !existing_docs.get<db::object::array>().empty())
+                        if(exists && !existing_docs.get<xson::object::array>().empty())
                         {
                             // Document exists - replace it
                             m_engine.replace(selector, document);
@@ -1792,47 +771,47 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
-                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 });
 
         // Update aka modify _id
         m_server.patch("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            [this](std::string_view request, std::string_view body, const http::headers& headers)
+            [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Not Acceptable"s},
                             {"message", "Only application/json is supported"s}
                         };
-                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
 
                     try
                     {
-                        auto uri = http::uri{request};
+                        auto uri = ::http::uri{request};
                         auto updates = xson::json::parse(body);
-                        auto documents = db::object{};
+                        auto documents = xson::object{};
                         auto id = stoll(uri.path[2]);
-                        auto selector = db::object{"_id", id};
+                        auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
                         auto collection = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection);
                         
                         // Check conditional requests (only if document exists)
-                        auto existing_docs = db::object{};
+                        auto existing_docs = xson::object{};
                         auto exists = m_engine.read(selector, existing_docs);
-                        if(exists && !existing_docs.get<db::object::array>().empty())
+                        if(exists && !existing_docs.get<xson::object::array>().empty())
                         {
                             // Check If-Match header (ETag-based)
                             auto metadata_position = m_engine.get_metadata_position(selector);
@@ -1843,13 +822,13 @@ private:
                                 if(match_check.has_value() && !match_check.value())
                                 {
                                     // Precondition failed - ETag doesn't match
-                                    auto error = db::object{
+                                    auto error = xson::object{
                                         {"error", "Precondition Failed"s},
                                         {"message", "ETag does not match current resource version"s},
                                         {"collection", collection},
                                         {"id", id}
                                     };
-                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<http::headers>{});
+                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<::http::headers>{});
                                 }
                             }
                             
@@ -1861,13 +840,13 @@ private:
                                 if(unmodified_check.has_value() && !unmodified_check.value())
                                 {
                                     // Precondition failed - document was modified since client's date
-                                    auto error = db::object{
+                                    auto error = xson::object{
                                         {"error", "Precondition Failed"s},
                                         {"message", "Document has been modified since the specified date"s},
                                         {"collection", collection},
                                         {"id", id}
                                     };
-                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<http::headers>{});
+                                    return std::make_tuple("412 Precondition Failed"s, xson::json::stringify(error), std::optional<::http::headers>{});
                                 }
                             }
                         }
@@ -1875,27 +854,27 @@ private:
                         m_engine.upsert(selector,updates,documents);
                         
                         // Add OData metadata if requested
-                        auto metadata_level = parse_odata_metadata_level(headers);
-                        if(metadata_level != odata_metadata_level::none)
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
                         {
-                            if(documents.is_array() && !documents.get<db::object::array>().empty())
+                            if(documents.is_array() && !documents.get<xson::object::array>().empty())
                             {
                                 // PATCH returns array with updated document(s)
-                                auto& items = documents.get<db::object::array>();
+                                auto& items = documents.get<xson::object::array>();
                                 for(auto& item : items)
                                 {
-                                    item = add_odata_metadata(item, metadata_level, collection, id);
+                                    item = yar::http::odata::add_metadata(item, metadata_level, collection, id);
                                 }
                             }
                             else if(!documents.is_array())
                             {
                                 // Single object
-                                documents = add_odata_metadata(documents, metadata_level, collection, id);
+                                documents = yar::http::odata::add_metadata(documents, metadata_level, collection, id);
                             }
                         }
                         
                         // Add Content-Location header for updated resource
-                        auto response_headers = http::headers{};
+                        auto response_headers = ::http::headers{};
                         response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
                         
                         // Get new ETag after update
@@ -1910,18 +889,18 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
-                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<http::headers>{});
+                        return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 });
 
         // Delete _id
         m_server.destroy("/[a-z][a-z0-9]*/[0-9]+"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
                     slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
 
@@ -1931,10 +910,10 @@ private:
 
                     try
                     {
-                        auto uri = http::uri{request};
+                        auto uri = ::http::uri{request};
                         auto id = stoll(uri.path[2]);
-                        auto documents = db::object{};
-                        auto selector = db::object{"_id", id};
+                        auto documents = xson::object{};
+                        auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
                         auto collection = validate_collection_name(uri.path[1]);
@@ -1943,7 +922,7 @@ private:
 
                         if(!deleted)
                         {
-                            auto error = db::object{
+                            auto error = xson::object{
                                 {"error", "Not Found"s},
                                 {"message", "Document not found"s},
                                 {"collection", collection},
@@ -1957,7 +936,7 @@ private:
                     }
                     catch(const std::exception& e)
                     {
-                        auto error = db::object{
+                        auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
                         };
@@ -1968,13 +947,13 @@ private:
         // Delete first
         m_server.destroy("/[a-z]+\\?\\$top"s).response(
             "application/json"sv,
-            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const http::headers& headers)
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const ::http::headers& headers)
                 {
                     slog << debug << "DELETE /[a-z]+?\\$top: " << request << flush;
 
-                    auto uri = http::uri{request};
-                    auto documents = db::object{};
-                    auto selector = db::object{"$top",1ll};
+                    auto uri = ::http::uri{request};
+                    auto documents = xson::object{};
+                    auto selector = xson::object{"$top",1ll};
 
                     const auto guard = std::lock_guard{m_engine};
                     m_engine.collection(uri.path[1]);
@@ -1985,8 +964,8 @@ private:
 
     std::string m_file;
     std::string m_port_or_service;
-    ext::lockable<db::engine> m_engine;
-    http::server m_server;
+    ext::lockable<yar::db::engine> m_engine;
+    ::http::server m_server;
     std::thread m_listen_thread;
 };
 
@@ -1997,4 +976,4 @@ export void restful_web_server(std::string_view file, const std::string_view por
     server.listen(); // Blocks forever
 }
 
-} // namespace db
+} // namespace yar::http

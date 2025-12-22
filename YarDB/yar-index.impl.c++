@@ -9,7 +9,7 @@ auto make_primary_key   = [](const xson::object::value& v){return std::get<xson:
 auto make_secondary_key = [](const xson::object::value& v){return xson::to_string(v);};
 
 template <typename T, typename F>
-db::index_view query_analysis(const db::object& selector, const T& keys, F make_key)
+yar::db::index_view query_analysis(const yar::db::object& selector, const T& keys, F make_key)
 {
     auto begin = std::ranges::cbegin(keys),
          end   = std::ranges::cend(keys);
@@ -69,19 +69,19 @@ db::index_view query_analysis(const db::object& selector, const T& keys, F make_
 
 } // namespace
 
-void db::index::add(const std::string& key)
+void yar::db::index::add(const std::string& key)
 {
     if(not m_secondary_keys.contains(key))
-        m_secondary_keys[key] = secondary_index_type{};
+        m_secondary_keys[key] = yar::db::secondary_index_type{};
 }
 
-void db::index::add(std::vector<std::string> keys)
+void yar::db::index::add(std::vector<std::string> keys)
 {
     for(const std::string& key : keys)
         add(key);
 }
 
-std::vector<std::string> db::index::keys() const
+std::vector<std::string> yar::db::index::keys() const
 {
     auto result = std::vector<std::string>{};
     for (const auto& [name,key] : m_secondary_keys)
@@ -89,12 +89,12 @@ std::vector<std::string> db::index::keys() const
     return result;
 }
 
-bool db::index::primary_key(const object& selector) const
+bool yar::db::index::primary_key(const yar::db::object& selector) const
 {
     return selector.has("_id"s);
 }
 
-bool db::index::secondary_key(const object& selector) const
+bool yar::db::index::secondary_key(const yar::db::object& selector) const
 {
     for(const auto& [name,key] : m_secondary_keys)
         if(selector.has(name))
@@ -102,7 +102,7 @@ bool db::index::secondary_key(const object& selector) const
     return false;
 }
 
-db::index_view db::index::view(const object& selector) const
+yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
 {
     if(primary_key(selector))
         return query_analysis(selector["_id"s], m_primary_keys, make_primary_key);
@@ -120,15 +120,15 @@ db::index_view db::index::view(const object& selector) const
         return {std::ranges::crbegin(m_primary_keys),std::ranges::crend(m_primary_keys)};
 }
 
-void db::index::update(object& document)
+void yar::db::index::update(yar::db::object& document)
 {
     if(document.has("_id"s))
-        m_sequence = std::max<sequence_type>(m_sequence, document["_id"s]);
+        m_sequence = std::max<yar::db::sequence_type>(m_sequence, document["_id"s]);
     else
         document["_id"s] = ++m_sequence;
 }
 
-void db::index::insert(object& document, position_type position)
+void yar::db::index::insert(yar::db::object& document, yar::db::position_type position)
 {
     const auto pk = make_primary_key(document["_id"s]);
     m_primary_keys[pk] = position;
@@ -141,7 +141,7 @@ void db::index::insert(object& document, position_type position)
         }
 }
 
-void db::index::erase(const object& document)
+void yar::db::index::erase(const yar::db::object& document)
 {
     const auto pk = make_primary_key(document["_id"s]);
     m_primary_keys.erase(pk);

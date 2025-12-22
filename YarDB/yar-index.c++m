@@ -4,7 +4,7 @@ import xson;
 
 using namespace std::string_literals;
 
-namespace db {
+namespace yar::db {
 
 using object = xson::object;
 
@@ -231,4 +231,4 @@ private:
     secondary_index_map m_secondary_keys;
 };
 
-} // namespace db
+} // namespace yar::db

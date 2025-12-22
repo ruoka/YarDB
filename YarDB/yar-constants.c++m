@@ -1,7 +1,7 @@
 export module yar:constants;
 import std;
 
-export namespace db {
+export namespace yar::db {
 
 // Reserved field names
 inline constexpr auto reserved_field_id = "_id";        // Primary key field in all documents
@@ -22,4 +22,4 @@ inline constexpr int max_collection_name_length = 256;  // Maximum length for co
 // Field name limits
 inline constexpr int max_field_name_length = 256;  // Maximum length for field names (e.g., in $orderby)
 
-} // namespace db
+} // namespace yar::db

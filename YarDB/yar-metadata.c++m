@@ -4,7 +4,7 @@ import xson;
 
 using namespace std::string_literals;
 
-export namespace db
+export namespace yar::db
 {
 
 using object = xson::object;
@@ -98,4 +98,4 @@ inline auto to_string(metadata::action a)
     std::unreachable();
 }
 
-} // namespace db
+} // namespace yar::db

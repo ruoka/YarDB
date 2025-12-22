@@ -7,67 +7,131 @@ export namespace db {
 
 using object = xson::object;
 
+// Database engine providing CRUD operations and indexing capabilities
+// Thread-safe when used through ext::lockable wrapper
 class engine
 {
 public:
 
+    // Construct engine and open/create database file
+    // @param db Path to database file (default: "./yar.db")
+    // @throws std::runtime_error if database cannot be opened or created
     engine(std::string_view db = "./yar.db"s);
 
+    // Move constructor
     engine(engine&&);
 
+    // Destructor - closes database and releases lock file
     ~engine();
 
 //  Indexing
 
+    // Add secondary index keys for the current collection
+    // Creates index metadata in _db collection and enables querying by these keys
+    // @param keys Vector of field names to index
     void index(std::vector<std::string> keys);
 
+    // Rebuild all indexes by scanning the entire database
+    // Called automatically on startup (twice: first to discover schema, second to build indexes)
+    // Can be called at runtime after adding new secondary keys to index existing documents
     void reindex();
 
 //  CRUD
 
+    // Create a new document in the current collection
+    // Automatically assigns _id if not present
+    // @param document Document to create (may be modified to add _id)
+    // @return true if successful, false on I/O error
     bool create(db::object& document);
 
+    // Read documents matching the selector from the current collection
+    // Supports OData query parameters: $top, $skip, $filter, $orderby, $select
+    // @param selector Query selector (can include OData parameters)
+    // @param documents Output array of matching documents
+    // @return true if any documents found, false otherwise
     bool read(const db::object& selector, db::object& documents);
     
     // Get metadata timestamp for the first document matching the selector
-    // Returns std::nullopt if no document found
-    std::optional<std::chrono::system_clock::time_point> get_metadata_timestamp(const db::object& selector);
+    // Used for Last-Modified HTTP header generation
+    // @param selector Query selector to find document
+    // @return Timestamp if document found, std::nullopt otherwise
+    std::optional<std::chrono::system_clock::time_point> get_metadata_timestamp(const db::object& selector) const;
     
     // Get metadata position for the first document matching the selector
-    // Returns std::nullopt if no document found
-    std::optional<std::int64_t> get_metadata_position(const db::object& selector);
+    // Used for ETag HTTP header generation
+    // @param selector Query selector to find document
+    // @return Position if document found, std::nullopt otherwise
+    std::optional<std::int64_t> get_metadata_position(const db::object& selector) const;
 
+    // Update documents matching the selector
+    // Merges updates with existing document fields (existing fields preserved unless overridden)
+    // Old document is marked as updated, new version appended to storage
+    // @param selector Query selector to find documents to update
+    // @param updates Fields to update/add (merged with existing document)
+    // @param documents Output array of updated documents
+    // @return true if any documents updated, false otherwise
     bool update(const db::object& selector, const db::object& updates, db::object& documents);
 
+    // Delete documents matching the selector
+    // Documents are marked as deleted but remain in storage for history tracking
+    // @param selector Query selector to find documents to delete
+    // @param documents Output array of deleted documents
+    // @return true if any documents deleted, false otherwise
     bool destroy(const db::object& selector, db::object& documents);
 
 //  Chain of updates
 
+    // Get version history for documents matching the selector
+    // Traverses metadata.previous chain to collect all versions (created, updated, deleted)
+    // @param selector Query selector to find documents
+    // @param documents Output array of all document versions in reverse chronological order
+    // @return true if any documents found, false otherwise
     bool history(const db::object& selector, db::object& documents);
 
 //  For convenience
 
+    // Upsert: update if exists, create if not
+    // @param selector Query selector to find existing document
+    // @param updates Document fields (used for update or create)
+    // @param documents Output array of updated/created documents
+    // @return true if document updated or created
     bool upsert(const db::object& selector, db::object& updates, db::object& documents)
     {
         return update(selector, updates, documents) || create(updates);
     }
 
+    // Upsert: update if exists, create if not (without returning documents)
+    // @param selector Query selector to find existing document
+    // @param updates Document fields (used for update or create)
+    // @return true if document updated or created
     bool upsert(const db::object& selector, db::object& updates)
     {
         return update(selector, updates) || create(updates);
     }
 
+    // Replace: delete existing document and create new one with same _id
+    // Only replaces if document exists (does not create if not found)
+    // @param selector Query selector to find document to replace
+    // @param document New document to create (will have same _id as replaced document)
+    // @return true if document replaced, false if not found
     bool replace(const db::object& selector, db::object& document)
     {
         return destroy(selector) && create(document);
     }
 
+    // Update documents matching the selector (without returning documents)
+    // @param selector Query selector to find documents to update
+    // @param updates Fields to update/add
+    // @return true if any documents updated, false otherwise
     bool update(const db::object& selector, const db::object& updates)
     {
         auto documents = db::object{};
         return update(selector, updates, documents);
     }
 
+    // Delete documents matching the selector (without returning documents)
+    // @param selector Query selector to find documents to delete
+    // @return true if any documents deleted, false otherwise
     bool destroy(const db::object& selector)
     {
         auto documents = db::object{};
@@ -76,16 +140,23 @@ public:
 
 //  Getters & setters
 
+    // Get current collection name
+    // @return Current collection name
     const auto& collection() const
     {
         return m_collection;
     };
 
+    // Set current collection name
+    // All CRUD operations operate on the current collection
+    // @param in_use Collection name to switch to
     void collection(std::string_view in_use)
     {
         m_collection = in_use;
     }
 
+    // Get list of all collection names in the database
+    // @return Vector of collection names
     auto collections() const
     {
         auto documents = std::vector<std::string>{};
@@ -102,7 +173,7 @@ private:
 
     std::map<std::string,db::index> m_index;
 
-    std::fstream m_storage;
+    mutable std::fstream m_storage;
 };
 
 } // namespace db

@@ -42,6 +42,28 @@ inline void lock(std::string_view db)
     std::atexit(unlock);
 }
 
+// Helper template to extract metadata value from first matching document
+template<typename T, typename Extractor>
+auto get_metadata_value_impl(std::fstream& storage, const db::index_view& view, const db::object& selector, Extractor extractor) -> std::optional<T>
+{
+    using xson::fson::operator >>;
+    
+    for(const auto position : view)
+    {
+        auto metadata = db::metadata{};
+        auto document = db::object{};
+        storage.clear();
+        storage.seekg(position, storage.beg);
+        storage >> metadata >> document;
+        if(document.match(selector))
+        {
+            return extractor(metadata);
+        }
+    }
+    
+    return std::nullopt; // No matching document found
+}
+
 } // namespace
 
 db::engine::engine(std::string_view db) :
@@ -131,9 +153,14 @@ bool db::engine::create(db::object& document)
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     index.update(document);
-    index.insert(document, m_storage.tellp());
     m_storage << metadata << document;
     m_storage.flush();
+    if(m_storage.fail())
+        return false;
+    
+    // Insert into index using the position that was set by metadata operator<<
+    // (which is the start position of the metadata record where data is written)
+    index.insert(document, metadata.position);
     return true;
 }
 
@@ -178,52 +205,24 @@ bool db::engine::read(const db::object& selector, db::object& documents)
     return success;
 }
 
-std::optional<std::chrono::system_clock::time_point> db::engine::get_metadata_timestamp(const db::object& selector)
+std::optional<std::chrono::system_clock::time_point> db::engine::get_metadata_timestamp(const db::object& selector) const
 {
-    using xson::fson::operator >>;
-    
-    const auto& index = m_index[m_collection];
-    
-    for(const auto position : index.view(selector))
-    {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
-        m_storage.clear();
-        m_storage.seekg(position, m_storage.beg);
-        m_storage >> metadata >> document;
-        
-        if(document.match(selector))
-        {
-            // Return the timestamp from metadata
-            return metadata.timestamp;
-        }
-    }
-    
-    return std::nullopt; // No matching document found
+    const auto it = m_index.find(m_collection);
+    if(it == m_index.end())
+        return std::nullopt;
+    const auto& index = it->second;
+    return get_metadata_value_impl<std::chrono::system_clock::time_point>(
+        m_storage, index.view(selector), selector, [](const db::metadata& m) { return m.timestamp; });
 }
 
-std::optional<std::int64_t> db::engine::get_metadata_position(const db::object& selector)
+std::optional<std::int64_t> db::engine::get_metadata_position(const db::object& selector) const
 {
-    using xson::fson::operator >>;
-    
-    const auto& index = m_index[m_collection];
-    
-    for(const auto position : index.view(selector))
-    {
-        auto metadata = db::metadata{};
-        auto document = db::object{};
-        m_storage.clear();
-        m_storage.seekg(position, m_storage.beg);
-        m_storage >> metadata >> document;
-        
-        if(document.match(selector))
-        {
-            // Return the position from metadata
-            return metadata.position;
-        }
-    }
-    
-    return std::nullopt; // No matching document found
+    const auto it = m_index.find(m_collection);
+    if(it == m_index.end())
+        return std::nullopt;
+    const auto& index = it->second;
+    return get_metadata_value_impl<std::int64_t>(
+        m_storage, index.view(selector), selector, [](const db::metadata& m) { return m.position; });
 }
 
 bool db::engine::update(const db::object& selector, const db::object& updates, db::object& documents)

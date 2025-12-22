@@ -90,6 +90,6 @@ catch(const exception& e)
 }
 catch(...)
 {
-    slog << error << "Shit hit the fan!" << flush;
+    slog << error << "Unexpected error occurred" << flush;
     return 1;
 }

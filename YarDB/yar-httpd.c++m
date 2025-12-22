@@ -1,5 +1,6 @@
 export module yar:httpd;
 import :engine;
+import :constants;
 import std;
 import net;
 import xson;
@@ -30,9 +31,8 @@ inline auto validate_collection_name(std::string_view collection_name)
     if(collection_name.empty())
         throw std::invalid_argument{"Collection name cannot be empty"};
     
-    constexpr auto max_collection_name_length = 256;
-    if(collection_name.size() > max_collection_name_length)
-        throw std::invalid_argument{"Collection name too long (max "s + std::to_string(max_collection_name_length) + " chars)"};
+    if(collection_name.size() > db::max_collection_name_length)
+        throw std::invalid_argument{"Collection name too long (max "s + std::to_string(db::max_collection_name_length) + " chars)"};
     
     // Must start with a letter
     if(collection_name[0] < 'a' || collection_name[0] > 'z')
@@ -109,13 +109,12 @@ constexpr auto parse_value_from_function_args(std::string_view args, std::size_t
 inline auto parse_comma_separated_list(std::string_view list_value)
 {
     auto fields = std::vector<std::string_view>{};
-    constexpr auto max_fields = 1000;
     auto start = std::size_t{0};
     
     while(true)
     {
-        if(fields.size() >= max_fields)
-            throw std::invalid_argument{"Too many fields in list (max 1000)"};
+        if(fields.size() >= db::max_query_fields)
+            throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(db::max_query_fields) + ")"};
         
         auto pos = list_value.find(',', start);
         if(pos == std::string_view::npos)
@@ -1269,9 +1268,8 @@ private:
                                 auto top_value = stoll(params["$top"s]);
                                 if(top_value < 0)
                                     throw std::invalid_argument{"$top must be non-negative"};
-                                constexpr auto max_top = 10000;
-                                if(top_value > max_top)
-                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(max_top) + ")"};
+                                if(top_value > db::max_query_top)
+                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(db::max_query_top) + ")"};
                                 selector["$top"s] = top_value;
                             }
                             catch(const std::exception&)
@@ -1288,9 +1286,8 @@ private:
                                 auto skip_value = stoll(params["$skip"s]);
                                 if(skip_value < 0)
                                     throw std::invalid_argument{"$skip must be non-negative"};
-                                constexpr auto max_skip = 100000;
-                                if(skip_value > max_skip)
-                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(max_skip) + ")"};
+                                if(skip_value > db::max_query_skip)
+                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(db::max_query_skip) + ")"};
                                 selector["$skip"s] = skip_value;
                             }
                             catch(const std::exception&)
@@ -1316,9 +1313,8 @@ private:
                             if(field_name.empty())
                                 throw std::invalid_argument{"$orderby field name cannot be empty"};
                             
-                            constexpr auto max_field_name_length = 256;
-                            if(field_name.size() > max_field_name_length)
-                                throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(max_field_name_length) + " chars)"};
+                            if(field_name.size() > db::max_field_name_length)
+                                throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(db::max_field_name_length) + " chars)"};
                             
                             // Store field name for ordering
                             selector["$orderby"s] = std::string{field_name};
@@ -1563,9 +1559,8 @@ private:
                                 auto top_value = stoll(params["$top"s]);
                                 if(top_value < 0)
                                     throw std::invalid_argument{"$top must be non-negative"};
-                                constexpr auto max_top = 10000;
-                                if(top_value > max_top)
-                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(max_top) + ")"};
+                                if(top_value > db::max_query_top)
+                                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(db::max_query_top) + ")"};
                                 selector["$top"s] = top_value;
                             }
                             catch(const std::exception&)
@@ -1581,9 +1576,8 @@ private:
                                 auto skip_value = stoll(params["$skip"s]);
                                 if(skip_value < 0)
                                     throw std::invalid_argument{"$skip must be non-negative"};
-                                constexpr auto max_skip = 100000;
-                                if(skip_value > max_skip)
-                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(max_skip) + ")"};
+                                if(skip_value > db::max_query_skip)
+                                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(db::max_query_skip) + ")"};
                                 selector["$skip"s] = skip_value;
                             }
                             catch(const std::exception&)

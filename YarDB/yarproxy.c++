@@ -164,7 +164,26 @@ try
     {
         slog << notice << "Accepting connections" << flush;
         auto client = endpoint.accept();
-        std::thread{[client = std::move(client), &replicas]() mutable {handle(client,replicas);}}.detach();
+        std::thread{
+            [client = std::move(client), &replicas]() mutable {
+                try
+                {
+                    handle(client, replicas);
+                }
+                catch(const system_error& e)
+                {
+                    slog << error("yarproxy") << "Thread system error with code " << e.code() << " " << quoted(e.what()) << flush;
+                }
+                catch(const exception& e)
+                {
+                    slog << error("yarproxy") << "Thread exception: " << quoted(e.what()) << flush;
+                }
+                catch(...)
+                {
+                    slog << error("yarproxy") << "Unexpected error in connection handler thread" << flush;
+                }
+            }
+        }.detach();
     }
 }
 catch(const system_error& e)
@@ -179,6 +198,6 @@ catch(const exception& e)
 }
 catch(...)
 {
-    slog << error << "Shit hit the fan!" << flush;
+    slog << error << "Unexpected error occurred" << flush;
     return 1;
 }

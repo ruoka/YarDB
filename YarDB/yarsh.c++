@@ -203,6 +203,6 @@ catch(const std::exception& e)
 }
 catch(...)
 {
-    cerr << "Shit hit the fan!" << endl;
+    cerr << "Unexpected error occurred" << endl;
     return 1;
 }

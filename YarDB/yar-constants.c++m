@@ -1,0 +1,25 @@
+export module yar:constants;
+import std;
+
+export namespace db {
+
+// Reserved field names
+inline constexpr auto reserved_field_id = "_id";        // Primary key field in all documents
+inline constexpr auto reserved_field_collection = "collection";  // Collection name field in _db documents
+inline constexpr auto reserved_field_keys = "keys";     // Secondary keys field in _db documents
+
+// Reserved collection names
+inline constexpr auto reserved_collection_db = "_db";  // System collection containing metadata for all collections
+
+// Query parameter limits
+inline constexpr long long max_query_top = 10000;           // Maximum value for $top query parameter
+inline constexpr long long max_query_skip = 100000;        // Maximum value for $skip query parameter
+inline constexpr int max_query_fields = 1000;        // Maximum number of fields in comma-separated lists
+
+// Collection name limits
+inline constexpr int max_collection_name_length = 256;  // Maximum length for collection names
+
+// Field name limits
+inline constexpr int max_field_name_length = 256;  // Maximum length for field names (e.g., in $orderby)
+
+} // namespace db

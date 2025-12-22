@@ -92,6 +92,7 @@ public:
         case reverse_secondary:
             return std::get<position_type>(*m_reverse_secondary_current);
         }
+        std::unreachable();
     }
 
     auto& operator ++ ()
@@ -127,6 +128,7 @@ public:
         case reverse_secondary:
             return m_reverse_secondary_current != itr.m_reverse_secondary_current;
         }
+        std::unreachable();
     }
 
 private:
@@ -167,28 +169,57 @@ private:
     index_iterator m_begin, m_end;
 };
 
+// Index for fast document lookup by primary key (_id) and secondary keys
+// Maintains primary index (by _id) and secondary indexes (by user-defined fields)
 class index
 {
 public:
 
     index() = default;
 
+    // Add a single secondary index key
+    // @param key Field name to index
     void add(const std::string& key);
 
+    // Add multiple secondary index keys
+    // @param keys Vector of field names to index
     void add(std::vector<std::string> keys);
 
+    // Get list of all secondary index key names
+    // @return Vector of secondary key names
     std::vector<std::string> keys() const;
 
+    // Check if selector uses primary key (_id)
+    // @param selector Query selector
+    // @return true if selector contains _id field
     bool primary_key(const xson::object& selector) const;
 
+    // Check if selector uses any secondary key
+    // @param selector Query selector
+    // @return true if selector contains any indexed secondary key field
     bool secondary_key(const xson::object& selector) const;
 
+    // Get index view for querying documents by selector
+    // Returns iterator over positions matching the selector
+    // @param selector Query selector (can use primary or secondary keys)
+    // @return Index view providing iterator over matching document positions
     index_view view(const xson::object& selector) const;
 
+    // Update document and assign _id if missing
+    // Increments sequence counter for new _id assignment
+    // @param document Document to update (may be modified to add _id)
     void update(xson::object& document);
 
+    // Insert document into index with storage position
+    // Updates primary key index and all matching secondary key indexes
+    // Overwrites existing entries if document with same key already exists
+    // @param document Document to index
+    // @param position Storage file position where document is stored
     void insert(xson::object& document, position_type position);
 
+    // Erase document from all indexes
+    // Removes from primary key index and all secondary key indexes
+    // @param document Document to remove from index
     void erase(const xson::object& document);
 
 private:

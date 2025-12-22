@@ -9,28 +9,47 @@ export namespace db
 
 using object = xson::object;
 
+// Metadata record stored with each document in the database
+// Tracks document lifecycle, collection, timestamp, and version chain
 struct metadata
 {
-    enum action : char {created = 'C', updated = 'U', deleted = 'D'};
+    // Document lifecycle action
+    enum action : char {
+        created = 'C',  // Document was created
+        updated = 'U',  // Document was updated (old version)
+        deleted = 'D'   // Document was deleted
+    };
+    
+    // Construct metadata with action
+    // @param s Action type (default: created)
     metadata(action s = created) : status{s}
     {};
+    
+    // Construct metadata for a collection
+    // @param c Collection name
     metadata(const std::string& c) : metadata{created}
     {
         collection = c;
     };
-    action status = created;
-    std::string collection = ""s;
-    std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::time_point{};
-//  std::streamoff position = -1;
-//  std::streamoff previous = -1;
-    std::int64_t position = -1;
-    std::int64_t previous = -1;
+    
+    action status = created;  // Current lifecycle status
+    std::string collection = ""s;  // Collection name this document belongs to
+    std::chrono::system_clock::time_point timestamp = std::chrono::system_clock::time_point{};  // Creation/update timestamp
+    std::int64_t position = -1;  // File position where this metadata record starts (set on write)
+    std::int64_t previous = -1;  // File position of previous version (for history chain)
 };
 
+// Predefined metadata for marking documents as updated
 const auto updated = metadata{metadata::updated};
 
+// Predefined metadata for marking documents as deleted
 const auto deleted = metadata{metadata::deleted};
 
+// Serialize metadata to output stream
+// Sets timestamp to current time and position to current stream position
+// @param os Output stream
+// @param data Metadata to serialize (position and timestamp are updated)
+// @return Reference to output stream
 inline auto& operator << (std::ostream& os, metadata& data)
 {
     data.timestamp = std::chrono::system_clock::now();
@@ -44,12 +63,20 @@ inline auto& operator << (std::ostream& os, metadata& data)
     return os;
 }
 
+// Serialize only status to output stream (for marking old records)
+// @param os Output stream
+// @param data Metadata containing status to serialize
+// @return Reference to output stream
 inline auto& operator << (std::ostream& os, const metadata& data)
 {
     xson::fast::encode(os,data.status);
     return os;
 }
 
+// Deserialize metadata from input stream
+// @param is Input stream
+// @param data Metadata to populate
+// @return Reference to input stream
 inline auto& operator >> (std::istream& is, metadata& data)
 {
     xson::fast::decode(is,data.status);
@@ -60,12 +87,15 @@ inline auto& operator >> (std::istream& is, metadata& data)
     return is;
 }
 
+// Convert metadata action enum to string representation
+// @param a Action enum value
+// @return String representation ("created", "updated", or "deleted")
 inline auto to_string(metadata::action a)
 {
     if(a == metadata::created) return "created"s;
     if(a == metadata::updated) return "updated"s;
     if(a == metadata::deleted) return "deleted"s;
-    std::terminate();
+    std::unreachable();
 }
 
 } // namespace db

@@ -34,9 +34,10 @@ export LDFLAGS="-Wl,-rpath,$LLVM_PREFIX/lib ${LDFLAGS}"
 # Recompile only if source is newer or binary missing
 if [[ ! -x "$BIN" || "$SRC" -nt "$BIN" ]]; then
     echo "Building CB (C++ Builder) with $CXX_COMPILER..."
+    # Use -B to tell clang++ where to find binaries (like the linker)
     "$CXX_COMPILER" \
+        -B"$LLVM_PREFIX/bin" \
         -std=c++23 -O3 -pthread \
-        -fuse-ld=lld \
         -stdlib=libc++ \
         -I"$LLVM_PREFIX/include/c++/v1" \
         -L"$LLVM_PREFIX/lib" \

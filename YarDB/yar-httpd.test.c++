@@ -204,7 +204,7 @@ auto test_set()
             require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
-            const long long id = created_doc["_id"s];
+            const long long id = static_cast<long long>(static_cast<xson::integer_type>(created_doc["_id"s]));
             
             // Get the document
             auto [status, reason, headers, response_body] = make_request(
@@ -220,7 +220,7 @@ auto test_set()
             
             auto document = json::parse(response_body);
             require_true(document.has("_id"s));
-            const long long doc_id = document["_id"s];
+            const long long doc_id = static_cast<long long>(static_cast<xson::integer_type>(document["_id"s]));
             require_eq(doc_id, id);
         };
 
@@ -252,7 +252,7 @@ auto test_set()
             require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
-            const long long id = created_doc["_id"s];
+            const long long id = static_cast<long long>(static_cast<xson::integer_type>(created_doc["_id"s]));
             
             // Delete the document
             auto [status, reason, headers, response_body] = make_request(
@@ -306,7 +306,7 @@ auto test_set()
             require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
-            const long long id = created_doc["_id"s];
+            const long long id = static_cast<long long>(static_cast<xson::integer_type>(created_doc["_id"s]));
             
             // Update the document
             auto [status, reason, headers, response_body] = make_request(
@@ -324,7 +324,7 @@ auto test_set()
             auto document = json::parse(response_body);
             const string name = document["name"s];
             require_eq(name, "Updated"s);
-            const long long value = document["value"s];
+            const long long value = static_cast<long long>(static_cast<xson::integer_type>(document["value"s]));
             require_eq(value, 100ll);
         };
 
@@ -345,11 +345,11 @@ auto test_set()
             require_eq(location, "/testitems/"s + std::to_string(new_id));
             
             auto document = json::parse(response_body);
-            const long long doc_id = document["_id"s];
+            const long long doc_id = static_cast<long long>(static_cast<xson::integer_type>(document["_id"s]));
             require_eq(doc_id, new_id);
             const string name = document["name"s];
             require_eq(name, "New Item"s);
-            const long long value = document["value"s];
+            const long long value = static_cast<long long>(static_cast<xson::integer_type>(document["value"s]));
             require_eq(value, 200ll);
             
             // Verify we can retrieve it
@@ -368,7 +368,7 @@ auto test_set()
             require_eq(post_status, "201"s);
             
             auto created_doc = json::parse(post_body);
-            const long long id = created_doc["_id"s];
+            const long long id = static_cast<long long>(static_cast<xson::integer_type>(created_doc["_id"s]));
             
             // Partially update the document
             auto [status, reason, headers, response_body] = make_request(
@@ -703,7 +703,7 @@ auto test_set()
             for(const auto& item : items)
             {
                 require_true(item.has("age"s));
-                const auto age = static_cast<long long>(item["age"s]);
+                const auto age = static_cast<long long>(static_cast<xson::integer_type>(item["age"s]));
                 require_true(age > 25);
             }
         };
@@ -795,7 +795,7 @@ auto test_set()
                 const string status = item["status"s];
                 require_eq(status, "active"s);
                 require_true(item.has("age"s));
-                const auto age = static_cast<long long>(item["age"s]);
+                const auto age = static_cast<long long>(static_cast<xson::integer_type>(item["age"s]));
                 require_true(age >= 25);
             }
         };
@@ -1566,7 +1566,7 @@ auto test_set()
             auto documents = json::parse(get_body);
             require_true(documents.is_array());
             require_true(documents.size() > 0);
-            const auto id = static_cast<long long>(documents[0]["_id"s]);
+            const auto id = static_cast<long long>(static_cast<xson::integer_type>(documents[0]["_id"s]));
             
             // Now test HEAD
             auto [status, reason, headers, response_body] = make_request(
@@ -1730,7 +1730,7 @@ auto test_set()
                 setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
             );
             auto documents = json::parse(get_body);
-            const auto id = static_cast<long long>(documents[0]["_id"s]);
+            const auto id = static_cast<long long>(static_cast<xson::integer_type>(documents[0]["_id"s]));
             
             auto [status, reason, headers, response_body] = make_request_with_accept(
                 setup->get_port(), "PUT"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Updated"})"s
@@ -1747,7 +1747,7 @@ auto test_set()
                 setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
             );
             auto documents = json::parse(get_body);
-            const auto id = static_cast<long long>(documents[0]["_id"s]);
+            const auto id = static_cast<long long>(static_cast<xson::integer_type>(documents[0]["_id"s]));
             
             auto [status, reason, headers, response_body] = make_request_with_accept(
                 setup->get_port(), "PATCH"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Patched"})"s
@@ -1764,7 +1764,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/headtest"s, R"({"name":"To Delete"})"s
             );
             auto created_doc = json::parse(post_body);
-            const auto id = static_cast<long long>(created_doc["_id"s]);
+            const auto id = static_cast<long long>(static_cast<xson::integer_type>(created_doc["_id"s]));
             
             auto [status, reason, headers, response_body] = make_request_with_accept(
                 setup->get_port(), "DELETE"s, "/headtest/"s + std::to_string(id), "application/xml"s, ""s
@@ -1875,7 +1875,7 @@ auto test_set()
                 require_true(item.has("@odata.editLink"s));
                 require_true(item.has("_id"s));
                 
-                auto id = static_cast<long long>(item["_id"s]);
+                auto id = static_cast<long long>(static_cast<xson::integer_type>(item["_id"s]));
                 require_eq(item["@odata.id"s].get<string>(), "/odatatest/"s + std::to_string(id));
                 require_eq(item["@odata.editLink"s].get<string>(), "/odatatest/"s + std::to_string(id));
             }
@@ -1890,7 +1890,7 @@ auto test_set()
             auto all_docs = json::parse(get_body);
             auto& items = all_docs.get<xson::object::array>();
             require_false(items.empty());
-            auto doc_id = static_cast<long long>(items[0]["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(items[0]["_id"s]));
             
             // Get single document with minimal metadata
             auto [status, reason, headers, body] = make_request_with_accept(
@@ -1919,7 +1919,7 @@ auto test_set()
             auto all_docs = json::parse(get_body);
             auto& items = all_docs.get<xson::object::array>();
             require_false(items.empty());
-            auto doc_id = static_cast<long long>(items[0]["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(items[0]["_id"s]));
             
             // Get single document with full metadata
             auto [status, reason, headers, body] = make_request_with_accept(
@@ -2000,7 +2000,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/odatatest3"s, R"({"name":"Charlie"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // Update with full metadata request
             auto [status, reason, headers, body] = make_request_with_accept(
@@ -2025,7 +2025,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/odatatest4"s, R"({"name":"David"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // Update with minimal metadata request
             auto [status, reason, headers, body] = make_request_with_accept(
@@ -2065,7 +2065,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest"s, R"({"name":"ETag Document"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document
             auto [status, reason, headers, body] = make_request(
@@ -2088,7 +2088,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest2"s, R"({"name":"If-None-Match Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document to get ETag
             auto [get_status, _unused3, headers1, _unused4] = make_request(
@@ -2117,7 +2117,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest3"s, R"({"name":"If-None-Match Non-Match"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET with If-None-Match with a different ETag
             auto custom_headers = std::map<string, string>{{"If-None-Match", "\"different-etag\""s}};
@@ -2139,7 +2139,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest4"s, R"({"name":"If-Match Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document to get ETag
             auto [get_status, _unused7, headers1, _unused8] = make_request(
@@ -2169,7 +2169,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest5"s, R"({"name":"If-Match Fail Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // PUT with If-Match with a different ETag
             auto custom_headers = std::map<string, string>{{"If-Match", "\"wrong-etag\""s}};
@@ -2192,7 +2192,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest6"s, R"({"name":"PATCH If-Match Test","age":25})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document to get ETag
             auto [get_status, _unused11, headers1, _unused12] = make_request(
@@ -2219,7 +2219,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest7"s, R"({"name":"PATCH Fail Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // PATCH with If-Match with a different ETag
             auto custom_headers = std::map<string, string>{{"If-Match", "\"wrong-etag\""s}};
@@ -2239,7 +2239,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest8"s, R"({"name":"ETag After Update"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET to get initial ETag
             auto [get_status1, _unused15, headers1, _unused16] = make_request(
@@ -2268,7 +2268,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest9"s, R"({"name":"HEAD ETag Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // HEAD request
             auto [status, reason, headers, body] = make_request(
@@ -2287,7 +2287,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest10"s, R"({"name":"Wildcard Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // PUT with If-Match: *
             auto custom_headers = std::map<string, string>{{"If-Match", "*"s}};
@@ -2306,7 +2306,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/etagtest11"s, R"({"name":"Wildcard None-Match"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET with If-None-Match: *
             auto custom_headers = std::map<string, string>{{"If-None-Match", "*"s}};
@@ -2330,7 +2330,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest"s, R"({"name":"Last-Modified Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document
             auto [status, reason, headers, body] = make_request(
@@ -2354,7 +2354,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest2"s, R"({"name":"If-Modified-Since Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document to get Last-Modified
             auto [get_status, _unused_get1, headers1, _unused_get2] = make_request(
@@ -2391,7 +2391,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest3"s, R"({"name":"Future Date Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET with If-Modified-Since set to a future date (document is older)
             auto future_date = "Tue, 31 Dec 2099 23:59:59 GMT"s;
@@ -2412,7 +2412,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest4"s, R"({"name":"If-Unmodified-Since Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document to get Last-Modified
             auto [get_status, _unused_get3, headers1, _unused_get4] = make_request(
@@ -2441,7 +2441,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest5"s, R"({"name":"Past Date Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // Wait a moment to ensure document timestamp is newer than past date
             std::this_thread::sleep_for(100ms);
@@ -2469,7 +2469,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest6"s, R"({"name":"PATCH If-Unmodified-Since Test","age":25})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // GET the document to get Last-Modified
             auto [get_status, _unused_get5, headers1, _unused_get6] = make_request(
@@ -2495,7 +2495,7 @@ auto test_set()
                 setup->get_port(), "POST"s, "/lastmodifiedtest7"s, R"({"name":"HEAD Last-Modified Test"})"s
             );
             auto created = json::parse(post_body);
-            auto doc_id = static_cast<long long>(created["_id"s]);
+            auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(created["_id"s]));
             
             // HEAD request
             auto [status, reason, headers, body] = make_request(

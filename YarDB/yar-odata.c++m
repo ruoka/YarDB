@@ -113,7 +113,7 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
         {
             if(item.has("_id"s))
             {
-                auto item_id = static_cast<long long>(item["_id"s]);
+                auto item_id = static_cast<long long>(static_cast<xson::integer_type>(item["_id"s]));
                 item = add_metadata(item, level, collection_name, item_id);
             }
         }

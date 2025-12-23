@@ -87,21 +87,21 @@ private:
 
                     try
                     {
-                        auto uri = ::http::uri{request};
+                        const auto uri = ::http::uri{request};
                         auto document = xson::json::parse(body);
 
                         const auto guard = std::lock_guard{m_engine};
-                        auto collection = validate_collection_name(uri.path[1]);
+                        const auto collection = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection);
                         m_engine.create(document);
                         
                         // Add Location header pointing to the newly created resource
                         auto response_headers = ::http::headers{};
-                        const auto id = static_cast<long long>(document["_id"s]);
+                        const auto id = static_cast<long long>(static_cast<xson::integer_type>(document["_id"s]));
                         response_headers.set("location"s, "/"s + collection + "/"s + std::to_string(id));
                         
                         // Add OData metadata if requested
-                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                         if(metadata_level != yar::http::odata::metadata_level::none)
                             document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
@@ -130,13 +130,13 @@ private:
 
                     try
                     {
-                        auto uri = ::http::uri{request};
-                        auto id = stoll(uri.path[2]);
+                        const auto uri = ::http::uri{request};
+                        const auto id = stoll(uri.path[2]);
                         auto documents = xson::object{};
                         auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
-                        auto collection = validate_collection_name(uri.path[1]);
+                        const auto collection = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection);
                         auto found = m_engine.read(selector, documents);
 
@@ -156,7 +156,7 @@ private:
                         auto document = documents.get<xson::object::array>()[0];
                         
                         // Add OData metadata if requested
-                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                         if(metadata_level != yar::http::odata::metadata_level::none)
                             document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
@@ -168,17 +168,17 @@ private:
                         // Generate ETag from position
                         if(metadata_position.has_value())
                         {
-                            auto etag = generate_etag(metadata_position.value());
+                            const auto etag = generate_etag(metadata_position.value());
                             response_headers.set("etag"s, etag);
                             
                             // Check If-None-Match conditional request (for GET/HEAD)
-                            auto none_match_check = check_if_none_match(headers, etag);
+                            const auto none_match_check = check_if_none_match(headers, etag);
                             if(none_match_check.has_value() && !none_match_check.value())
                             {
                                 // ETag matches - resource not modified, return 304 Not Modified
                                 if(metadata_timestamp.has_value())
                                 {
-                                    auto last_modified = format_http_date(metadata_timestamp.value());
+                                    const auto last_modified = format_http_date(metadata_timestamp.value());
                                     response_headers.set("last-modified"s, last_modified);
                                 }
                                 return std::make_tuple("304 Not Modified"s, ""s, std::make_optional(response_headers));
@@ -187,11 +187,11 @@ private:
                         
                         if(metadata_timestamp.has_value())
                         {
-                            auto last_modified = format_http_date(metadata_timestamp.value());
+                            const auto last_modified = format_http_date(metadata_timestamp.value());
                             response_headers.set("last-modified"s, last_modified);
                             
                             // Check If-Modified-Since conditional request
-                            auto modified_check = check_if_modified_since(headers, metadata_timestamp.value());
+                            const auto modified_check = check_if_modified_since(headers, metadata_timestamp.value());
                             if(modified_check.has_value() && !modified_check.value())
                             {
                                 // Document not modified since client's date - return 304 Not Modified
@@ -226,7 +226,7 @@ private:
 
                     try
                     {
-                        auto uri = ::http::uri{request};
+                        const auto uri = ::http::uri{request};
                         auto document = xson::object{};
                         auto selector = xson::object{};
                         
@@ -265,7 +265,7 @@ private:
                             }
                             
                             const auto guard = std::lock_guard{m_engine};
-                            auto collection_name = validate_collection_name(uri.path[1]);
+                            const auto collection_name = validate_collection_name(uri.path[1]);
                             m_engine.collection(collection_name);
                             
                             // Read all matching documents to count them
@@ -295,7 +295,7 @@ private:
                         {
                             try
                             {
-                                auto top_value = stoll(params["$top"s]);
+                                const auto top_value = stoll(params["$top"s]);
                                 if(top_value < 0)
                                     throw std::invalid_argument{"$top must be non-negative"};
                                 if(top_value > yar::db::max_query_top)
@@ -313,7 +313,7 @@ private:
                         {
                             try
                             {
-                                auto skip_value = stoll(params["$skip"s]);
+                                const auto skip_value = stoll(params["$skip"s]);
                                 if(skip_value < 0)
                                     throw std::invalid_argument{"$skip must be non-negative"};
                                 if(skip_value > yar::db::max_query_skip)
@@ -384,7 +384,7 @@ private:
                         }
 
                         const auto guard = std::lock_guard{m_engine};
-                        auto collection_name = validate_collection_name(uri.path[1]);
+                        const auto collection_name = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection_name);
                         m_engine.read(selector, document);
                         
@@ -407,7 +407,7 @@ private:
                         }
                         
                         // Add OData metadata if requested
-                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                         if(metadata_level != yar::http::odata::metadata_level::none)
                         {
                             if(document.is_array())
@@ -417,7 +417,7 @@ private:
                             else if(document.has("_id"s))
                             {
                                 // Single object - add metadata directly
-                                auto doc_id = static_cast<long long>(document["_id"s]);
+                                const auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(document["_id"s]));
                                 document = yar::http::odata::add_metadata(document, metadata_level, collection_name, doc_id);
                             }
                         }
@@ -450,7 +450,7 @@ private:
                     auto response = xson::object{"collections", m_engine.collections()};
                     
                     // Add OData metadata if requested
-                    auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                    const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                     if(metadata_level != yar::http::odata::metadata_level::none)
                     {
                         response["@odata.context"s] = "/$metadata#Collections"s;
@@ -473,13 +473,13 @@ private:
 
                     try
                     {
-                        auto uri = ::http::uri{request};
-                        auto id = stoll(uri.path[2]);
+                        const auto uri = ::http::uri{request};
+                        const auto id = stoll(uri.path[2]);
                         auto documents = xson::object{};
                         auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
-                        auto collection = validate_collection_name(uri.path[1]);
+                        const auto collection = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection);
                         auto found = m_engine.read(selector, documents);
 
@@ -500,7 +500,7 @@ private:
                         auto document = documents.get<xson::object::array>()[0];
                         
                         // Add OData metadata if requested
-                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                         if(metadata_level != yar::http::odata::metadata_level::none)
                             document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
@@ -512,17 +512,17 @@ private:
                         // Generate ETag from position
                         if(metadata_position.has_value())
                         {
-                            auto etag = generate_etag(metadata_position.value());
+                            const auto etag = generate_etag(metadata_position.value());
                             response_headers.set("etag"s, etag);
                             
                             // Check If-None-Match conditional request (for GET/HEAD)
-                            auto none_match_check = check_if_none_match(headers, etag);
+                            const auto none_match_check = check_if_none_match(headers, etag);
                             if(none_match_check.has_value() && !none_match_check.value())
                             {
                                 // ETag matches - resource not modified, return 304 Not Modified
                                 if(metadata_timestamp.has_value())
                                 {
-                                    auto last_modified = format_http_date(metadata_timestamp.value());
+                                    const auto last_modified = format_http_date(metadata_timestamp.value());
                                     response_headers.set("last-modified"s, last_modified);
                                 }
                                 const auto content = xson::json::stringify(document); // Still compute for Content-Length
@@ -532,11 +532,11 @@ private:
                         
                         if(metadata_timestamp.has_value())
                         {
-                            auto last_modified = format_http_date(metadata_timestamp.value());
+                            const auto last_modified = format_http_date(metadata_timestamp.value());
                             response_headers.set("last-modified"s, last_modified);
                             
                             // Check If-Modified-Since conditional request
-                            auto modified_check = check_if_modified_since(headers, metadata_timestamp.value());
+                            const auto modified_check = check_if_modified_since(headers, metadata_timestamp.value());
                             if(modified_check.has_value() && !modified_check.value())
                             {
                                 // Document not modified since client's date - return 304 Not Modified
@@ -643,7 +643,7 @@ private:
                         }
                         
                         // Extract collection name from path (e.g., /_db/users -> users)
-                        auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
+                        const auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
                         
                         const auto guard = std::lock_guard{m_engine};
                         
@@ -676,10 +676,10 @@ private:
                         auto result_document = db_documents.get<xson::object::array>()[0];
                         
                         // Add OData metadata if requested
-                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                         if(metadata_level != yar::http::odata::metadata_level::none)
                         {
-                            auto doc_id = static_cast<long long>(result_document["_id"s]);
+                            const auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(result_document["_id"s]));
                             result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
                         }
                         
@@ -714,7 +714,7 @@ private:
 
                     try
                     {
-                        auto uri = ::http::uri{request};
+                        const auto uri = ::http::uri{request};
                         auto request_body = xson::json::parse(body);
                         
                         // Validate request body has "keys" field
@@ -728,7 +728,7 @@ private:
                         }
                         
                         // Extract and validate keys
-                        auto keys_value = request_body["keys"s];
+                        const auto keys_value = request_body["keys"s];
                         if(!keys_value.is_array())
                         {
                             auto error = xson::object{
@@ -738,7 +738,7 @@ private:
                             return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
                         }
                         
-                        auto keys_array = keys_value.get<xson::object::array>();
+                        const auto keys_array = keys_value.get<xson::object::array>();
                         if(keys_array.empty())
                         {
                             auto error = xson::object{
@@ -749,7 +749,7 @@ private:
                         }
                         
                         // Extract collection name from path
-                        auto collection_name = validate_collection_name(uri.path[2]);
+                        const auto collection_name = validate_collection_name(uri.path[2]);
                         
                         const auto guard = std::lock_guard{m_engine};
                         
@@ -763,10 +763,10 @@ private:
                         auto existing_keys_set = std::set<std::string>{};
                         if(has_existing && !existing_docs.get<xson::object::array>().empty())
                         {
-                            auto existing_doc = existing_docs.get<xson::object::array>()[0];
+                            const auto existing_doc = existing_docs.get<xson::object::array>()[0];
                             if(existing_doc.has("keys"s))
                             {
-                                auto existing_keys_array = existing_doc["keys"s].get<xson::object::array>();
+                                const auto existing_keys_array = existing_doc["keys"s].get<xson::object::array>();
                                 for(const auto& key : existing_keys_array)
                                 {
                                     if(key.is_string())
@@ -826,10 +826,10 @@ private:
                                 auto result_document = existing_docs.get<xson::object::array>()[0];
                                 
                                 // Add OData metadata if requested
-                                auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                                const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                                 if(metadata_level != yar::http::odata::metadata_level::none)
                                 {
-                                    auto doc_id = static_cast<long long>(result_document["_id"s]);
+                                    const auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(result_document["_id"s]));
                                     result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
                                 }
                                 
@@ -875,10 +875,10 @@ private:
                         auto result_document = db_documents.get<xson::object::array>()[0];
                         
                         // Add OData metadata if requested
-                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                         if(metadata_level != yar::http::odata::metadata_level::none)
                         {
-                            auto doc_id = static_cast<long long>(result_document["_id"s]);
+                            const auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(result_document["_id"s]));
                             result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
                         }
                         
@@ -1019,7 +1019,7 @@ private:
                             else if(document.has("_id"s))
                             {
                                 // Single object - add metadata directly
-                                auto doc_id = static_cast<long long>(document["_id"s]);
+                                const auto doc_id = static_cast<long long>(static_cast<xson::integer_type>(document["_id"s]));
                                 document = yar::http::odata::add_metadata(document, metadata_level, collection_name, doc_id);
                             }
                         }

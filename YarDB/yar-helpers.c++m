@@ -31,7 +31,7 @@ inline auto validate_collection_name(std::string_view collection_name)
     if(collection_name.empty())
         throw std::invalid_argument{"Collection name cannot be empty"};
     
-        if(collection_name.size() > yar::db::max_collection_name_length)
+    if(collection_name.size() > yar::db::max_collection_name_length)
         throw std::invalid_argument{"Collection name too long (max "s + std::to_string(yar::db::max_collection_name_length) + " chars)"};
     
     // Must start with a letter

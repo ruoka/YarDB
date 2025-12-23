@@ -87,6 +87,16 @@ private:
 
                     try
                     {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
                         const auto uri = ::http::uri{request};
                         auto document = xson::json::parse(body);
 
@@ -571,6 +581,16 @@ private:
 
                     try
                     {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
                         auto uri = ::http::uri{request};
                         auto request_body = xson::json::parse(body);
                         
@@ -714,6 +734,16 @@ private:
 
                     try
                     {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
                         const auto uri = ::http::uri{request};
                         auto request_body = xson::json::parse(body);
                         
@@ -1051,6 +1081,16 @@ private:
 
                     try
                     {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
                         auto uri = ::http::uri{request};
                         auto document = xson::json::parse(body);
                         auto id = stoll(uri.path[2]);
@@ -1177,6 +1217,16 @@ private:
 
                     try
                     {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
+                            return std::make_tuple("400 Bad Request"s, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
                         auto uri = ::http::uri{request};
                         auto updates = xson::json::parse(body);
                         auto documents = xson::object{};

@@ -18,6 +18,10 @@ class fixture
 public:
     fixture(string_view f) : file{f}, port{"21120"s}, server{file, "21120"s}
     {
+        // Clean up any stale PID file from previous test runs
+        const auto pid_file = string{f} + ".pid"s;
+        remove(pid_file.c_str());
+        
         auto fs = fstream{};
         fs.open(file, ios::out);
         fs.close();

@@ -1,0 +1,484 @@
+export module yar:helper;
+import :constants;
+import std;
+import net;
+import xson;
+
+// General HTTP server helper functions
+// This module contains utilities that are not specific to OData
+
+namespace yar::http::helpers {
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+using namespace net;
+
+// String conversion utilities
+inline auto stoll(std::string_view sv)
+{
+    auto ll = 0ll;
+    auto [ptr, ec] = std::from_chars(sv.begin(),sv.end(),ll);
+    if(ec == std::errc::result_out_of_range)
+        throw std::invalid_argument{"Number out of range: "s + std::string{sv}};
+    if(ec != std::errc() || ptr != sv.end())
+        throw std::invalid_argument{"Invalid ID format: "s + std::string{sv}};
+    return ll;
+}
+
+// Collection name validation
+inline auto validate_collection_name(std::string_view collection_name)
+{
+    if(collection_name.empty())
+        throw std::invalid_argument{"Collection name cannot be empty"};
+    
+        if(collection_name.size() > yar::db::max_collection_name_length)
+        throw std::invalid_argument{"Collection name too long (max "s + std::to_string(yar::db::max_collection_name_length) + " chars)"};
+    
+    // Must start with a letter
+    if(collection_name[0] < 'a' || collection_name[0] > 'z')
+        throw std::invalid_argument{"Collection name must start with a lowercase letter"};
+    
+    // Must contain only lowercase letters, digits, and underscores
+    for(auto c : collection_name)
+    {
+        if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
+    }
+    
+    return std::string{collection_name};
+}
+
+// String trimming utilities
+constexpr auto trim_start(std::string_view sv)
+{
+    auto start = sv.find_first_not_of(" \t\n\r");
+    return start == std::string_view::npos ? sv : sv.substr(start);
+}
+
+constexpr auto trim_end(std::string_view sv)
+{
+    auto end = sv.find_last_not_of(" \t\n\r");
+    return end == std::string_view::npos ? sv : sv.substr(0, end + 1);
+}
+
+constexpr auto trim(std::string_view sv)
+{
+    return trim_start(trim_end(sv));
+}
+
+inline auto trim_end_to_string(std::string_view sv)
+{
+    return std::string{trim_end(sv)};
+}
+
+inline auto trim_start_to_string(std::string_view sv)
+{
+    return std::string{trim_start(sv)};
+}
+
+// URL utilities
+inline auto url_decode(std::string_view encoded)
+{
+    auto decoded = std::string{};
+    decoded.reserve(encoded.length());
+    
+    for(std::size_t i = 0; i < encoded.length(); ++i)
+    {
+        if(encoded[i] == '%' && i + 2 < encoded.length())
+        {
+            // Try to decode %XX - need at least 2 hex digits
+            auto hex = encoded.substr(i + 1, 2);
+            auto value = 0;
+            auto [ptr, ec] = std::from_chars(hex.data(), hex.data() + hex.length(), value, 16);
+            // from_chars validates hex characters, so we don't need manual validation
+            if(ec == std::errc() && ptr == hex.data() + hex.length())
+            {
+                decoded += static_cast<char>(value);
+                i += 2; // Skip the %XX
+                continue;
+            }
+            // Invalid %XX sequence - include the % as-is (fall through)
+        }
+        // Not a valid %XX sequence, or + (which should be space in query strings)
+        if(encoded[i] == '+')
+            decoded += ' ';
+        else
+            decoded += encoded[i];
+    }
+    
+    return decoded;
+}
+
+// HTTP date utilities
+inline auto format_http_date(std::chrono::system_clock::time_point tp) -> std::string
+{
+    // Format chrono::time_point directly using std::format
+    // Format specifiers: %a=weekday, %d=day, %b=month, %Y=year, %H=%M=%S=time
+    return std::format("{:%a, %d %b %Y %H:%M:%S} GMT"sv, tp);
+}
+
+inline auto parse_http_date(std::string_view date_str) -> std::optional<std::chrono::system_clock::time_point>
+{
+    using namespace std::chrono;
+    
+    // Parse format: "%a, %d %b %Y %H:%M:%S GMT"
+    // Find comma (after weekday)
+    auto comma_pos = date_str.find(',');
+    if(comma_pos == std::string_view::npos || comma_pos == 0)
+        return std::nullopt;
+    
+    // Skip weekday and comma, find date part
+    auto date_part = trim_start(date_str.substr(comma_pos + 1));
+    
+    // Parse: "21 Dec 2025 22:30:08 GMT"
+    // Extract day (first number)
+    auto space1 = date_part.find(' ');
+    if(space1 == std::string_view::npos)
+        return std::nullopt;
+    
+    auto day_str = trim(date_part.substr(0, space1));
+    auto day = 0;
+    auto [ptr1, ec1] = std::from_chars(day_str.data(), day_str.data() + day_str.size(), day);
+    if(ec1 != std::errc() || ptr1 != day_str.data() + day_str.size() || day < 1 || day > 31)
+        return std::nullopt;
+    
+    // Extract month
+    auto month_part = trim_start(date_part.substr(space1 + 1));
+    auto space2 = month_part.find(' ');
+    if(space2 == std::string_view::npos || space2 != 3)
+        return std::nullopt;
+    
+    auto month_str = month_part.substr(0, 3);
+    constexpr const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    auto month = 0u;
+    for(auto i = 0u; i < 12; ++i)
+    {
+        if(month_str == months[i])
+        {
+            month = i + 1;
+            break;
+        }
+    }
+    if(month == 0)
+        return std::nullopt;
+    
+    // Extract year
+    auto year_part = trim_start(month_part.substr(space2 + 1));
+    auto space3 = year_part.find(' ');
+    if(space3 == std::string_view::npos)
+        return std::nullopt;
+    
+    auto year_str = year_part.substr(0, space3);
+    auto year = 0;
+    auto [ptr2, ec2] = std::from_chars(year_str.data(), year_str.data() + year_str.size(), year);
+    if(ec2 != std::errc() || ptr2 != year_str.data() + year_str.size())
+        return std::nullopt;
+    
+    // Extract time
+    auto time_part = trim_start(year_part.substr(space3 + 1));
+    auto space4 = time_part.find(' ');
+    if(space4 == std::string_view::npos)
+        return std::nullopt;
+    
+    auto time_str = time_part.substr(0, space4);
+    // Parse HH:MM:SS
+    auto colon1 = time_str.find(':');
+    auto colon2 = time_str.find(':', colon1 + 1);
+    if(colon1 == std::string_view::npos || colon2 == std::string_view::npos)
+        return std::nullopt;
+    
+    auto hour_str = time_str.substr(0, colon1);
+    auto minute_str = time_str.substr(colon1 + 1, colon2 - colon1 - 1);
+    auto second_str = time_str.substr(colon2 + 1);
+    
+    auto hour = 0u, minute = 0u, second = 0u;
+    auto [ptr3, ec3] = std::from_chars(hour_str.data(), hour_str.data() + hour_str.size(), hour);
+    auto [ptr4, ec4] = std::from_chars(minute_str.data(), minute_str.data() + minute_str.size(), minute);
+    auto [ptr5, ec5] = std::from_chars(second_str.data(), second_str.data() + second_str.size(), second);
+    
+    if(ec3 != std::errc() || ptr3 != hour_str.data() + hour_str.size() || hour > 23)
+        return std::nullopt;
+    if(ec4 != std::errc() || ptr4 != minute_str.data() + minute_str.size() || minute > 59)
+        return std::nullopt;
+    if(ec5 != std::errc() || ptr5 != second_str.data() + second_str.size() || second > 59)
+        return std::nullopt;
+    
+    // Check for "GMT" suffix
+    auto gmt_part = trim_start(time_part.substr(space4 + 1));
+    if(!gmt_part.starts_with("GMT"sv))
+        return std::nullopt;
+    
+    // Construct time_point
+    try
+    {
+        // Use fully qualified type names to avoid conflict with local variable names (year, month, day)
+        // Cast day to unsigned int to avoid narrowing conversion (std::chrono::day requires unsigned int)
+        auto ymd = std::chrono::year_month_day{
+            std::chrono::year{year}, 
+            std::chrono::month{month}, 
+            std::chrono::day{static_cast<unsigned int>(day)}
+        };
+        auto tp = std::chrono::sys_days{ymd} + 
+                  std::chrono::hours{hour} + 
+                  std::chrono::minutes{minute} + 
+                  std::chrono::seconds{second};
+        // sys_days + duration gives us a system_clock::time_point (with correct precision)
+        return std::chrono::time_point_cast<std::chrono::system_clock::duration>(tp);
+    }
+    catch(...)
+    {
+        return std::nullopt;
+    }
+}
+
+// ETag utilities
+inline auto generate_etag(std::int64_t position) -> std::string
+{
+    // Convert position to hex string
+    constexpr auto hex_digits = "0123456789abcdef"sv;
+    auto etag = std::string{"\""};
+    
+    // Convert int64_t to hex (handle both positive and negative)
+    auto pos = static_cast<std::uint64_t>(position);
+    
+    if(pos == 0)
+    {
+        etag += '0';
+    }
+    else
+    {
+        // Extract hex digits in reverse order
+        auto digits = std::string{};
+        while(pos > 0)
+        {
+            digits += hex_digits[pos & 0xf];
+            pos >>= 4;
+        }
+        // Reverse to get correct order
+        etag.append(digits.rbegin(), digits.rend());
+    }
+    
+    etag += '"';
+    return etag;
+}
+
+inline auto trim_etag_quotes(std::string_view etag) -> std::string_view
+{
+    if(etag.size() >= 2 && etag.front() == '"' && etag.back() == '"')
+        return etag.substr(1, etag.size() - 2);
+    return etag;
+}
+
+// Conditional request utilities
+inline auto check_if_modified_since(
+    const ::http::headers& headers,
+    std::chrono::system_clock::time_point document_timestamp) -> std::optional<bool>
+{
+    if(!headers.contains("if-modified-since"s))
+        return std::nullopt; // Header not present, proceed normally
+    
+    auto if_modified_since_str = headers["if-modified-since"s];
+    auto client_date = parse_http_date(if_modified_since_str);
+    
+    if(!client_date.has_value())
+        return std::nullopt; // Invalid date format, ignore header
+    
+    // Document is modified if document_timestamp > client_date
+    // Not modified if document_timestamp <= client_date
+    return document_timestamp > client_date.value();
+}
+
+inline auto check_if_unmodified_since(
+    const ::http::headers& headers,
+    std::chrono::system_clock::time_point document_timestamp) -> std::optional<bool>
+{
+    if(!headers.contains("if-unmodified-since"s))
+        return std::nullopt; // Header not present, proceed normally
+    
+    auto if_unmodified_since_str = headers["if-unmodified-since"s];
+    auto client_date = parse_http_date(if_unmodified_since_str);
+    
+    if(!client_date.has_value())
+        return std::nullopt; // Invalid date format, ignore header
+    
+    // Precondition met if document_timestamp <= client_date
+    // Precondition failed if document_timestamp > client_date
+    return document_timestamp <= client_date.value();
+}
+
+inline auto check_if_match(
+    const ::http::headers& headers,
+    const std::string& current_etag) -> std::optional<bool>
+{
+    if(!headers.contains("if-match"s))
+        return std::nullopt; // Header not present, proceed normally
+    
+    auto if_match_value = headers["if-match"s];
+    
+    // Handle "*" wildcard (match any existing resource)
+    if(if_match_value == "*")
+        return true; // Match any existing resource
+    
+    // Compare ETags (remove quotes if present)
+    auto clean_current = trim_etag_quotes(current_etag);
+    auto clean_requested = trim_etag_quotes(if_match_value);
+    
+    return clean_current == clean_requested;
+}
+
+inline auto check_if_none_match(
+    const ::http::headers& headers,
+    const std::string& current_etag) -> std::optional<bool>
+{
+    if(!headers.contains("if-none-match"s))
+        return std::nullopt; // Header not present, proceed normally
+    
+    auto if_none_match_value = headers["if-none-match"s];
+    
+    // Handle "*" wildcard (only if resource doesn't exist - always fails if resource exists)
+    if(if_none_match_value == "*")
+        return false; // Resource exists, precondition failed
+    
+    // Compare ETags (remove quotes if present)
+    auto clean_current = trim_etag_quotes(current_etag);
+    auto clean_requested = trim_etag_quotes(if_none_match_value);
+    
+    // Return true if ETags differ (proceed with request)
+    // Return false if ETags match (skip processing)
+    return clean_current != clean_requested;
+}
+
+// HTTP response utilities
+inline auto accepts_json(const ::http::headers& headers) -> bool
+{
+    // Headers are stored in lowercase, so check "accept" directly
+    if(!headers.contains("accept"s))
+        return true; // No Accept header means accept anything (including JSON)
+    
+    // Get Accept header value (already lowercase from headers class)
+    const auto accept_value = headers["accept"s];
+    
+    // Check for wildcards that accept anything
+    if(accept_value.contains("*/*"s) || accept_value.contains("application/*"s))
+        return true;
+    
+    // Check if it contains "application/json" (handles all variants including parameters)
+    // Examples that match: "application/json", "application/json;odata=fullmetadata", 
+    //                      "application/json, application/xml", etc.
+    return accept_value.contains("application/json"s);
+}
+
+inline auto not_acceptable_response() -> std::tuple<std::string, std::string>
+{
+    auto error = xson::object{
+        {"error", "Not Acceptable"s},
+        {"message", "Only application/json is supported"s}
+    };
+    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error));
+}
+
+inline auto not_acceptable_response_with_headers() -> std::tuple<std::string, std::string, std::optional<::http::headers>>
+{
+    auto error = xson::object{
+        {"error", "Not Acceptable"s},
+        {"message", "Only application/json is supported"s}
+    };
+    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
+}
+
+// Query parameter parsing
+inline auto parse_comma_separated_list(std::string_view list_value)
+{
+    auto fields = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    
+    while(true)
+    {
+        if(fields.size() >= yar::db::max_query_fields)
+            throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(yar::db::max_query_fields) + ")"};
+        
+        auto pos = list_value.find(',', start);
+        if(pos == std::string_view::npos)
+        {
+            auto field = trim(list_value.substr(start));
+            if(!field.empty())
+                fields.push_back(field);
+            break;
+        }
+        auto field = trim(list_value.substr(start, pos - start));
+        if(!field.empty())
+            fields.push_back(field);
+        start = pos + 1;
+    }
+    
+    return fields;
+}
+
+inline auto parse_query_params(const ::http::uri& uri)
+{
+    auto params = std::map<std::string, std::string>{};
+    
+    // Check if query string exists
+    auto query_str = static_cast<std::string_view>(uri.query);
+    if(query_str.empty())
+        return params;
+    
+    // Validate total query string size (64KB limit)
+    constexpr auto max_query_size = 64 * 1024;
+    if(query_str.size() > max_query_size)
+        throw std::invalid_argument{"Query string too large (max 64KB)"};
+    
+    // uri.query is indexed_property<'&'>, so it splits by &
+    constexpr auto max_params = 100;
+    constexpr auto max_param_size = 1024;
+    
+    for(std::size_t i = 0; i < max_params; ++i)
+    {
+        auto param = uri.query[i];
+        if(param.empty())
+            break;
+        
+        // Validate parameter size
+        if(param.size() > max_param_size)
+            throw std::invalid_argument{"Parameter too large (max 1024 chars)"};
+            
+        // Split key=value
+        auto eq_pos = param.find('=');
+        if(eq_pos != std::string_view::npos)
+        {
+            auto key_view = param.substr(0, eq_pos);
+            auto value_view = param.substr(eq_pos + 1);
+            
+            // Validate key and value sizes
+            if(key_view.size() > max_param_size || value_view.size() > max_param_size)
+                throw std::invalid_argument{"Parameter key or value too large (max 1024 chars)"};
+            
+            auto key = url_decode(key_view);
+            auto value = url_decode(value_view);
+            
+            // Validate decoded sizes
+            if(key.size() > max_param_size || value.size() > max_param_size)
+                throw std::invalid_argument{"Decoded parameter key or value too large (max 1024 chars)"};
+            
+            params[key] = value;
+        }
+        else
+        {
+            // Boolean flag (no value)
+            if(param.size() > max_param_size)
+                throw std::invalid_argument{"Parameter name too large (max 1024 chars)"};
+            
+            auto key = url_decode(param);
+            if(key.size() > max_param_size)
+                throw std::invalid_argument{"Decoded parameter name too large (max 1024 chars)"};
+            
+            params[key] = "true"s;
+        }
+    }
+    
+    return params;
+}
+
+} // namespace yar::http::helpers
+

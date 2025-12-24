@@ -41,11 +41,12 @@
 ### 🟡 Medium Priority
 
 #### OData Features
-5. **`$count` query option** - Return count of items
-   - Support `$count=true` to return count instead of items
-   - Support `$count` inline with results
-   - Example: `GET /Products?$count=true`
-   - **Impact**: Efficient counting without fetching all data
+5. **✅ `$count` query option** - ✅ **COMPLETED** - Return count of items
+   - ✅ Support `$count=true` to return count instead of items
+   - ✅ Returns count as JSON number (OData compliant)
+   - ✅ Works with `$filter` to return filtered count
+   - ✅ Example: `GET /Products?$count=true` returns `42`
+   - ✅ **Impact**: Efficient counting without fetching all data
 
 6. **Enhanced `$filter` operators** - Expand filter capabilities
    - Support `in` operator: `$filter=status in ('active','pending')`
@@ -86,6 +87,7 @@
     - Implement `GET /$metadata` endpoint
     - Return EDM (Entity Data Model) XML describing the service
     - Include entity types, properties, and relationships
+    - **Note**: HTTP header metadata (`@odata.context`, `@odata.id`, `@odata.editLink`) is implemented, but the `GET /$metadata` endpoint is separate and not yet implemented
     - **Impact**: Enables service discovery and code generation
 
 12. **`$batch` request support** - Batch operations
@@ -122,7 +124,7 @@
 
 ## Overall Assessment
 
-**Rating: 9.0/10** - Excellent REST API with proper HTTP semantics, comprehensive error handling, content negotiation, ETag support, and full conditional request support. Ready for production use with advanced caching and optimistic locking capabilities.
+**Rating: 9.1/10** - Excellent REST API with proper HTTP semantics, comprehensive error handling, content negotiation, ETag support, full conditional request support, and `$count` query option. Ready for production use with advanced caching and optimistic locking capabilities.
 
 ## Strengths ✅
 
@@ -245,7 +247,7 @@ All previously identified critical issues have been addressed:
 | `$select` | `$select=field1,field2` | ✅ `$select=field1,field2` (always includes `_id`) | ✅ **FULLY COMPATIBLE** |
 | `$expand` | `$expand=relatedEntity` | ⚠️ Parsed but placeholder (returns as-is) | ⚠️ **PARTIAL** - parsed but expansion not yet implemented |
 | `$apply` | `$apply=groupby((field),aggregate(Price with sum))` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #1 |
-| `$count` | `$count=true` or inline count | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #5 |
+| `$count` | `$count=true` or inline count | ✅ `$count=true` returns count as JSON number | ✅ **FULLY COMPATIBLE** |
 | `$search` | `$search=keyword` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #7 |
 | `$format` | `$format=json` or `$format=xml` | ⚠️ JSON only (default) | ⚠️ **PARTIAL** - JSON only, no format selection |
 | `$metadata` | `GET /$metadata` endpoint | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #11 |
@@ -303,6 +305,7 @@ All previously identified critical issues have been addressed:
 - ✅ `$filter` - Filtering with comparison and logical operators
 - ✅ `$select` - Field projection (e.g., `$select=name,email`)
 - ✅ `$expand` - Parsed (placeholder implementation)
+- ✅ `$count` - Return count of items (e.g., `$count=true`)
 
 **Code Quality:**
 - ✅ Optimized string handling with `string_view`
@@ -335,6 +338,7 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 - $filter parameter with OData-compliant expressions (e.g., `$filter=age gt 25`)
 - $select parameter for field projection (e.g., `$select=name,email`)
 - $expand parameter parsing (placeholder for future expansion)
+- $count parameter for returning count of items (e.g., `$count=true`)
 
 The API now follows REST best practices and provides a production-ready foundation for client applications. All major OData query parameters have been implemented, providing comprehensive query capabilities. Content negotiation, HEAD method support, ETag support, and conditional requests enable efficient client-server interaction, caching strategies, and optimistic locking.
 
@@ -342,4 +346,9 @@ The API now follows REST best practices and provides a production-ready foundati
 See the [TODO: Missing Features](#todo-missing-features-prioritized) section at the top of this document for prioritized next steps. High-priority items include:
 - Implementing `$apply` with aggregation and grouping
 - Full `$expand` implementation (currently placeholder)
+
+**Recently Completed:**
+- ✅ `$count` query option - Returns count as JSON number (OData compliant)
+
+**Note**: HTTP header metadata (`@odata.context`, `@odata.id`, `@odata.editLink`) is implemented via `Accept` header. The `GET /$metadata` endpoint (separate service discovery endpoint) is not yet implemented.
 

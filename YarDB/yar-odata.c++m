@@ -55,7 +55,7 @@ inline auto parse_metadata_level(const ::http::headers& headers) -> metadata_lev
 // For full metadata: adds @odata.context, @odata.id, @odata.editLink
 inline auto add_metadata(xson::object document, metadata_level level, 
                          std::string_view collection_name,
-                         std::optional<long long> id = std::nullopt) -> xson::object
+                         std::optional<xson::integer_type> id = std::nullopt) -> xson::object
 {
     if(level == metadata_level::none)
         return document; // No metadata needed
@@ -113,7 +113,7 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
         {
             if(item.has("_id"s))
             {
-                auto item_id = static_cast<long long>(static_cast<xson::integer_type>(item["_id"s]));
+                auto item_id = static_cast<xson::integer_type>(item["_id"s]);
                 item = add_metadata(item, level, collection_name, item_id);
             }
         }

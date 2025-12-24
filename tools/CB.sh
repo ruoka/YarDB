@@ -31,13 +31,41 @@ esac
 # Ensure we always search the LLVM lib dir when linking CB itself
 export LDFLAGS="-Wl,-rpath,$LLVM_PREFIX/lib ${LDFLAGS}"
 
-# Recompile only if source is newer or binary missing
-if [[ ! -x "$BIN" || "$SRC" -nt "$BIN" ]]; then
+# Check if binary exists and was built for the correct OS
+NEEDS_REBUILD=false
+if [[ ! -x "$BIN" ]]; then
+    NEEDS_REBUILD=true
+elif [[ "$SRC" -nt "$BIN" ]]; then
+    NEEDS_REBUILD=true
+else
+    # Check binary format using file command (portable across Linux and macOS)
+    if [[ -f "$BIN" ]] && command -v file >/dev/null 2>&1; then
+        FILE_TYPE=$(file "$BIN" 2>/dev/null || echo "")
+        case "$UNAME_OUT" in
+            Linux)
+                if [[ "$FILE_TYPE" != *"ELF"* ]]; then
+                    echo "CB binary was built for a different OS (not Linux), rebuilding..."
+                    NEEDS_REBUILD=true
+                fi
+                ;;
+            Darwin)
+                if [[ "$FILE_TYPE" != *"Mach-O"* ]]; then
+                    echo "CB binary was built for a different OS (not macOS), rebuilding..."
+                    NEEDS_REBUILD=true
+                fi
+                ;;
+        esac
+    fi
+fi
+
+# Rebuild if needed
+if [[ "$NEEDS_REBUILD" == "true" ]]; then
     echo "Building CB (C++ Builder) with $CXX_COMPILER..."
     # Use -B to tell clang++ where to find binaries (like the linker)
     "$CXX_COMPILER" \
         -B"$LLVM_PREFIX/bin" \
         -std=c++23 -O3 -pthread \
+        -fuse-ld=lld \
         -stdlib=libc++ \
         -I"$LLVM_PREFIX/include/c++/v1" \
         -L"$LLVM_PREFIX/lib" \

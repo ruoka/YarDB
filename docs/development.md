@@ -56,6 +56,14 @@ sudo apt-get install clang-20 libc++-20-dev
 - Check PCM files are generated in `build-{os}-{config}/pcm/` (e.g., `build-darwin-debug/pcm/`)
 - Clean and rebuild if module dependencies are incorrect: `./tools/CB.sh debug clean && ./tools/CB.sh debug build`
 
+### Test DB Artifacts
+- Some tests create `*.db` files (and occasionally `*.pid` lock files) in the repo root. If a test fails in a way that suggests stale/corrupt storage state, delete them and re-run tests:
+
+```bash
+find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
+./tools/CB.sh debug test
+```
+
 ### Build System
 - All build artifacts go to `build-{os}-{config}/` directory (e.g., `build-darwin-debug/`, `build-linux-release/`)
 - C++ Builder automatically detects source files and handles dependencies

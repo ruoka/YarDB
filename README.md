@@ -186,6 +186,11 @@ yarproxy --replica=http://localhost:2112 --replica=http://localhost:2114 2113
 
 Exports database contents from the FSON-encoded database file to JSON format.
 
+## Notes
+
+- **Binary DB format**: YarDB stores documents in a binary format (FSON + metadata). If the database file is corrupted or you point YarDB at the wrong file, you may see errors like “Invalid FSON type encountered during decoding”.
+- **HTTP request bodies**: Some HTTP stacks may pass request bodies with trailing `'\0'` bytes. YarDB trims trailing NUL bytes before parsing JSON request bodies to avoid spurious “trailing garbage” parse failures.
+
 **Usage:**
 ```bash
 yarexport [--help] [--file=<name>]

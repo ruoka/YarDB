@@ -71,6 +71,13 @@ public:
     }
 
 private:
+    static std::string_view trim_trailing_nul(std::string_view sv)
+    {
+        while(!sv.empty() && sv.back() == '\0')
+            sv.remove_suffix(1);
+        return sv;
+    }
+
     void setup_routes()
     {
 
@@ -98,7 +105,7 @@ private:
                         }
                         
                         const auto uri = ::http::uri{request};
-                        auto document = xson::json::parse(body);
+                        auto document = xson::json::parse(trim_trailing_nul(body));
 
                         const auto guard = std::lock_guard{m_engine};
                         const auto collection = validate_collection_name(uri.path[1]);
@@ -594,7 +601,7 @@ private:
                         }
                         
                         auto uri = ::http::uri{request};
-                        auto request_body = xson::json::parse(body);
+                        auto request_body = xson::json::parse(trim_trailing_nul(body));
                         
                         // Validate request body has "keys" field
                         if(!request_body.has("keys"s))
@@ -747,7 +754,7 @@ private:
                         }
                         
                         const auto uri = ::http::uri{request};
-                        auto request_body = xson::json::parse(body);
+                        auto request_body = xson::json::parse(trim_trailing_nul(body));
                         
                         // Validate request body has "keys" field
                         if(!request_body.has("keys"s))
@@ -1094,7 +1101,7 @@ private:
                         }
                         
                         auto uri = ::http::uri{request};
-                        auto document = xson::json::parse(body);
+                        auto document = xson::json::parse(trim_trailing_nul(body));
                         auto id = stoll(uri.path[2]);
                         
                         // Ensure the document has the correct _id from the URL
@@ -1230,7 +1237,7 @@ private:
                         }
                         
                         auto uri = ::http::uri{request};
-                        auto updates = xson::json::parse(body);
+                        auto updates = xson::json::parse(trim_trailing_nul(body));
                         auto documents = xson::object{};
                         auto id = stoll(uri.path[2]);
                         auto selector = xson::object{"_id", id};

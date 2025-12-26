@@ -1398,6 +1398,47 @@ private:
                     m_engine.destroy(selector,documents);
                     return std::make_tuple("200 OK"s, xson::json::stringify(documents));
                 });
+
+        // GET /_reindex - Reindex all collections (rebuild indexes from data)
+        m_server.get("/_reindex"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
+                {
+                    slog << debug << "GET /_reindex: " << request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
+
+                    try
+                    {
+                        // Reindex all collections - this rebuilds indexes from scratch
+                        const auto guard = std::lock_guard{m_engine};
+                        m_engine.reindex();
+
+                        auto response = xson::object{
+                            {"status", "reindexing completed"s},
+                            {"message", "All collections have been reindexed"s}
+                        };
+
+                        // Add OData metadata if requested
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                        {
+                            response["@odata.context"s] = "/$metadata#ReindexResult"s;
+                        }
+
+                        return std::make_tuple("200 OK"s, xson::json::stringify(response));
+                    }
+                    catch(const std::exception& e)
+                    {
+                        auto error = xson::object{
+                            {"error", "Internal Server Error"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return std::make_tuple("500 Internal Server Error"s, xson::json::stringify(error));
+                    }
+                });
     }
 
     std::string m_file;

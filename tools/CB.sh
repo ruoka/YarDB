@@ -9,6 +9,24 @@ PROJECT_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
 SRC="$PROJECT_ROOT/deps/tester/tools/cb.c++"
 BIN="$TOOLS_DIR/cb"
 
+# If we're about to run tests in JSONL mode, keep stdout machine-parseable by
+# sending wrapper logs to stderr.
+JSONL_MODE=false
+for arg in "$@"; do
+  if [[ "$arg" == "--output=jsonl" || "$arg" == "--output=JSONL" ]]; then
+    JSONL_MODE=true
+    break
+  fi
+done
+
+log() {
+  if [[ "$JSONL_MODE" == "true" ]]; then
+    echo "$@" >&2
+  else
+    echo "$@"
+  fi
+}
+
 # Detect OS and set compiler/LLVM paths
 UNAME_OUT="$(uname -s)"
 case "$UNAME_OUT" in
@@ -60,7 +78,7 @@ fi
 
 # Rebuild if needed
 if [[ "$NEEDS_REBUILD" == "true" ]]; then
-    echo "Building CB (C++ Builder) with $CXX_COMPILER..."
+    log "Building CB (C++ Builder) with $CXX_COMPILER..."
     # Use -B to tell clang++ where to find binaries (like the linker)
     "$CXX_COMPILER" \
         -B"$LLVM_PREFIX/bin" \
@@ -71,7 +89,7 @@ if [[ "$NEEDS_REBUILD" == "true" ]]; then
         -L"$LLVM_PREFIX/lib" \
         -Wl,-rpath,"$LLVM_PREFIX/lib" \
         "$SRC" -o "$BIN"
-    echo "CB compiled successfully → $BIN"
+    log "CB compiled successfully → $BIN"
 fi
 
 # Resolve std.cppm path: explicit argument (with slash or .cppm suffix) wins,
@@ -87,8 +105,8 @@ if [[ -z "$STD_CPPM" ]]; then
 fi
 
 if [[ ! -f "$STD_CPPM" ]]; then
-    echo "ERROR: std.cppm not found at '$STD_CPPM'."
-    echo "Pass the path as the first argument or set LLVM_PATH."
+    log "ERROR: std.cppm not found at '$STD_CPPM'."
+    log "Pass the path as the first argument or set LLVM_PATH."
     exit 1
 fi
 

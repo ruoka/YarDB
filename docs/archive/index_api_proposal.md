@@ -1,7 +1,18 @@
 # HTTP API Proposal: Add Secondary Indexes
 
-## Overview
-Add an HTTP endpoint to configure secondary indexes for collections via REST API.
+## ✅ FULLY IMPLEMENTED - December 2025
+
+This proposal has been **fully implemented**. The REST API for secondary indexes is now available:
+
+- ✅ `PUT /_db/{collection_name}` - Create/update index configuration
+- ✅ `PATCH /_db/{collection_name}` - Incremental index updates
+- ✅ `GET /_reindex` - Reindex all collections (added Dec 2025)
+
+**Index configuration** is stored in the `_db` system collection and **automatic reindexing** occurs after configuration changes.
+
+---
+
+## Historical Context (Pre-Implementation)
 
 ## Endpoint Design
 

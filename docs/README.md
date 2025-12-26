@@ -15,12 +15,12 @@ This directory contains comprehensive project documentation organized by topic a
 
 ### 📋 Proposals & Planning
 - **[handler_refactoring_proposal.md](handler_refactoring_proposal.md)** - HTTP handler code consolidation proposal
-- **[index_api_proposal.md](index_api_proposal.md)** - Database indexing API design
 - **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API design evaluation
 
 ### 📁 Archive
 - **[archive/](archive/)** - Completed/historical documentation
   - **[namespace_design_proposal.md](archive/namespace_design_proposal.md)** - ✅ **COMPLETED** namespace refactoring (implemented Dec 2025)
+  - **[index_api_proposal.md](archive/index_api_proposal.md)** - ✅ **COMPLETED** secondary indexing API (implemented Dec 2025)
   - **[code_review.md](archive/code_review.md)** - Historical peer review from engine/index/metadata modules
 
 ## 🎯 Current Development Focus

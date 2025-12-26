@@ -118,16 +118,25 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-      - name: Cache LLVM 20
+      - name: Cache LLVM 20 and static analysis tools
+        id: cache-tools
         uses: actions/cache@v4
         with:
           path: |
             /usr/lib/llvm-20
             /usr/bin/clang-20
             /usr/bin/clang++-20
-          key: llvm-20-ubuntu-${{ runner.arch }}-2025-v4
+            /usr/bin/clang-tidy-20
+            /usr/bin/run-clang-tidy-20
+            /usr/bin/cppcheck
+          key: llvm-20-tools-ubuntu-${{ runner.arch }}-2025-v4
+          restore-keys: |
+            llvm-20-tools-ubuntu-${{ runner.arch }}-
+            llvm-20-tools-ubuntu-
+            llvm-20-tools-
 
-      - name: Install LLVM toolchain
+      - name: Install LLVM toolchain and analysis tools
+        if: steps.cache-tools.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -y
           sudo apt-get install -y clang-20 clang-tools-20 cppcheck

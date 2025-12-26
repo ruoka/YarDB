@@ -4,6 +4,7 @@
 [submodule "tester"]
 	path = deps/tester
 	url = https://github.com/ruoka/tester.git
+	branch = main
 [submodule "xson"]
 	path = deps/xson
 	url = https://github.com/ruoka/json4cpp.git

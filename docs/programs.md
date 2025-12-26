@@ -46,6 +46,16 @@ yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] [--file=<name>
 
 - `--help` - Display usage information
 
+### Security Note
+
+**⚠️ Security Warning**: Currently, `yardb` provides **no authentication or access control**. All endpoints are publicly accessible. For production use, deploy behind a reverse proxy with proper authentication and TLS termination.
+
+**Future Security Features** (development roadmap):
+- JWT-based authentication with refresh tokens
+- Role-based access control (RBAC)
+- TLS/HTTPS support via proxy integration
+- Security audit logging
+
 ### Example
 
 ```bash

@@ -1443,7 +1443,7 @@ private:
 
     std::string m_file;
     std::string m_port_or_service;
-    ext::lockable<yar::db::engine> m_engine;
+    extension::lockable<yar::db::engine> m_engine;
     ::http::server m_server;
     std::thread m_listen_thread;
 };

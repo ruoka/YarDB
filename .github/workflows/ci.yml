@@ -80,7 +80,11 @@ jobs:
         run: ./tools/CB.sh ${{ matrix.config }} test -- --output=jsonl > test_results_${{ matrix.config }}.jsonl
 
       - name: Build and test net submodule standalone (${{ matrix.config }})
-        run: ./deps/net/tools/CB.sh ${{ matrix.config }} test
+        run: |
+          set -euo pipefail
+          cd deps/net
+          git submodule update --init --recursive
+          ./tools/CB.sh ${{ matrix.config }} test
 
       - name: Validate JSONL output
         run: |

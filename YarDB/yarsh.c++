@@ -93,7 +93,7 @@ try
         clog << "Enter restful request: ";
         cin >> method;
 
-        ext::to_upper(method);
+        ext::ascii_to_upper(method);
 
         if (method == "HELP")
         {

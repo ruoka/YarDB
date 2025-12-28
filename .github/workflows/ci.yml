@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # CI environments frequently lack privileges / networking setup needed for integration tests.
+  # net defaults to running network tests locally; in CI we disable them for determinism.
+  NET_DISABLE_NETWORK_TESTS: "1"
+
 jobs:
   # Quick syntax check and basic build
   build-and-test:
@@ -72,7 +77,10 @@ jobs:
         run: ./tools/CB.sh ${{ matrix.config }} build
 
       - name: Run tests with JSONL output (${{ matrix.config }})
-        run: ./tools/CB.sh ${{ matrix.config }} test --output=jsonl > test_results_${{ matrix.config }}.jsonl
+        run: ./tools/CB.sh ${{ matrix.config }} test -- --output=jsonl > test_results_${{ matrix.config }}.jsonl
+
+      - name: Build and test net submodule standalone (${{ matrix.config }})
+        run: ./deps/net/tools/CB.sh ${{ matrix.config }} test
 
       - name: Validate JSONL output
         run: |

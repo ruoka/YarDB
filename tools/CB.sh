@@ -6,8 +6,37 @@ set -e
 
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
-SRC="$PROJECT_ROOT/deps/tester/tools/cb.c++"
 BIN="$TOOLS_DIR/cb"
+
+# Default behavior:
+# - On normal dev machines: run all tests (including network) by default.
+# - In Cursor sandbox/CI-like environments: disable network tests unless user explicitly overrides.
+if [[ -n "${CURSOR_SANDBOX:-}" && -z "${NET_DISABLE_NETWORK_TESTS+x}" ]]; then
+  export NET_DISABLE_NETWORK_TESTS=1
+fi
+
+# Resolve tester root (required).
+# Optionally clone if missing (export CB_FETCH_DEPS=1).
+TESTER_ROOT=""
+if [[ -d "$PROJECT_ROOT/deps/tester/tools" ]]; then
+  TESTER_ROOT="$PROJECT_ROOT/deps/tester"
+elif [[ "${CB_FETCH_DEPS:-0}" == "1" ]]; then
+  mkdir -p "$PROJECT_ROOT/deps"
+  log "tester dependency missing; cloning into '$PROJECT_ROOT/deps/tester'..."
+  git clone --depth 1 "https://github.com/ruoka/tester.git" "$PROJECT_ROOT/deps/tester"
+  TESTER_ROOT="$PROJECT_ROOT/deps/tester"
+fi
+
+if [[ -z "$TESTER_ROOT" ]]; then
+  log "ERROR: tester dependency not found at '$PROJECT_ROOT/deps/tester'."
+  log "Fix by initializing submodules:"
+  log "  git submodule update --init --recursive"
+  log "or rerun with:"
+  log "  CB_FETCH_DEPS=1 $0 $*"
+  exit 1
+fi
+
+SRC="$TESTER_ROOT/tools/cb.c++"
 
 # If we're about to run tests in JSONL mode, keep stdout machine-parseable by
 # sending wrapper logs to stderr.
@@ -129,7 +158,8 @@ INCLUDE_FLAGS=()
 LINK_FLAGS_STR="-lcrypto"
 if [[ -n "$PROJECT_ROOT" ]]; then
         INCLUDE_FLAGS=(
-        -I "$PROJECT_ROOT/deps/net/src"
+        -I "$PROJECT_ROOT/deps/net/net"
+        -I "$TESTER_ROOT/tester"
         )
         # Add Homebrew paths on Darwin (macOS)
         if [[ "$UNAME_OUT" == "Darwin" ]]; then

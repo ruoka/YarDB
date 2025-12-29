@@ -175,7 +175,7 @@ auto test_set()
     using namespace tester::basic;
     using namespace tester::assertions;
 
-    test_case("[yardb] REST API status codes and responses") = []
+    test_case("REST API status codes and responses, [yardb]") = []
     {
         const auto test_file = "./httpd_test.db";
         // Use shared_ptr so fixture lives beyond test_case lambda execution
@@ -389,7 +389,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] OData query parameters") = []
+    test_case("OData query parameters, [yardb]") = []
     {
         const auto test_file = "./httpd_test_odata.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -653,7 +653,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] OData advanced query parameters") = []
+    test_case("OData advanced query parameters, [yardb]") = []
     {
         const auto test_file = "./httpd_test_odata_advanced.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -1295,7 +1295,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] PUT and PATCH /_db/{collection_name} - Add secondary indexes") = []
+    test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes, [yardb]") = []
     {
         const auto test_file = "./httpd_test_indexes.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -1518,7 +1518,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] HEAD method and Accept header content negotiation") = []
+    test_case("HEAD method and Accept header content negotiation, [yardb]") = []
     {
         const auto test_file = "./httpd_head_test.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -1817,7 +1817,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] OData metadata support") = []
+    test_case("OData metadata support, [yardb]") = []
     {
         const auto test_file = "./httpd_odata_test.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -2057,7 +2057,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] ETag and conditional requests") = []
+    test_case("ETag and conditional requests, [yardb]") = []
     {
         const auto test_file = "./etag_test.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -2322,7 +2322,7 @@ auto test_set()
         };
     };
 
-    test_case("[yardb] Last-Modified and conditional requests") = []
+    test_case("Last-Modified and conditional requests, [yardb]") = []
     {
         const auto test_file = "./lastmodified_test.db";
         auto setup = std::make_shared<fixture>(test_file);

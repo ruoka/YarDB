@@ -46,7 +46,7 @@ auto test_set()
     using namespace tester::basic;
     using namespace tester::assertions;
 
-    test_case("[yardb] database engine CRUD functions are working") = []
+    test_case("database engine CRUD functions are working, [yardb]") = []
     {
         const auto test_file = "./engine_test.db";
         const auto setup = fixture{test_file};

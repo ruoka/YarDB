@@ -44,6 +44,55 @@ sudo apt-get install clang-20 libc++-20-dev
 - Add new test: Create `.test.c++` file next to source
 - Add new program: Create `.c++` file in `YarDB/` directory (C++ Builder will automatically detect it)
 
+## Logging Standards
+
+YarDB follows structured logging standards for consistent observability across all components.
+
+### Log Levels & Usage
+
+| Level | Usage | Category | Examples |
+|-------|-------|----------|----------|
+| **INFO** | Server lifecycle events | `"yardb"` | Server startup, shutdown |
+| **DEBUG** | Request processing details | `"yardb"` | HTTP request logs, DB operations |
+| **ERROR** | Failures and exceptions | `"httpd"` | Server startup failures, critical errors |
+
+### Implementation Guidelines
+
+**✅ Correct Usage:**
+```cpp
+// Server lifecycle events
+slog << info("yardb") << "Server starting on port: " << port << flush;
+
+// Request processing (debug level)
+slog << debug("yardb") << "GET /api/users: " << request_uri << flush;
+
+// Error conditions
+slog << error("httpd") << "Failed to bind to port: " << e.what() << flush;
+```
+
+**❌ Avoid:**
+- Using `std::cout` or `printf` for logging
+- Inconsistent log levels for similar events
+- Missing categories on log messages
+- Log levels that don't match the severity
+
+### Category Standards
+
+- **`"yardb"`**: Application-level events (HTTP requests, DB operations, business logic)
+- **`"httpd"`**: Infrastructure/server-level events (networking, startup failures)
+
+### Testing Log Output
+
+When running tests, logs appear in the test output. Use appropriate log levels for debugging:
+
+```bash
+# Run tests with debug logging enabled
+./tools/CB.sh debug test --tags="[yardb]"
+
+# Filter logs by category
+# (depends on syslog configuration)
+```
+
 ## Troubleshooting
 
 ### Linking Issues

@@ -14,6 +14,10 @@ class fixture
 public:
     fixture(string_view f) : file{f}
     {
+        // Remove any existing PID file
+        string pid_file = string{file} + ".pid";
+        remove(pid_file.c_str());
+
         auto fs = fstream{};
         fs.open(file,ios::out);
         fs.close();
@@ -22,6 +26,9 @@ public:
     ~fixture()
     {
         remove(file.c_str());
+        // Also remove the PID lock file
+        string pid_file = string{file} + ".pid";
+        remove(pid_file.c_str());
     }
 private:
     std::string file;
@@ -39,7 +46,7 @@ auto test_set()
     using namespace tester::basic;
     using namespace tester::assertions;
 
-    test_case("database engine CRUD functions are working") = []
+    test_case("[yardb] database engine CRUD functions are working") = []
     {
         const auto test_file = "./engine_test.db";
         const auto setup = fixture{test_file};

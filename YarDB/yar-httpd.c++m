@@ -32,11 +32,12 @@ public:
     {
         if(m_listen_thread.joinable())
             return; // Already started
-        
+
         m_listen_thread = std::thread{[this]()
         {
             try
             {
+                slog << info("yardb") << "Server starting on port: " << m_port_or_service << flush;
                 m_server.listen(m_port_or_service);
             }
             catch(const std::exception& e)
@@ -86,7 +87,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "POST /[a-z]+: "<< request << " <- " << body << flush;
+                    slog << debug("yardb") << "POST /[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -136,12 +137,38 @@ private:
                     }
                 });
 
+        // HEAD / - Removed, will use GET fallback
+
+        // List all collections
+        m_server.get("/"s).response(
+            "application/json"sv,
+            [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
+                {
+                    slog << debug("yardb") << "GET /: " << request << flush;
+
+                    // Check Accept header
+                    if(!accepts_json(headers))
+                        return not_acceptable_response();
+
+                    const auto guard = std::lock_guard{m_engine};
+                    auto response = xson::object{"collections", m_engine.collections()};
+
+                    // Add OData metadata if requested
+                    const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                    if(metadata_level != yar::http::odata::metadata_level::none)
+                    {
+                        response["@odata.context"s] = "/$metadata#Collections"s;
+                    }
+
+                    return std::make_tuple("200 OK"s, xson::json::stringify(response));
+                });
+
         // Read _id
         m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "GET /[a-z]+/[0-9]+: " << request << flush;
+                    slog << debug("yardb") << "GET /[a-z]+/[0-9]+: " << request << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -237,7 +264,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "GET /[a-z]+: " << request << flush;
+                    slog << debug("yardb") << "GET /[a-z]+: " << request << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -459,7 +486,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "PUT /_db/[a-z]+: "<< request << " <- " << body << flush;
+                    slog << debug("yardb") << "PUT /_db/[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -612,7 +639,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "PATCH /_db/[a-z]+: "<< request << " <- " << body << flush;
+                    slog << debug("yardb") << "PATCH /_db/[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -820,7 +847,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "PUT /[a-z]+: "<< request << " <- " << body << flush;
+                    slog << debug("yardb") << "PUT /[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -956,7 +983,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
+                    slog << debug("yardb") << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -1078,7 +1105,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "DELETE /[a-z]+/[0-9]+: " << request << flush;
+                    slog << debug("yardb") << "DELETE /[a-z]+/[0-9]+: " << request << flush;
 
                     // Check Accept header (for error responses)
                     if(!accepts_json(headers))
@@ -1125,7 +1152,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const ::http::headers& headers)
                 {
-                    slog << debug << "DELETE /[a-z]+?\\$top: " << request << flush;
+                    slog << debug("yardb") << "DELETE /[a-z]+?\\$top: " << request << flush;
 
                     auto uri = ::http::uri{request};
                     auto documents = xson::object{};
@@ -1142,7 +1169,7 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug << "GET /_reindex: " << request << flush;
+                    slog << debug("yardb") << "GET /_reindex: " << request << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))

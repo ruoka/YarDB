@@ -16,12 +16,12 @@ using namespace xson;
 class fixture
 {
 public:
-    fixture(string_view f) : file{f}, port{"21120"s}, server{file, "21120"s}
+    fixture(string_view f) : file{f}, port{"21120"s}, server{file, port}
     {
         // Clean up any stale PID file from previous test runs
-        const auto pid_file = string{f} + ".pid"s;
+        const auto pid_file = string{file} + ".pid"s;
         remove(pid_file.c_str());
-        
+
         auto fs = fstream{};
         fs.open(file, ios::out);
         fs.close();
@@ -29,6 +29,8 @@ public:
         // Wait longer for server to start and bind to port
         std::this_thread::sleep_for(1000ms);
     }
+
+    const std::string& get_port() const { return port; }
 
     ~fixture()
     {
@@ -39,9 +41,7 @@ public:
         const auto pid_file = file + ".pid"s;
         remove(pid_file.c_str());
     }
-    
-    const std::string& get_port() const { return port; }
-    
+
 private:
     std::string file;
     std::string port;
@@ -175,7 +175,7 @@ auto test_set()
     using namespace tester::basic;
     using namespace tester::assertions;
 
-    test_case("REST API status codes and responses") = []
+    test_case("[yardb] REST API status codes and responses") = []
     {
         const auto test_file = "./httpd_test.db";
         // Use shared_ptr so fixture lives beyond test_case lambda execution
@@ -389,7 +389,7 @@ auto test_set()
         };
     };
 
-    test_case("OData query parameters") = []
+    test_case("[yardb] OData query parameters") = []
     {
         const auto test_file = "./httpd_test_odata.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -653,7 +653,7 @@ auto test_set()
         };
     };
 
-    test_case("OData advanced query parameters") = []
+    test_case("[yardb] OData advanced query parameters") = []
     {
         const auto test_file = "./httpd_test_odata_advanced.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -1295,7 +1295,7 @@ auto test_set()
         };
     };
 
-    test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes") = []
+    test_case("[yardb] PUT and PATCH /_db/{collection_name} - Add secondary indexes") = []
     {
         const auto test_file = "./httpd_test_indexes.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -1518,7 +1518,7 @@ auto test_set()
         };
     };
 
-    test_case("HEAD method and Accept header content negotiation") = []
+    test_case("[yardb] HEAD method and Accept header content negotiation") = []
     {
         const auto test_file = "./httpd_head_test.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -1817,7 +1817,7 @@ auto test_set()
         };
     };
 
-    test_case("OData metadata support") = []
+    test_case("[yardb] OData metadata support") = []
     {
         const auto test_file = "./httpd_odata_test.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -2057,7 +2057,7 @@ auto test_set()
         };
     };
 
-    test_case("ETag and conditional requests") = []
+    test_case("[yardb] ETag and conditional requests") = []
     {
         const auto test_file = "./etag_test.db";
         auto setup = std::make_shared<fixture>(test_file);
@@ -2322,7 +2322,7 @@ auto test_set()
         };
     };
 
-    test_case("Last-Modified and conditional requests") = []
+    test_case("[yardb] Last-Modified and conditional requests") = []
     {
         const auto test_file = "./lastmodified_test.db";
         auto setup = std::make_shared<fixture>(test_file);

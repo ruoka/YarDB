@@ -18,7 +18,7 @@ try
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;
     auto service_or_port = "2112"s;
-    slog.appname("YarDB");
+    slog.appname("yardb");
     slog.level(net::syslog::severity::debug);
 
     for(string_view option : arguments)

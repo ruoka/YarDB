@@ -32,7 +32,7 @@ public:
     {
         if(m_listen_thread.joinable())
             return; // Already started
-
+        
         m_listen_thread = std::thread{[this]()
         {
             try

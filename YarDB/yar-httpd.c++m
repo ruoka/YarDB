@@ -37,14 +37,18 @@ public:
         {
             try
             {
-                slog << info("yardb") << "Server starting on port: " << m_port_or_service << flush;
+                slog << info("SERVER_START") << "Server starting on port: " << m_port_or_service
+                      << std::pair{"port"sv, m_port_or_service}
+                      << flush;
                 m_server.listen(m_port_or_service);
             }
             catch(const std::exception& e)
             {
                 // Log error if possible, but don't crash
                 // The server will remain stopped if listen fails
-                slog << error("httpd") << "Failed to start server: " << e.what() << flush;
+                slog << error("SERVER_START_ERROR") << "Failed to start server: " << e.what()
+                      << std::pair{"port"sv, m_port_or_service}
+                      << flush;
             }
         }};
     }
@@ -87,7 +91,11 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "POST /[a-z]+: "<< request << " <- " << body << flush;
+                    slog << debug("POST_DOCUMENT") << "POST /[a-z]+: "<< request << " <- " << body
+                          << std::pair{"method", "POST"}
+                          << std::pair{"uri", request}
+                          << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -106,10 +114,10 @@ private:
                         }
                         
                         const auto uri = ::http::uri{request};
+                        const auto collection = validate_collection_name(uri.path[1]);
                         auto document = xson::json::parse(trim_trailing_nul(body));
 
                         const auto guard = std::lock_guard{m_engine};
-                        const auto collection = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection);
                         m_engine.create(document);
                         
@@ -125,10 +133,30 @@ private:
                         if(metadata_level != yar::http::odata::metadata_level::none)
                             document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
                         
+                        slog << info("DOCUMENT_CREATED") << "Created document in " << collection << " with id " << id
+                              << std::pair{"method", "POST"}
+                              << std::pair{"collection", collection}
+                              << std::pair{"id", static_cast<long long>(id)}
+                              << std::pair{"status", 201}
+                              << flush;
+                        
                         return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
                     }
                     catch(const std::exception& e)
                     {
+                        std::string collection = "";
+                        try {
+                            const auto uri = ::http::uri{request};
+                            try {
+                                collection = uri.path[1];
+                            } catch(...) {}
+                        } catch(...) {}
+                        slog << error("CREATE_ERROR") << "Error creating document: " << e.what()
+                              << std::pair{"method", "POST"}
+                              << std::pair{"collection", collection}
+                              << std::pair{"uri", request}
+                              << std::pair{"status", 400}
+                              << flush;
                         auto error = xson::object{
                             {"error", "Bad Request"s},
                             {"message", std::string{e.what()}}
@@ -144,7 +172,10 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "GET /: " << request << flush;
+                    slog << debug("LIST_COLLECTIONS") << "GET /: " << request
+                          << std::pair{"method", "GET"}
+                          << std::pair{"uri", request}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -168,7 +199,10 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "GET /[a-z]+/[0-9]+: " << request << flush;
+                    slog << debug("GET_DOCUMENT") << "GET /[a-z]+/[0-9]+: " << request
+                          << std::pair{"method", "GET"}
+                          << std::pair{"uri", request}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -177,18 +211,24 @@ private:
                     try
                     {
                         const auto uri = ::http::uri{request};
+                        const auto collection = validate_collection_name(uri.path[1]);
                         const auto id = stoll(uri.path[2]);
                         auto documents = xson::object{};
                         auto selector = xson::object{"_id", id};
 
                         const auto guard = std::lock_guard{m_engine};
-                        const auto collection = validate_collection_name(uri.path[1]);
                         m_engine.collection(collection);
                         auto found = m_engine.read(selector, documents);
 
                         // Check if document was found
                         if(!found || documents.get<xson::object::array>().empty())
                         {
+                            slog << warning("DOCUMENT_NOT_FOUND") << "Document not found"
+                                  << std::pair{"method", "GET"}
+                                  << std::pair{"collection", collection}
+                                  << std::pair{"id", id}
+                                  << std::pair{"status", 404}
+                                  << flush;
                             auto error = xson::object{
                                 {"error", "Not Found"s},
                                 {"message", "Document not found"s},
@@ -257,14 +297,24 @@ private:
                     }
                 });
 
-        // Read collection with OData query parameters
+                        // Read collection with OData query parameters
         // Route pattern allows optional query string: /[a-z][a-z0-9]*(\?.*)?
         // Note: Collection names must start with a letter, but can contain digits
         m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response(
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "GET /[a-z]+: " << request << flush;
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    try {
+                        collection = validate_collection_name(uri.path[1]);
+                    } catch(...) {}
+                    
+                    slog << debug("GET_COLLECTION") << "GET /[a-z]+: " << request
+                          << std::pair{"method", "GET"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -486,7 +536,18 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "PUT /_db/[a-z]+: "<< request << " <- " << body << flush;
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    try {
+                        collection = validate_collection_name(uri.path[2]);
+                    } catch(...) {}
+                    
+                    slog << debug("PUT_INDEX") << "PUT /_db/[a-z]+: "<< request << " <- " << body
+                          << std::pair{"method", "PUT"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -639,7 +700,18 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "PATCH /_db/[a-z]+: "<< request << " <- " << body << flush;
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    try {
+                        collection = validate_collection_name(uri.path[2]);
+                    } catch(...) {}
+                    
+                    slog << debug("PATCH_INDEX") << "PATCH /_db/[a-z]+: "<< request << " <- " << body
+                          << std::pair{"method", "PATCH"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -847,7 +919,21 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "PUT /[a-z]+: "<< request << " <- " << body << flush;
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    long long id = 0ll;
+                    try {
+                        collection = validate_collection_name(uri.path[1]);
+                        id = stoll(uri.path[2]);
+                    } catch(...) {}
+                    
+                    slog << debug("PUT_DOCUMENT") << "PUT /[a-z]+: "<< request << " <- " << body
+                          << std::pair{"method", "PUT"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << std::pair{"id", id}
+                          << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -983,7 +1069,21 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "PATCH /[a-z]+: "<< request << " <- " << body << flush;
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    long long id = 0ll;
+                    try {
+                        collection = validate_collection_name(uri.path[1]);
+                        id = stoll(uri.path[2]);
+                    } catch(...) {}
+                    
+                    slog << debug("PATCH_DOCUMENT") << "PATCH /[a-z]+: "<< request << " <- " << body
+                          << std::pair{"method", "PATCH"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << std::pair{"id", id}
+                          << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))
@@ -1105,7 +1205,20 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "DELETE /[a-z]+/[0-9]+: " << request << flush;
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    long long id = 0ll;
+                    try {
+                        collection = validate_collection_name(uri.path[1]);
+                        id = stoll(uri.path[2]);
+                    } catch(...) {}
+                    
+                    slog << debug("DELETE_DOCUMENT") << "DELETE /[a-z]+/[0-9]+: " << request
+                          << std::pair{"method", "DELETE"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << std::pair{"id", id}
+                          << flush;
 
                     // Check Accept header (for error responses)
                     if(!accepts_json(headers))
@@ -1152,9 +1265,17 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, [[maybe_unused]] const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "DELETE /[a-z]+?\\$top: " << request << flush;
-
-                    auto uri = ::http::uri{request};
+                    const auto uri = ::http::uri{request};
+                    std::string collection = "";
+                    try {
+                        collection = validate_collection_name(uri.path[1]);
+                    } catch(...) {}
+                    
+                    slog << debug("DELETE_FIRST") << "DELETE /[a-z]+?\\$top: " << request
+                          << std::pair{"method", "DELETE"}
+                          << std::pair{"uri", request}
+                          << std::pair{"collection", collection}
+                          << flush;
                     auto documents = xson::object{};
                     auto selector = xson::object{"$top",1ll};
 
@@ -1169,7 +1290,10 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
-                    slog << debug("yardb") << "GET /_reindex: " << request << flush;
+                    slog << debug("REINDEX") << "GET /_reindex: " << request
+                          << std::pair{"method", "GET"}
+                          << std::pair{"uri", request}
+                          << flush;
 
                     // Check Accept header
                     if(!accepts_json(headers))

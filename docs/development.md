@@ -46,40 +46,91 @@ sudo apt-get install clang-20 libc++-20-dev
 
 ## Logging Standards
 
-YarDB follows structured logging standards for consistent observability across all components.
+YarDB follows industry-standard structured logging practices (RFC 5424) for consistent observability across all components.
 
 ### Log Levels & Usage
 
-| Level | Usage | Category | Examples |
-|-------|-------|----------|----------|
-| **INFO** | Server lifecycle events | `"yardb"` | Server startup, shutdown |
-| **DEBUG** | Request processing details | `"yardb"` | HTTP request logs, DB operations |
-| **ERROR** | Failures and exceptions | `"httpd"` | Server startup failures, critical errors |
+| Level | Usage | Examples |
+|-------|-------|----------|
+| **NOTICE** | Server lifecycle events | Server startup, shutdown, connection accepted |
+| **INFO** | Normal operational events | Document created, request completed successfully |
+| **DEBUG** | Detailed diagnostic information | Request processing details, DB operations |
+| **WARNING** | Warning conditions | Document not found, invalid input |
+| **ERROR** | Error conditions | Server startup failures, exceptions, critical errors |
+
+### Message IDs (RFC 5424)
+
+All log entries use structured message IDs for easy filtering and correlation:
+
+- **Server Events**: `SERVER_START`, `SERVER_READY`, `SERVER_STOP`
+- **Connection Events**: `CONN_ACCEPT`, `CONN_CLOSED`, `CONN_EXCEPTION`
+- **HTTP Events**: `HTTP_REQUEST`, `HTTP_RESPONSE`, `REQUEST_RECEIVED`
+- **Document Operations**: `DOCUMENT_CREATED`, `DOCUMENT_NOT_FOUND`, `CREATE_ERROR`
+- **System Events**: `ACCEPT_ERROR`, `LISTEN_ERROR`, `STREAM_ERROR`
 
 ### Implementation Guidelines
 
 **✅ Correct Usage:**
 ```cpp
-// Server lifecycle events
-slog << info("yardb") << "Server starting on port: " << port << flush;
+using namespace std::string_view_literals;
 
-// Request processing (debug level)
-slog << debug("yardb") << "GET /api/users: " << request_uri << flush;
+// Server lifecycle events with structured fields
+slog << notice("SERVER_START") << "Server starting on port: " << port
+     << std::pair{"port"sv, port}
+     << flush;
 
-// Error conditions
-slog << error("httpd") << "Failed to bind to port: " << e.what() << flush;
+// Request processing with structured fields
+slog << debug("POST_DOCUMENT") << "POST /[a-z]+: " << request
+     << std::pair{"method"sv, "POST"sv}
+     << std::pair{"uri"sv, request}
+     << std::pair{"collection"sv, collection}
+     << std::pair{"body_size"sv, body.size()}
+     << flush;
+
+// Success events with structured fields
+slog << info("DOCUMENT_CREATED") << "Created document in " << collection << " with id " << id
+     << std::pair{"method"sv, "POST"sv}
+     << std::pair{"collection"sv, collection}
+     << std::pair{"id"sv, id}
+     << std::pair{"status"sv, 201}
+     << flush;
+
+// Error conditions with structured fields
+slog << error("CREATE_ERROR") << "Error creating document: " << e.what()
+     << std::pair{"method"sv, "POST"sv}
+     << std::pair{"collection"sv, collection}
+     << std::pair{"uri"sv, request}
+     << std::pair{"status"sv, 400}
+     << flush;
 ```
 
 **❌ Avoid:**
 - Using `std::cout` or `printf` for logging
+- Missing message IDs on log entries
 - Inconsistent log levels for similar events
-- Missing categories on log messages
 - Log levels that don't match the severity
+- Constructing `std::string` unnecessarily (use `string_view` literals with `sv` suffix)
 
-### Category Standards
+### Structured Fields
 
-- **`"yardb"`**: Application-level events (HTTP requests, DB operations, business logic)
-- **`"httpd"`**: Infrastructure/server-level events (networking, startup failures)
+Structured fields provide machine-readable context for log analysis:
+
+- **Network Fields**: `ip`, `port`, `client_ip`, `client_port`
+- **HTTP Fields**: `method`, `uri`, `version`, `status`, `content_length`
+- **Application Fields**: `collection`, `id`, `body_size`
+- **Error Fields**: `errno`, `error_message`, `error_code`
+
+**Best Practices:**
+- Use `std::pair{"key"sv, value}` syntax to avoid unnecessary string construction
+- Include relevant context fields (IP, port, method, URI, status codes)
+- Use appropriate types (integers for status codes, strings for IDs)
+- Keep field names consistent across similar log entries
+
+### Log Format
+
+- **Default**: JSONL (JSON Lines) format for better observability tooling integration
+- **Alternative**: Syslog (RFC 5424) format available via configuration
+- **Output**: Structured JSON with timestamp, host, app name, PID, level, message ID, message, and structured fields
 
 ### Testing Log Output
 
@@ -89,8 +140,7 @@ When running tests, logs appear in the test output. Use appropriate log levels f
 # Run tests with debug logging enabled
 ./tools/CB.sh debug test --tags="[yardb]"
 
-# Filter logs by category
-# (depends on syslog configuration)
+# Logs are in JSONL format by default, making them easy to parse and filter
 ```
 
 ## Troubleshooting
@@ -137,6 +187,31 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
   - Deterministic `{"type":"eof"}` stream termination
   - Human-readable logs directed to stderr, machine-readable JSONL to stdout
 
+#### Structured Logging System
+- **Status**: ✅ **COMPLETED** (Dec 2025)
+- **Implementation**: Replaced `syslogstream` with `structured_log_stream` supporting both syslog (RFC 5424) and JSONL formats
+- **Features**:
+  - **Dual Format Support**: Syslog (RFC 5424) and JSONL formats, configurable at runtime
+  - **Structured Fields**: Support for key-value pairs via `std::pair{"key"sv, value}` syntax
+  - **Message IDs**: RFC 5424 compliant message identifiers (e.g., "SERVER_START", "CONNECTION_ACCEPTED")
+  - **Backward Compatibility**: Maintains API compatibility with existing `syslogstream` usage
+  - **Default JSONL**: JSONL format is now the default for better observability tooling integration
+  - **Type Support**: Automatic conversion for integers, floats, strings, booleans, and null values
+  - **Thread Safety**: Proper locking for concurrent logging operations
+- **Impact**: Improved observability, better integration with log aggregation tools, structured data for analysis
+
+#### Net Module Modernization
+- **Status**: ✅ **COMPLETED** (Dec 2025)
+- **Implementation**: Converted `net` module from header-based C++ library to C++23 modules
+- **Features**:
+  - **C++23 Modules**: All `.hpp` files converted to `.c++m` module files
+  - **Clean Module Interface**: Proper `export module` and `import` declarations
+  - **System Encapsulation**: All POSIX system calls and constants encapsulated in `net:posix` module
+  - **Modern C++23 Features**: Uses `std::byteswap` and `std::endian` for byte order conversion
+  - **API Compatibility**: Maintained backward compatibility during transition
+  - **Module Organization**: Clear separation with module partitions (e.g., `net:http_server`, `net:syslogstream`)
+- **Impact**: Modernized core networking library, improved build times, better encapsulation, easier maintenance
+
 ### 🚧 Active Development Projects
 
 #### 1. 🔐 Security & Authentication System
@@ -152,9 +227,8 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 
 #### 2. 📊 Observability & Monitoring
 - **Priority**: HIGH
-- **Current State**: RFC 3164/5424 syslog support, basic console logging
+- **Current State**: ✅ Structured logging with JSONL (default) and syslog (RFC 5424) formats, structured fields support, RFC 5424 message IDs
 - **Planned Implementation**:
-  - **Structured JSON Logging**: Add JSON mode to `syslogstream` class
   - **Prometheus Metrics**: `/metrics` endpoint with request latency, throughput, errors
   - **Health Checks**: `/health`, `/ready` endpoints
   - **Distributed Tracing**: OpenTelemetry integration
@@ -177,17 +251,6 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
   - Optional client certificate authentication
 - **Timeline**: 1-2 months
 - **Alternatives Considered**: Direct TLS in database (rejected for architectural reasons)
-
-#### 4. 🌐 Net Module Modernization
-- **Priority**: MEDIUM
-- **Current State**: Header-based C++ library
-- **Planned Implementation**:
-  - Convert to C++23 modules (remove `.hpp` files)
-  - Clean module interface design
-  - Update all consumers to use modules
-  - Maintain API compatibility during transition
-- **Timeline**: 1 month (upcoming work)
-- **Impact**: Modernize core networking library, reduce build times
 
 ### 📋 Future Enhancements (Post-MVP)
 
@@ -217,12 +280,12 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 - **Authorization Model**: RBAC with collection/database-level permissions
 
 ### Observability Strategy
-- **Logging**: Dual-mode (syslog + structured JSON) for different consumption patterns
-- **Metrics**: Prometheus standard for cloud-native monitoring
-- **Tracing**: OpenTelemetry for distributed request tracking
+- **Logging**: ✅ **IMPLEMENTED** - Dual-mode (syslog RFC 5424 + JSONL) with structured fields support, RFC 5424 message IDs, default JSONL format
+- **Metrics**: Prometheus standard for cloud-native monitoring (planned)
+- **Tracing**: OpenTelemetry for distributed request tracking (planned)
 
 ### Module Architecture
 - **Clean Namespaces**: `yar::*` top-level with clear separation (`db::*` vs `http::*`)
-- **C++23 Modules**: Modern module system for better encapsulation and build performance
+- **C++23 Modules**: ✅ **IMPLEMENTED** - Modern module system for better encapsulation and build performance (all `net` modules converted from headers)
 - **Submodule Independence**: Each dependency maintains its own release cycle
 

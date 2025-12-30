@@ -106,7 +106,7 @@ try
 
         if(option == "--clog")
         {
-            slog.redirect(clog);
+            (void)slog.redirect(clog);
             continue;
         }
 

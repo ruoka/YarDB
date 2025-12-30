@@ -20,6 +20,7 @@ try
     auto service_or_port = "2112"s;
     slog.appname("yardb");
     slog.level(net::syslog::severity::debug);
+    slog.set_format(net::log_format::jsonl);  // Use JSONL format by default
 
     for(string_view option : arguments)
     {

@@ -37,7 +37,7 @@ inline void lock(std::string_view db)
     file.open(lock, std::ios::out | std::ios::trunc);
     if(!file.is_open())
         throw std::runtime_error{"Failed to create DB lock "s + lock};
-    file << net::syslog::getpid() << std::endl;
+    file << net::posix::getpid() << std::endl;
     locks.emplace(lock);
     std::atexit(unlock);
 }

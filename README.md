@@ -116,13 +116,12 @@ The main database server that provides a RESTful HTTP API for document storage a
 
 **Usage:**
 ```bash
-yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] [--file=<name>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port]
 ```
 
 **Options:**
 - `--file=<name>` - Database file path (default: `yar.db`)
 - `--clog` - Redirect logging to console instead of syslog
-- `--slog_tag=<tag>` - Set syslog application tag
 - `--slog_level=<level>` - Set syslog severity level (numeric mask)
 - `service_or_port` - Port number or service name (default: `2112`)
 
@@ -163,13 +162,12 @@ A proxy server that forwards requests to replica yardb servers, providing load b
 
 **Usage:**
 ```bash
-yarproxy [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port]
+yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_port]
 ```
 
 **Options:**
 - `--replica=<URL>` - Add a replica server URL (can be specified multiple times)
 - `--clog` - Redirect logging to console
-- `--slog_tag=<tag>` - Set syslog application tag
 - `--slog_level=<level>` - Set syslog severity level
 - `service_or_port` - Port number for proxy server (default: `2113`)
 

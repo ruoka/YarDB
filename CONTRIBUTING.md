@@ -7,7 +7,6 @@ Thank you for your interest in contributing to YarDB! This document provides gui
 ### Prerequisites
 
 - **Clang 20 or higher** with C++23 modules support and built-in std module
-- **Make** build system
 - **Git** for version control
 
 ### Getting Started
@@ -20,19 +19,20 @@ Thank you for your interest in contributing to YarDB! This document provides gui
 
 2. **Initialize submodules:**
    ```bash
-   git submodule init
-   git submodule update
+   git submodule update --init --depth 1
    ```
+   
+   **Note:** Using `--depth 1` prevents pulling in nested submodules, which avoids multiple tester framework dependencies that could cause conflicts.
 
 3. **Build the project:**
    ```bash
-   make clean
-   make build
+   ./tools/CB.sh debug build    # Build in debug mode
+   ./tools/CB.sh release build  # Build in release mode (optimized)
    ```
 
 4. **Run tests:**
    ```bash
-   make run_tests
+   ./tools/CB.sh debug test     # Build and run all tests
    ```
 
 ### Using Dev Containers
@@ -72,7 +72,8 @@ The project follows the [C++ Core Guidelines](https://github.com/isocpp/CppCoreG
 ## Testing
 
 - Unit tests are co-located with source files using `.test.c++` extension
-- Run tests with `make run_tests`
+- Run tests with `./tools/CB.sh debug test`
+- Run specific tests with `./tools/CB.sh debug test "pattern"`
 - Ensure all tests pass before submitting a pull request
 
 ## Submitting Changes
@@ -94,11 +95,17 @@ The project follows the [C++ Core Guidelines](https://github.com/isocpp/CppCoreG
 
 ## Build System
 
-- Main Makefile is in the project root
-- Compiler configuration is in `config/compiler.mk`
-- Build artifacts go to `build-{os}/` directory (e.g., `build-darwin/`, `build-linux/`)
-- Submodules are built with `PREFIX=../../build-{os}` to share the same build directory
-- Override `BUILD_DIR` environment variable to use a custom build directory
+- Uses C++ Builder (`./tools/CB.sh`) - a pure C++ build system
+- Build artifacts go to `build-{os}-{config}/` directory (e.g., `build-darwin-debug/`, `build-linux-release/`)
+- Automatic module dependency resolution and caching
+- Parallel builds supported
+- Common commands:
+  - `./tools/CB.sh debug build` - Build in debug mode
+  - `./tools/CB.sh release build` - Build in release mode
+  - `./tools/CB.sh debug test` - Build and run all tests
+  - `./tools/CB.sh debug test "pattern"` - Run filtered tests
+  - `./tools/CB.sh debug clean` - Clean build artifacts
+  - `./tools/CB.sh debug list` - List all translation units
 
 ## Questions?
 

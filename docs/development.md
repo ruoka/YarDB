@@ -13,12 +13,14 @@
 
 ### Git Submodules
 ```bash
-# Initialize and update submodules
-git submodule update --init --recursive --depth 1
+# Initialize and update submodules (depth 1 to avoid nested submodules)
+git submodule update --init --depth 1
 
 # Pull with submodules
 git pull --recurse-submodules
 ```
+
+**Note:** Using `--depth 1` prevents pulling in nested submodules, which avoids multiple tester framework dependencies that could cause conflicts.
 
 ### Environment Setup
 

@@ -18,7 +18,7 @@ The main database server that provides a RESTful HTTP API for document storage a
 ### Usage
 
 ```bash
-yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] [--file=<name>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port]
 ```
 
 ### Options
@@ -31,10 +31,6 @@ yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] [--file=<name>
 - `--clog` - Redirect logging to console (stdout/stderr) instead of syslog
   - Useful for development and debugging
   - Default: logs to syslog
-
-- `--slog_tag=<tag>` - Set syslog application tag
-  - Default: `YarDB`
-  - Used for log filtering and identification
 
 - `--slog_level=<level>` - Set syslog severity level (numeric mask)
   - Controls which log levels are output
@@ -276,7 +272,7 @@ A proxy server that forwards requests to replica yardb servers, providing load b
 ### Usage
 
 ```bash
-yarproxy [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port]
+yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_port]
 ```
 
 ### Options
@@ -287,8 +283,6 @@ yarproxy [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<
   - Example: `--replica=http://localhost:2112`
 
 - `--clog` - Redirect logging to console instead of syslog
-
-- `--slog_tag=<tag>` - Set syslog application tag (default: `YarPROXY`)
 
 - `--slog_level=<level>` - Set syslog severity level
 

@@ -7,7 +7,7 @@ using namespace chrono;
 using namespace ext;
 using namespace net;
 
-const auto usage = R"(yarproxy [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] --replica=<URL> [service_or_port])";
+const auto usage = R"(yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_port])";
 
 using replica = endpointstream;
 
@@ -93,8 +93,8 @@ try
     const auto arguments = span(argv,argc).subspan(1);
     auto replicas = replica_set{};
     auto service_or_port = "2113"s;
-    slog.appname("YarPROXY");
-    slog.level(net::syslog::severity::debug);
+    slog.app_name("yarproxy")
+        .log_level(net::syslog::severity::debug);
 
     for(string_view option : arguments)
     {
@@ -106,14 +106,7 @@ try
 
         if(option == "--clog")
         {
-            (void)slog.redirect(clog);
-            continue;
-        }
-
-        if(option.starts_with("--slog_tag="))
-        {
-            auto tag = option.substr(string_view{"--slog_tag="}.size());
-            slog.appname(tag);
+            slog.redirect(clog);
             continue;
         }
 
@@ -128,7 +121,7 @@ try
                 cerr << usage << endl;
                 return 1;
             }
-            slog.level(mask);
+            slog.log_level(static_cast<net::syslog::severity>(mask));
             continue;
         }
 

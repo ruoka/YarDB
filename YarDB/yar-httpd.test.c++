@@ -19,8 +19,8 @@ public:
     fixture(string_view f) : file{f}, port{"21120"s}, server{file, port}
     {
         // Set logging app name and sd_id for tests (using instance methods)
-        slog.appname("yardb");
-        slog.sd_id("yardb");
+        slog.app_name("yardb")
+            .sd_id("yardb");
         
         // Clean up any stale PID file from previous test runs
         const auto pid_file = string{file} + ".pid"s;

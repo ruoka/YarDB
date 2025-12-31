@@ -67,7 +67,7 @@ sudo apt-get update
 sudo apt-get install -y clang-20 libc++-20-dev
 
 # Run server
-./yardb --file=/var/lib/yardb/data.db --slog_tag=YarDB
+./yardb --file=/var/lib/yardb/data.db
 ```
 
 ### Option 2: Behind Reverse Proxy (Recommended)
@@ -135,7 +135,7 @@ curl http://localhost:2112/ready    # Readiness probe
 ### Log Aggregation
 ```bash
 # Current: syslog
-yardb --slog_tag=YarDB --slog_level=6
+yardb --slog_level=6
 
 # Future: JSON structured logging
 # Will support correlation IDs and structured data
@@ -195,7 +195,6 @@ yarexport --file=production.db > backup.json
 export LLVM_PREFIX=/usr/lib/llvm-20
 
 # Logging configuration
-export SYSLOG_TAG=YarDB
 export SYSLOG_LEVEL=6  # Debug level
 ```
 

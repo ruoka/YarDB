@@ -7,7 +7,7 @@ using namespace std;
 using namespace net;
 using namespace ext;
 
-const auto usage = R"(yardb [--help] [--clog] [--slog_tag=<tag>] [--slog_level=<level>] [--file=<name>] [service_or_port])";
+const auto usage = R"(yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port])";
 
 int main(int argc, char** argv)
 try
@@ -18,9 +18,9 @@ try
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;
     auto service_or_port = "2112"s;
-    slog.appname("yardb");
-    slog.level(net::syslog::severity::debug);
-    (void)slog.set_format(net::log_format::jsonl);  // Use JSONL format by default
+    slog.app_name("yardb")
+        .log_level(net::syslog::severity::debug)
+        .format(net::log_format::jsonl);  // Use JSONL format by default
 
     for(string_view option : arguments)
     {
@@ -32,14 +32,7 @@ try
 
         if(option == "--clog")
         {
-            (void)slog.redirect(clog);
-            continue;
-        }
-
-        if(option.starts_with("--slog_tag="))
-        {
-            auto tag = option.substr(string_view{"--slog_tag="}.size());
-            slog.appname(tag);
+            slog.redirect(clog);
             continue;
         }
 
@@ -54,7 +47,7 @@ try
                 clog << usage << endl;
                 return 1;
             }
-            slog.level(mask);
+            slog.log_level(static_cast<net::syslog::severity>(mask));
             continue;
         }
 

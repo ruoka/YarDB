@@ -89,7 +89,7 @@ Example: `build-darwin-debug/`, `build-linux-release/`
 
 ### Module dependency errors
 - Clean and rebuild: `./tools/CB.sh debug clean && ./tools/CB.sh debug build`
-- Check that all submodules are initialized: `git submodule update --init --recursive`
+- Check that all submodules are initialized: `git submodule update --init --depth 1`
 
 ### std.pcm not found
 - Ensure LLVM is installed with libc++ module support (Clang 20+)

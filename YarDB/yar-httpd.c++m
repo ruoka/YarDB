@@ -91,10 +91,13 @@ private:
             "application/json"sv,
             [this](std::string_view request, std::string_view body, const ::http::headers& headers)
                 {
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("POST_DOCUMENT") << "POST /[a-z]+: "<< request << " <- " << body
                           << std::pair{"method", "POST"}
                           << std::pair{"uri", request}
                           << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -138,6 +141,7 @@ private:
                               << std::pair{"collection", collection}
                               << std::pair{"id", static_cast<long long>(id)}
                               << std::pair{"status", 201}
+                              << std::pair{"correlation_id", correlation_id}
                               << flush;
                         
                         return std::make_tuple("201 Created"s, xson::json::stringify(document), std::make_optional(response_headers));
@@ -156,6 +160,7 @@ private:
                               << std::pair{"collection", collection}
                               << std::pair{"uri", request}
                               << std::pair{"status", 400}
+                              << std::pair{"correlation_id", correlation_id}
                               << flush;
                         auto error = xson::object{
                             {"error", "Bad Request"s},
@@ -172,9 +177,12 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("LIST_COLLECTIONS") << "GET /: " << request
                           << std::pair{"method", "GET"}
                           << std::pair{"uri", request}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -199,9 +207,12 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("GET_DOCUMENT") << "GET /[a-z]+/[0-9]+: " << request
                           << std::pair{"method", "GET"}
                           << std::pair{"uri", request}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -228,6 +239,7 @@ private:
                                   << std::pair{"collection", collection}
                                   << std::pair{"id", id}
                                   << std::pair{"status", 404}
+                                  << std::pair{"correlation_id", correlation_id}
                                   << flush;
                             auto error = xson::object{
                                 {"error", "Not Found"s},
@@ -297,7 +309,7 @@ private:
                     }
                 });
 
-                        // Read collection with OData query parameters
+        // Read collection with OData query parameters
         // Route pattern allows optional query string: /[a-z][a-z0-9]*(\?.*)?
         // Note: Collection names must start with a letter, but can contain digits
         m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response(
@@ -310,10 +322,13 @@ private:
                         collection = validate_collection_name(uri.path[1]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("GET_COLLECTION") << "GET /[a-z]+: " << request
                           << std::pair{"method", "GET"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -542,11 +557,14 @@ private:
                         collection = validate_collection_name(uri.path[2]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("PUT_INDEX") << "PUT /_db/[a-z]+: "<< request << " <- " << body
                           << std::pair{"method", "PUT"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
                           << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -706,11 +724,14 @@ private:
                         collection = validate_collection_name(uri.path[2]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("PATCH_INDEX") << "PATCH /_db/[a-z]+: "<< request << " <- " << body
                           << std::pair{"method", "PATCH"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
                           << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -927,12 +948,15 @@ private:
                         id = stoll(uri.path[2]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("PUT_DOCUMENT") << "PUT /[a-z]+: "<< request << " <- " << body
                           << std::pair{"method", "PUT"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
                           << std::pair{"id", id}
                           << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -1077,12 +1101,15 @@ private:
                         id = stoll(uri.path[2]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("PATCH_DOCUMENT") << "PATCH /[a-z]+: "<< request << " <- " << body
                           << std::pair{"method", "PATCH"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
                           << std::pair{"id", id}
                           << std::pair{"body_size", static_cast<long long>(body.size())}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header
@@ -1213,11 +1240,14 @@ private:
                         id = stoll(uri.path[2]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("DELETE_DOCUMENT") << "DELETE /[a-z]+/[0-9]+: " << request
                           << std::pair{"method", "DELETE"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
                           << std::pair{"id", id}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header (for error responses)
@@ -1271,10 +1301,13 @@ private:
                         collection = validate_collection_name(uri.path[1]);
                     } catch(...) {}
                     
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("DELETE_FIRST") << "DELETE /[a-z]+?\\$top: " << request
                           << std::pair{"method", "DELETE"}
                           << std::pair{"uri", request}
                           << std::pair{"collection", collection}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto documents = xson::object{};
                     auto selector = xson::object{"$top",1ll};
@@ -1290,9 +1323,12 @@ private:
             "application/json"sv,
             [this](std::string_view request, [[maybe_unused]] std::string_view body, const ::http::headers& headers)
                 {
+                    // Extract correlation ID (guaranteed to exist by net HTTP server)
+                    const auto correlation_id = headers[std::string{"x-correlation-id"}];
                     slog << debug("REINDEX") << "GET /_reindex: " << request
                           << std::pair{"method", "GET"}
                           << std::pair{"uri", request}
+                          << std::pair{"correlation_id", correlation_id}
                           << flush;
 
                     // Check Accept header

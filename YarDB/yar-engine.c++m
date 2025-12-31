@@ -55,13 +55,13 @@ public:
     // Used for Last-Modified HTTP header generation
     // @param selector Query selector to find document
     // @return Timestamp if document found, std::nullopt otherwise
-    std::optional<std::chrono::system_clock::time_point> get_metadata_timestamp(const object& selector) const;
+    std::optional<std::chrono::system_clock::time_point> metadata_timestamp(const object& selector) const;
     
     // Get metadata position for the first document matching the selector
     // Used for ETag HTTP header generation
     // @param selector Query selector to find document
     // @return Position if document found, std::nullopt otherwise
-    std::optional<std::int64_t> get_metadata_position(const object& selector) const;
+    std::optional<std::int64_t> metadata_position(const object& selector) const;
 
     // Update documents matching the selector
     // Merges updates with existing document fields (existing fields preserved unless overridden)

@@ -16,7 +16,7 @@ using namespace xson;
 class fixture
 {
 public:
-    fixture(string_view f) : file{f}, port{"21120"s}, server{file, port}
+    fixture(string_view f) : file{f}, m_port{"21120"s}, server{file, m_port}
     {
         // Set logging app name and sd_id for tests (using instance methods)
         slog.app_name("yardb")
@@ -34,7 +34,7 @@ public:
         std::this_thread::sleep_for(1000ms);
     }
 
-    const std::string& get_port() const { return port; }
+    const std::string& port() const { return m_port; }
 
     ~fixture()
     {
@@ -48,7 +48,7 @@ public:
     
 private:
     std::string file;
-    std::string port;
+    std::string m_port;
     yar::http::rest_api_server server;
 };
 
@@ -189,7 +189,7 @@ auto test_set()
         section("POST returns 201 Created") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Test Item","value":42})"s
+                setup->port(), "POST"s, "/testitems"s, R"({"name":"Test Item","value":42})"s
             );
 
             require_eq(status, "201"s);
@@ -207,7 +207,7 @@ auto test_set()
         {
             // First create a document
             auto [post_status, post_reason, post_headers, post_body] = make_request(
-                setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Existing Item"})"s
+                setup->port(), "POST"s, "/testitems"s, R"({"name":"Existing Item"})"s
             );
             require_eq(post_status, "201"s);
             
@@ -216,7 +216,7 @@ auto test_set()
             
             // Get the document
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems/"s + std::to_string(id), ""s
+                setup->port(), "GET"s, "/testitems/"s + std::to_string(id), ""s
             );
 
             require_eq(status, "200"s);
@@ -235,7 +235,7 @@ auto test_set()
         section("GET non-existent document returns 404 Not Found") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems/99999"s, ""s
+                setup->port(), "GET"s, "/testitems/99999"s, ""s
             );
 
             require_eq(status, "404"s);
@@ -255,7 +255,7 @@ auto test_set()
         {
             // First create a document
             auto [post_status, post_reason, post_headers, post_body] = make_request(
-                setup->get_port(), "POST"s, "/testitems"s, R"({"name":"To Delete"})"s
+                setup->port(), "POST"s, "/testitems"s, R"({"name":"To Delete"})"s
             );
             require_eq(post_status, "201"s);
             
@@ -264,7 +264,7 @@ auto test_set()
             
             // Delete the document
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "DELETE"s, "/testitems/"s + std::to_string(id), ""s
+                setup->port(), "DELETE"s, "/testitems/"s + std::to_string(id), ""s
             );
 
             require_eq(status, "204"s);
@@ -275,7 +275,7 @@ auto test_set()
         section("DELETE non-existent document returns 404 Not Found") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "DELETE"s, "/testitems/99999"s, ""s
+                setup->port(), "DELETE"s, "/testitems/99999"s, ""s
             );
 
             require_eq(status, "404"s);
@@ -291,7 +291,7 @@ auto test_set()
         section("POST with invalid JSON returns 400 Bad Request") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "POST"s, "/testitems"s, R"({"invalid":json})"s
+                setup->port(), "POST"s, "/testitems"s, R"({"invalid":json})"s
             );
 
             require_eq(status, "400"s);
@@ -309,7 +309,7 @@ auto test_set()
         {
             // First create a document
             auto [post_status, post_reason, post_headers, post_body] = make_request(
-                setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Original"})"s
+                setup->port(), "POST"s, "/testitems"s, R"({"name":"Original"})"s
             );
             require_eq(post_status, "201"s);
             
@@ -318,7 +318,7 @@ auto test_set()
             
             // Update the document
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "PUT"s, "/testitems/"s + std::to_string(id), R"({"name":"Updated","value":100})"s
+                setup->port(), "PUT"s, "/testitems/"s + std::to_string(id), R"({"name":"Updated","value":100})"s
             );
 
             require_eq(status, "200"s);
@@ -341,7 +341,7 @@ auto test_set()
             // PUT to a non-existent document should create it
             const long long new_id = 99999ll;
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "PUT"s, "/testitems/"s + std::to_string(new_id), R"({"name":"New Item","value":200})"s
+                setup->port(), "PUT"s, "/testitems/"s + std::to_string(new_id), R"({"name":"New Item","value":200})"s
             );
 
             require_eq(status, "201"s);
@@ -362,7 +362,7 @@ auto test_set()
             
             // Verify we can retrieve it
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems/"s + std::to_string(new_id), ""s
+                setup->port(), "GET"s, "/testitems/"s + std::to_string(new_id), ""s
             );
             require_eq(get_status, "200"s);
         };
@@ -371,7 +371,7 @@ auto test_set()
         {
             // First create a document
             auto [post_status, post_reason, post_headers, post_body] = make_request(
-                setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Original","value":50})"s
+                setup->port(), "POST"s, "/testitems"s, R"({"name":"Original","value":50})"s
             );
             require_eq(post_status, "201"s);
             
@@ -380,7 +380,7 @@ auto test_set()
             
             // Partially update the document
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "PATCH"s, "/testitems/"s + std::to_string(id), R"({"value":75})"s
+                setup->port(), "PATCH"s, "/testitems/"s + std::to_string(id), R"({"value":75})"s
             );
 
             require_eq(status, "200"s);
@@ -404,7 +404,7 @@ auto test_set()
             for(int i = 1; i <= 5; ++i)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                 );
                 require_eq(post_status, "201"s);
                 // Small delay to ensure server processes request
@@ -413,7 +413,7 @@ auto test_set()
             
             // Get collection with $top=2
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems?$top=2"s, ""s
+                setup->port(), "GET"s, "/testitems?$top=2"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -433,7 +433,7 @@ auto test_set()
             for(int i = 1; i <= 3; ++i)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                 );
                 require_eq(post_status, "201"s);
                 // Small delay to ensure server processes request
@@ -443,7 +443,7 @@ auto test_set()
             // Get collection with $orderby desc
             // Note: Space in "field desc" must be URL-encoded as %20
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems?$orderby=field%20desc"s, ""s
+                setup->port(), "GET"s, "/testitems?$orderby=field%20desc"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -460,14 +460,14 @@ auto test_set()
             for(int i = 1; i <= 5; ++i)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                 );
                 // Allow retry if server is busy
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                        setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -482,7 +482,7 @@ auto test_set()
             // Get collection with $top=2 and $orderby desc
             // Note: Space in "field desc" needs to be URL-encoded as %20
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems?$top=2&$orderby=field%20desc"s, ""s
+                setup->port(), "GET"s, "/testitems?$top=2&$orderby=field%20desc"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -502,14 +502,14 @@ auto test_set()
             for(int i = 1; i <= 10; ++i)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
                 );
                 // Allow retry if server is busy
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                        setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -522,7 +522,7 @@ auto test_set()
             
             // Get collection with $skip=3 (should skip first 3 items)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems?$skip=3"s, ""s
+                setup->port(), "GET"s, "/testitems?$skip=3"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -535,7 +535,7 @@ auto test_set()
             
             // Get all items without skip to compare
             auto [status_all, reason_all, headers_all, response_body_all] = make_request(
-                setup->get_port(), "GET"s, "/testitems"s, ""s
+                setup->port(), "GET"s, "/testitems"s, ""s
             );
             require_eq(status_all, "200"s);
             auto documents_all = json::parse(response_body_all);
@@ -556,14 +556,14 @@ auto test_set()
             for(int i = 1; i <= 10; ++i)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
                 );
                 // Allow retry if server is busy
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
+                        setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"(", "value":)"s + std::to_string(i) + R"(})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -576,7 +576,7 @@ auto test_set()
             
             // Get collection with $skip=3&$top=3 (should return items 4, 5, 6)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems?$skip=3&$top=3"s, ""s
+                setup->port(), "GET"s, "/testitems?$skip=3&$top=3"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -590,7 +590,7 @@ auto test_set()
             
             // Get all items without skip/top to compare
             auto [status_all, reason_all, headers_all, response_body_all] = make_request(
-                setup->get_port(), "GET"s, "/testitems"s, ""s
+                setup->port(), "GET"s, "/testitems"s, ""s
             );
             require_eq(status_all, "200"s);
             auto documents_all = json::parse(response_body_all);
@@ -613,14 +613,14 @@ auto test_set()
             for(int i = 1; i <= 5; ++i)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                 );
                 // Allow retry if server is busy
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                        setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -633,7 +633,7 @@ auto test_set()
             
             // Get collection with $skip=0 (should return all items, same as no skip)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/testitems?$skip=0"s, ""s
+                setup->port(), "GET"s, "/testitems?$skip=0"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -641,7 +641,7 @@ auto test_set()
             
             // Get all items without skip to compare
             auto [status_all, reason_all, headers_all, response_body_all] = make_request(
-                setup->get_port(), "GET"s, "/testitems"s, ""s
+                setup->port(), "GET"s, "/testitems"s, ""s
             );
             require_eq(status_all, "200"s);
             auto documents_all = json::parse(response_body_all);
@@ -675,13 +675,13 @@ auto test_set()
             for(const auto& [name, age] : test_data)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/users"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                    setup->port(), "POST"s, "/users"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
                 );
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/users"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                        setup->port(), "POST"s, "/users"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -694,7 +694,7 @@ auto test_set()
             
             // Filter: age gt 25 (should return Bob and Charlie)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users?$filter=age%20gt%2025"s, ""s
+                setup->port(), "GET"s, "/users?$filter=age%20gt%2025"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -720,7 +720,7 @@ auto test_set()
         {
             // Filter: name eq 'Alice' (should return only Alice)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users?$filter=name%20eq%20'Alice'"s, ""s
+                setup->port(), "GET"s, "/users?$filter=name%20eq%20'Alice'"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -744,7 +744,7 @@ auto test_set()
             // Add status field to existing documents
             // First, get all users and update them with status
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/users"s, ""s
+                setup->port(), "GET"s, "/users"s, ""s
             );
             require_eq(get_status, "200"s);
             
@@ -763,13 +763,13 @@ auto test_set()
             for(const auto& [name, age, status] : test_data)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                    setup->port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
                 );
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                        setup->port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -782,7 +782,7 @@ auto test_set()
             
             // Filter: status eq 'active' and age ge 25
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users2?$filter=status%20eq%20'active'%20and%20age%20ge%2025"s, ""s
+                setup->port(), "GET"s, "/users2?$filter=status%20eq%20'active'%20and%20age%20ge%2025"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -812,13 +812,13 @@ auto test_set()
         {
             // Create a document with multiple fields
             auto [post_status, post_reason, post_headers, post_body] = make_request(
-                setup->get_port(), "POST"s, "/users3"s, R"({"name":"TestUser", "email":"test@example.com", "age":30, "status":"active"})"s
+                setup->port(), "POST"s, "/users3"s, R"({"name":"TestUser", "email":"test@example.com", "age":30, "status":"active"})"s
             );
             if(post_status != "201"s)
             {
                 std::this_thread::sleep_for(100ms);
                 auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                    setup->get_port(), "POST"s, "/users3"s, R"({"name":"TestUser", "email":"test@example.com", "age":30, "status":"active"})"s
+                    setup->port(), "POST"s, "/users3"s, R"({"name":"TestUser", "email":"test@example.com", "age":30, "status":"active"})"s
                 );
                 require_eq(retry_status, "201"s);
             }
@@ -830,7 +830,7 @@ auto test_set()
             
             // Select only name and email fields
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users3?$select=name,email"s, ""s
+                setup->port(), "GET"s, "/users3?$select=name,email"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -866,7 +866,7 @@ auto test_set()
         {
             // Filter and select: age gt 25, select name and email
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users?$filter=age%20gt%2025&$select=name,email"s, ""s
+                setup->port(), "GET"s, "/users?$filter=age%20gt%2025&$select=name,email"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -893,7 +893,7 @@ auto test_set()
         {
             // Select name and age, limit to 2 results
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users?$select=name,age&$top=2"s, ""s
+                setup->port(), "GET"s, "/users?$select=name,age&$top=2"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -930,13 +930,13 @@ auto test_set()
             for(const auto& [name, age, status] : test_data)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                    setup->port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
                 );
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
+                        setup->port(), "POST"s, "/users2"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(, "status":")"s + status + R"("})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -949,13 +949,13 @@ auto test_set()
             
             // First test simple GET to ensure collection exists
             auto [test_status, test_reason, test_headers, test_body] = make_request(
-                setup->get_port(), "GET"s, "/users2"s, ""s
+                setup->port(), "GET"s, "/users2"s, ""s
             );
             require_eq(test_status, "200"s);
             
             // Filter, select, and limit: status eq 'active', select name and age, top 2
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users2?$filter=status%20eq%20'active'&$select=name,age&$top=2"s, ""s
+                setup->port(), "GET"s, "/users2?$filter=status%20eq%20'active'&$select=name,age&$top=2"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -990,13 +990,13 @@ auto test_set()
             for(const auto& [name, email] : test_data)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/users3"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"("})"s
+                    setup->port(), "POST"s, "/users3"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"("})"s
                 );
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/users3"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"("})"s
+                        setup->port(), "POST"s, "/users3"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"("})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -1009,7 +1009,7 @@ auto test_set()
             
             // Filter: startswith(name, 'A') (should return Alice)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users3?$filter=startswith(name,'A')"s, ""s
+                setup->port(), "GET"s, "/users3?$filter=startswith(name,'A')"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1035,7 +1035,7 @@ auto test_set()
         {
             // Filter: contains(email, '@example') (should return Alice and Charlie)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users3?$filter=contains(email,'@example')"s, ""s
+                setup->port(), "GET"s, "/users3?$filter=contains(email,'@example')"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1070,13 +1070,13 @@ auto test_set()
             for(const auto& [name, email, path] : test_data)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/users4"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"(", "path":")"s + path + R"("})"s
+                    setup->port(), "POST"s, "/users4"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"(", "path":")"s + path + R"("})"s
                 );
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/users4"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"(", "path":")"s + path + R"("})"s
+                        setup->port(), "POST"s, "/users4"s, R"({"name":")"s + name + R"(", "email":")"s + email + R"(", "path":")"s + path + R"("})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -1089,7 +1089,7 @@ auto test_set()
             
             // Filter: endswith(path, '.pdf') (should return Alice4 and Charlie4)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users4?$filter=endswith(path,'.pdf')"s, ""s
+                setup->port(), "GET"s, "/users4?$filter=endswith(path,'.pdf')"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1116,7 +1116,7 @@ auto test_set()
             // Combined filter: startswith(name, 'C') and endswith(path, '.pdf')
             // Should return Charlie4
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users4?$filter=startswith(name,'C')%20and%20endswith(path,'.pdf')"s, ""s
+                setup->port(), "GET"s, "/users4?$filter=startswith(name,'C')%20and%20endswith(path,'.pdf')"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1146,7 +1146,7 @@ auto test_set()
             // Combined filter: contains(email, '@example') and startswith(name, 'A')
             // Should return Alice
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users3?$filter=contains(email,'@example')%20and%20startswith(name,'A')"s, ""s
+                setup->port(), "GET"s, "/users3?$filter=contains(email,'@example')%20and%20startswith(name,'A')"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1175,7 +1175,7 @@ auto test_set()
         {
             // $expand is a placeholder, should return documents unchanged
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users?$expand=orders"s, ""s
+                setup->port(), "GET"s, "/users?$expand=orders"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1192,7 +1192,7 @@ auto test_set()
         {
             // Invalid filter expression
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/users?$filter=invalid"s, ""s
+                setup->port(), "GET"s, "/users?$filter=invalid"s, ""s
             );
 
             require_eq(status, "400"s);
@@ -1218,13 +1218,13 @@ auto test_set()
             for(const auto& [name, age] : test_data)
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->get_port(), "POST"s, "/counttest"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                    setup->port(), "POST"s, "/counttest"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
                 );
                 if(post_status != "201"s)
                 {
                     std::this_thread::sleep_for(100ms);
                     auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->get_port(), "POST"s, "/counttest"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
+                        setup->port(), "POST"s, "/counttest"s, R"({"name":")"s + name + R"(", "age":)"s + std::to_string(age) + R"(})"s
                     );
                     require_eq(retry_status, "201"s);
                 }
@@ -1237,7 +1237,7 @@ auto test_set()
             
             // Get count with $count=true
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/counttest?$count=true"s, ""s
+                setup->port(), "GET"s, "/counttest?$count=true"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1250,7 +1250,7 @@ auto test_set()
             
             // Verify it matches the actual count by getting all documents
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/counttest"s, ""s
+                setup->port(), "GET"s, "/counttest"s, ""s
             );
             require_eq(get_status, "200"s);
             auto documents = json::parse(get_body);
@@ -1263,7 +1263,7 @@ auto test_set()
         {
             // Count with filter: age gt 25 (should return count of users with age > 25)
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/counttest?$count=true&$filter=age%20gt%2025"s, ""s
+                setup->port(), "GET"s, "/counttest?$count=true&$filter=age%20gt%2025"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1275,7 +1275,7 @@ auto test_set()
             
             // Verify it matches the filtered count
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/counttest?$filter=age%20gt%2025"s, ""s
+                setup->port(), "GET"s, "/counttest?$filter=age%20gt%2025"s, ""s
             );
             require_eq(get_status, "200"s);
             auto documents = json::parse(get_body);
@@ -1288,7 +1288,7 @@ auto test_set()
         {
             // Count on empty collection
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "GET"s, "/emptycollection?$count=true"s, ""s
+                setup->port(), "GET"s, "/emptycollection?$count=true"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1308,18 +1308,18 @@ auto test_set()
         {
             // Create some test documents first
             auto [post_status1, _unused1, _unused2, post_body1] = make_request(
-                setup->get_port(), "POST"s, "/indextest"s, R"({"name":"Alice","email":"alice@example.com","status":"active"})"s
+                setup->port(), "POST"s, "/indextest"s, R"({"name":"Alice","email":"alice@example.com","status":"active"})"s
             );
             require_eq(post_status1, "201"s);
             
             auto [post_status2, _unused3, _unused4, post_body2] = make_request(
-                setup->get_port(), "POST"s, "/indextest"s, R"({"name":"Bob","email":"bob@example.com","status":"inactive"})"s
+                setup->port(), "POST"s, "/indextest"s, R"({"name":"Bob","email":"bob@example.com","status":"inactive"})"s
             );
             require_eq(post_status2, "201"s);
             
             // Add secondary indexes
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "PUT"s, "/_db/indextest"s, R"({"keys":["email","status"]})"s
+                setup->port(), "PUT"s, "/_db/indextest"s, R"({"keys":["email","status"]})"s
             );
 
             require_eq(status, "200"s);
@@ -1342,7 +1342,7 @@ auto test_set()
         {
             // Missing keys field
             auto [status1, reason1, _unused1, body1] = make_request(
-                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({})"s
+                setup->port(), "PUT"s, "/_db/indextest2"s, R"({})"s
             );
             require_eq(status1, "400"s);
             auto error1 = json::parse(body1);
@@ -1350,7 +1350,7 @@ auto test_set()
             
             // Keys not an array
             auto [status2, reason2, _unused2, body2] = make_request(
-                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":"email"})"s
+                setup->port(), "PUT"s, "/_db/indextest2"s, R"({"keys":"email"})"s
             );
             require_eq(status2, "400"s);
             auto error2 = json::parse(body2);
@@ -1358,7 +1358,7 @@ auto test_set()
             
             // Empty keys array
             auto [status3, reason3, _unused3, body3] = make_request(
-                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":[]})"s
+                setup->port(), "PUT"s, "/_db/indextest2"s, R"({"keys":[]})"s
             );
             require_eq(status3, "400"s);
             auto error3 = json::parse(body3);
@@ -1366,7 +1366,7 @@ auto test_set()
             
             // Invalid key (not a string)
             auto [status4, reason4, _unused4, body4] = make_request(
-                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":[123]})"s
+                setup->port(), "PUT"s, "/_db/indextest2"s, R"({"keys":[123]})"s
             );
             require_eq(status4, "400"s);
             auto error4 = json::parse(body4);
@@ -1374,7 +1374,7 @@ auto test_set()
             
             // Reserved field name
             auto [status5, reason5, _unused5, body5] = make_request(
-                setup->get_port(), "PUT"s, "/_db/indextest2"s, R"({"keys":["_id"]})"s
+                setup->port(), "PUT"s, "/_db/indextest2"s, R"({"keys":["_id"]})"s
             );
             require_eq(status5, "400"s);
             auto error5 = json::parse(body5);
@@ -1385,24 +1385,24 @@ auto test_set()
         {
             // Create test documents
             auto [post_status1, _unused1, _unused2, post_body1] = make_request(
-                setup->get_port(), "POST"s, "/querytest"s, R"({"name":"User1","email":"user1@test.com","age":25})"s
+                setup->port(), "POST"s, "/querytest"s, R"({"name":"User1","email":"user1@test.com","age":25})"s
             );
             require_eq(post_status1, "201"s);
             
             auto [post_status2, _unused3, _unused4, post_body2] = make_request(
-                setup->get_port(), "POST"s, "/querytest"s, R"({"name":"User2","email":"user2@test.com","age":30})"s
+                setup->port(), "POST"s, "/querytest"s, R"({"name":"User2","email":"user2@test.com","age":30})"s
             );
             require_eq(post_status2, "201"s);
             
             // Add index on email field
             auto [put_status, _unused5, _unused6, _unused7] = make_request(
-                setup->get_port(), "PUT"s, "/_db/querytest"s, R"({"keys":["email"]})"s
+                setup->port(), "PUT"s, "/_db/querytest"s, R"({"keys":["email"]})"s
             );
             require_eq(put_status, "200"s);
             
             // Query by indexed field
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/querytest?$filter=email%20eq%20'user1@test.com'"s, ""s
+                setup->port(), "GET"s, "/querytest?$filter=email%20eq%20'user1@test.com'"s, ""s
             );
             require_eq(get_status, "200"s);
             
@@ -1417,7 +1417,7 @@ auto test_set()
         {
             // First, add some indexes with PUT
             auto [put_status1, _unused1, _unused2, put_body1] = make_request(
-                setup->get_port(), "PUT"s, "/_db/patchtest"s, R"({"keys":["email"]})"s
+                setup->port(), "PUT"s, "/_db/patchtest"s, R"({"keys":["email"]})"s
             );
             require_eq(put_status1, "200"s);
             auto config1 = json::parse(put_body1);
@@ -1426,7 +1426,7 @@ auto test_set()
             
             // PATCH to add more indexes
             auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
-                setup->get_port(), "PATCH"s, "/_db/patchtest"s, R"({"keys":["status","age"]})"s
+                setup->port(), "PATCH"s, "/_db/patchtest"s, R"({"keys":["status","age"]})"s
             );
             require_eq(patch_status, "200"s);
             
@@ -1444,13 +1444,13 @@ auto test_set()
         {
             // Add indexes with PUT
             auto [put_status, _unused1, _unused2, _unused3] = make_request(
-                setup->get_port(), "PUT"s, "/_db/duptest"s, R"({"keys":["email","status"]})"s
+                setup->port(), "PUT"s, "/_db/duptest"s, R"({"keys":["email","status"]})"s
             );
             require_eq(put_status, "200"s);
             
             // PATCH with duplicate keys (email already exists)
             auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
-                setup->get_port(), "PATCH"s, "/_db/duptest"s, R"({"keys":["email","age"]})"s
+                setup->port(), "PATCH"s, "/_db/duptest"s, R"({"keys":["email","age"]})"s
             );
             require_eq(patch_status, "200"s);
             
@@ -1472,14 +1472,14 @@ auto test_set()
         {
             // Add indexes with PUT
             auto [put_status, _unused1, _unused2, put_body] = make_request(
-                setup->get_port(), "PUT"s, "/_db/allduptest"s, R"({"keys":["email","status"]})"s
+                setup->port(), "PUT"s, "/_db/allduptest"s, R"({"keys":["email","status"]})"s
             );
             require_eq(put_status, "200"s);
             auto original_config = json::parse(put_body);
             
             // PATCH with all duplicate keys
             auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
-                setup->get_port(), "PATCH"s, "/_db/allduptest"s, R"({"keys":["email","status"]})"s
+                setup->port(), "PATCH"s, "/_db/allduptest"s, R"({"keys":["email","status"]})"s
             );
             require_eq(patch_status, "200"s);
             
@@ -1493,9 +1493,9 @@ auto test_set()
 
         section("PUT /_db/{collection_name} with invalid Accept header returns 406") = [setup]
         {
-            auto stream = connect("localhost"s, setup->get_port());
+            auto stream = connect("localhost"s, setup->port());
             stream << "PUT /_db/accepttest HTTP/1.1" << crlf
-                   << "Host: localhost:" << setup->get_port() << crlf
+                   << "Host: localhost:" << setup->port() << crlf
                    << "Accept: application/xml" << crlf
                    << "Content-Type: application/json" << crlf
                    << "Content-Length: " << R"({"keys":["email"]})"s.length() << crlf
@@ -1508,9 +1508,9 @@ auto test_set()
 
         section("PATCH /_db/{collection_name} with invalid Accept header returns 406") = [setup]
         {
-            auto stream = connect("localhost"s, setup->get_port());
+            auto stream = connect("localhost"s, setup->port());
             stream << "PATCH /_db/accepttest2 HTTP/1.1" << crlf
-                   << "Host: localhost:" << setup->get_port() << crlf
+                   << "Host: localhost:" << setup->port() << crlf
                    << "Accept: application/xml" << crlf
                    << "Content-Type: application/json" << crlf
                    << "Content-Length: " << R"({"keys":["email"]})"s.length() << crlf
@@ -1531,7 +1531,7 @@ auto test_set()
         section("Setup: Create test document") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "POST"s, "/headtest"s, R"({"name":"HEAD Test","value":100})"s
+                setup->port(), "POST"s, "/headtest"s, R"({"name":"HEAD Test","value":100})"s
             );
             require_eq(status, "201"s);
         };
@@ -1539,7 +1539,7 @@ auto test_set()
         section("HEAD / returns 200 OK with no body") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "HEAD"s, "/"s, ""s
+                setup->port(), "HEAD"s, "/"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1553,7 +1553,7 @@ auto test_set()
         section("HEAD /collection returns 200 OK with no body") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "HEAD"s, "/headtest"s, ""s
+                setup->port(), "HEAD"s, "/headtest"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1568,7 +1568,7 @@ auto test_set()
         {
             // First get the ID from a GET request
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+                setup->port(), "GET"s, "/headtest?$top=1"s, ""s
             );
             require_eq(get_status, "200"s);
             auto documents = json::parse(get_body);
@@ -1578,7 +1578,7 @@ auto test_set()
             
             // Now test HEAD
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "HEAD"s, "/headtest/"s + std::to_string(id), ""s
+                setup->port(), "HEAD"s, "/headtest/"s + std::to_string(id), ""s
             );
 
             require_eq(status, "200"s);
@@ -1592,7 +1592,7 @@ auto test_set()
         section("HEAD /collection/{id} returns 404 Not Found for non-existent document") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request(
-                setup->get_port(), "HEAD"s, "/headtest/99999"s, ""s
+                setup->port(), "HEAD"s, "/headtest/99999"s, ""s
             );
 
             require_eq(status, "404"s);
@@ -1604,7 +1604,7 @@ auto test_set()
         section("GET with Accept: application/json returns 200 OK") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "application/json"s, ""s
+                setup->port(), "GET"s, "/headtest?s$top=1"s, "application/json"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1617,7 +1617,7 @@ auto test_set()
         section("GET with Accept: */* returns 200 OK") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "*/*"s, ""s
+                setup->port(), "GET"s, "/headtest?s$top=1"s, "*/*"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1629,7 +1629,7 @@ auto test_set()
         section("GET with Accept: application/* returns 200 OK") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest?s$top=1"s, "application/*"s, ""s
+                setup->port(), "GET"s, "/headtest?s$top=1"s, "application/*"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1641,7 +1641,7 @@ auto test_set()
         section("GET with Accept: application/json;odata=fullmetadata returns 200 OK") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest?$top=1"s, "application/json;odata=fullmetadata"s, ""s
+                setup->port(), "GET"s, "/headtest?$top=1"s, "application/json;odata=fullmetadata"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1653,7 +1653,7 @@ auto test_set()
         section("GET with Accept: application/xml returns 406 Not Acceptable") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest"s, "application/xml"s, ""s
+                setup->port(), "GET"s, "/headtest"s, "application/xml"s, ""s
             );
 
             require_eq(status, "406"s);
@@ -1673,7 +1673,7 @@ auto test_set()
         section("GET with Accept: text/html returns 406 Not Acceptable") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest"s, "text/html"s, ""s
+                setup->port(), "GET"s, "/headtest"s, "text/html"s, ""s
             );
 
             require_eq(status, "406"s);
@@ -1689,7 +1689,7 @@ auto test_set()
         section("GET with Accept: application/xml, text/html returns 406 Not Acceptable") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/headtest"s, "application/xml, text/html"s, ""s
+                setup->port(), "GET"s, "/headtest"s, "application/xml, text/html"s, ""s
             );
 
             require_eq(status, "406"s);
@@ -1698,9 +1698,9 @@ auto test_set()
 
         section("GET without Accept header returns 200 OK (defaults to accept anything)") = [setup]
         {
-            auto stream = connect("localhost"s, setup->get_port());
+            auto stream = connect("localhost"s, setup->port());
             stream << "GET /headtest?s$top=1 HTTP/1.1" << crlf
-                   << "Host: localhost:" << setup->get_port() << crlf
+                   << "Host: localhost:" << setup->port() << crlf
                    << crlf << flush;
             
             auto [status, reason, headers, response_body] = parse_http_response(stream);
@@ -1714,7 +1714,7 @@ auto test_set()
         section("HEAD with Accept: application/xml returns 406 Not Acceptable") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "HEAD"s, "/headtest"s, "application/xml"s, ""s
+                setup->port(), "HEAD"s, "/headtest"s, "application/xml"s, ""s
             );
 
             require_eq(status, "406"s);
@@ -1724,7 +1724,7 @@ auto test_set()
         section("POST with Accept: application/xml returns 406 Not Acceptable") = [setup]
         {
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "POST"s, "/headtest"s, "application/xml"s, R"({"name":"Test"})"s
+                setup->port(), "POST"s, "/headtest"s, "application/xml"s, R"({"name":"Test"})"s
             );
 
             require_eq(status, "406"s);
@@ -1735,13 +1735,13 @@ auto test_set()
         {
             // First get an ID
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+                setup->port(), "GET"s, "/headtest?$top=1"s, ""s
             );
             auto documents = json::parse(get_body);
             const auto id = static_cast<xson::integer_type>(documents[0]["_id"s]);
             
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "PUT"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Updated"})"s
+                setup->port(), "PUT"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Updated"})"s
             );
 
             require_eq(status, "406"s);
@@ -1752,13 +1752,13 @@ auto test_set()
         {
             // First get an ID
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+                setup->port(), "GET"s, "/headtest?$top=1"s, ""s
             );
             auto documents = json::parse(get_body);
             const auto id = static_cast<xson::integer_type>(documents[0]["_id"s]);
             
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "PATCH"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Patched"})"s
+                setup->port(), "PATCH"s, "/headtest/"s + std::to_string(id), "application/xml"s, R"({"name":"Patched"})"s
             );
 
             require_eq(status, "406"s);
@@ -1769,13 +1769,13 @@ auto test_set()
         {
             // Create a document to delete
             auto [post_status, post_reason, post_headers, post_body] = make_request(
-                setup->get_port(), "POST"s, "/headtest"s, R"({"name":"To Delete"})"s
+                setup->port(), "POST"s, "/headtest"s, R"({"name":"To Delete"})"s
             );
             auto created_doc = json::parse(post_body);
             const auto id = static_cast<xson::integer_type>(created_doc["_id"s]);
             
             auto [status, reason, headers, response_body] = make_request_with_accept(
-                setup->get_port(), "DELETE"s, "/headtest/"s + std::to_string(id), "application/xml"s, ""s
+                setup->port(), "DELETE"s, "/headtest/"s + std::to_string(id), "application/xml"s, ""s
             );
 
             require_eq(status, "406"s);
@@ -1786,13 +1786,13 @@ auto test_set()
         {
             // Valid query parameters should work
             auto [status1, reason1, headers1, body1] = make_request(
-                setup->get_port(), "HEAD"s, "/headtest?$top=5"s, ""s
+                setup->port(), "HEAD"s, "/headtest?$top=5"s, ""s
             );
             require_eq(status1, "200"s);
 
             // Invalid query parameters should return 400
             auto [status2, reason2, headers2, body2] = make_request(
-                setup->get_port(), "HEAD"s, "/headtest?$top=-1"s, ""s
+                setup->port(), "HEAD"s, "/headtest?$top=-1"s, ""s
             );
             require_eq(status2, "400"s);
         };
@@ -1801,12 +1801,12 @@ auto test_set()
         {
             // GET request
             auto [get_status, get_reason, get_headers, get_body] = make_request(
-                setup->get_port(), "GET"s, "/headtest?$top=1"s, ""s
+                setup->port(), "GET"s, "/headtest?$top=1"s, ""s
             );
             
             // HEAD request
             auto [head_status, head_reason, head_headers, head_body] = make_request(
-                setup->get_port(), "HEAD"s, "/headtest?$top=1"s, ""s
+                setup->port(), "HEAD"s, "/headtest?$top=1"s, ""s
             );
 
             require_eq(get_status, "200"s);
@@ -1830,13 +1830,13 @@ auto test_set()
         {
             // Create test document
             auto [post_status, _, __, post_body] = make_request(
-                setup->get_port(), "POST"s, "/odatatest"s, R"({"name":"Alice","age":30})"s
+                setup->port(), "POST"s, "/odatatest"s, R"({"name":"Alice","age":30})"s
             );
             require_eq(post_status, "201"s);
 
             // Query collection with minimal metadata
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/odatatest"s, "application/json;odata=minimalmetadata"s
+                setup->port(), "GET"s, "/odatatest"s, "application/json;odata=minimalmetadata"s
             );
 
             require_eq(status, "200"s);
@@ -1860,7 +1860,7 @@ auto test_set()
         {
             // Query collection with full metadata
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/odatatest"s, "application/json;odata=fullmetadata"s
+                setup->port(), "GET"s, "/odatatest"s, "application/json;odata=fullmetadata"s
             );
 
             require_eq(status, "200"s);
@@ -1893,7 +1893,7 @@ auto test_set()
         {
             // Get first document ID
             auto [get_status, __, ___, get_body] = make_request(
-                setup->get_port(), "GET"s, "/odatatest"s, ""s
+                setup->port(), "GET"s, "/odatatest"s, ""s
             );
             auto all_docs = json::parse(get_body);
             auto& items = all_docs.get<xson::object::array>();
@@ -1902,7 +1902,7 @@ auto test_set()
             
             // Get single document with minimal metadata
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/odatatest/"s + std::to_string(doc_id), 
+                setup->port(), "GET"s, "/odatatest/"s + std::to_string(doc_id), 
                 "application/json;odata=minimalmetadata"s
             );
 
@@ -1922,7 +1922,7 @@ auto test_set()
         {
             // Get first document ID
             auto [get_status, __, ___, get_body] = make_request(
-                setup->get_port(), "GET"s, "/odatatest"s, ""s
+                setup->port(), "GET"s, "/odatatest"s, ""s
             );
             auto all_docs = json::parse(get_body);
             auto& items = all_docs.get<xson::object::array>();
@@ -1931,7 +1931,7 @@ auto test_set()
             
             // Get single document with full metadata
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/odatatest/"s + std::to_string(doc_id), 
+                setup->port(), "GET"s, "/odatatest/"s + std::to_string(doc_id), 
                 "application/json;odata=fullmetadata"s
             );
 
@@ -1952,7 +1952,7 @@ auto test_set()
         {
             // Query without Accept header
             auto [status, reason, headers, body] = make_request(
-                setup->get_port(), "GET"s, "/odatatest"s, ""s
+                setup->port(), "GET"s, "/odatatest"s, ""s
             );
 
             require_eq(status, "200"s);
@@ -1970,7 +1970,7 @@ auto test_set()
         {
             // Query with explicit no metadata
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "GET"s, "/odatatest"s, "application/json;odata=nometadata"s
+                setup->port(), "GET"s, "/odatatest"s, "application/json;odata=nometadata"s
             );
 
             require_eq(status, "200"s);
@@ -1988,7 +1988,7 @@ auto test_set()
         {
             // Create document with minimal metadata request
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "POST"s, "/odatatest2"s, "application/json;odata=minimalmetadata"s,
+                setup->port(), "POST"s, "/odatatest2"s, "application/json;odata=minimalmetadata"s,
                 R"({"name":"Bob","age":25})"s
             );
 
@@ -2005,14 +2005,14 @@ auto test_set()
         {
             // First create a document
             auto [post_status, __, ___, post_body] = make_request(
-                setup->get_port(), "POST"s, "/odatatest3"s, R"({"name":"Charlie"})"s
+                setup->port(), "POST"s, "/odatatest3"s, R"({"name":"Charlie"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // Update with full metadata request
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "PUT"s, "/odatatest3/"s + std::to_string(doc_id), 
+                setup->port(), "PUT"s, "/odatatest3/"s + std::to_string(doc_id), 
                 "application/json;odata=fullmetadata"s,
                 R"({"name":"Charlie Updated","age":40})"s
             );
@@ -2030,14 +2030,14 @@ auto test_set()
         {
             // First create a document
             auto [post_status, __, ___, post_body] = make_request(
-                setup->get_port(), "POST"s, "/odatatest4"s, R"({"name":"David"})"s
+                setup->port(), "POST"s, "/odatatest4"s, R"({"name":"David"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // Update with minimal metadata request
             auto [status, reason, headers, body] = make_request_with_accept(
-                setup->get_port(), "PATCH"s, "/odatatest4/"s + std::to_string(doc_id), 
+                setup->port(), "PATCH"s, "/odatatest4/"s + std::to_string(doc_id), 
                 "application/json;odata=minimalmetadata"s,
                 R"({"age":35})"s
             );
@@ -2070,14 +2070,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post1, _unused_post2, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest"s, R"({"name":"ETag Document"})"s
+                setup->port(), "POST"s, "/etagtest"s, R"({"name":"ETag Document"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document
             auto [status, reason, headers, body] = make_request(
-                setup->get_port(), "GET"s, "/etagtest/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/etagtest/"s + std::to_string(doc_id), ""s
             );
             
             require_eq(status, "200"s);
@@ -2093,14 +2093,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused1, _unused2, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest2"s, R"({"name":"If-None-Match Test"})"s
+                setup->port(), "POST"s, "/etagtest2"s, R"({"name":"If-None-Match Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document to get ETag
             auto [get_status, _unused3, headers1, _unused4] = make_request(
-                setup->get_port(), "GET"s, "/etagtest2/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/etagtest2/"s + std::to_string(doc_id), ""s
             );
             require_eq(get_status, "200"s);
             require_true(headers1.contains("etag"s));
@@ -2109,7 +2109,7 @@ auto test_set()
             // GET again with If-None-Match matching the ETag
             auto custom_headers = std::map<string, string>{{"If-None-Match", etag}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "GET"s, "/etagtest2/"s + std::to_string(doc_id), custom_headers
+                setup->port(), "GET"s, "/etagtest2/"s + std::to_string(doc_id), custom_headers
             );
             
             require_eq(status, "304"s);
@@ -2122,7 +2122,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post3, _unused_post4, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest3"s, R"({"name":"If-None-Match Non-Match"})"s
+                setup->port(), "POST"s, "/etagtest3"s, R"({"name":"If-None-Match Non-Match"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2130,7 +2130,7 @@ auto test_set()
             // GET with If-None-Match with a different ETag
             auto custom_headers = std::map<string, string>{{"If-None-Match", "\"different-etag\""s}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "GET"s, "/etagtest3/"s + std::to_string(doc_id), custom_headers
+                setup->port(), "GET"s, "/etagtest3/"s + std::to_string(doc_id), custom_headers
             );
             
             require_eq(status, "200"s);
@@ -2144,14 +2144,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused5, _unused6, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest4"s, R"({"name":"If-Match Test"})"s
+                setup->port(), "POST"s, "/etagtest4"s, R"({"name":"If-Match Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document to get ETag
             auto [get_status, _unused7, headers1, _unused8] = make_request(
-                setup->get_port(), "GET"s, "/etagtest4/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/etagtest4/"s + std::to_string(doc_id), ""s
             );
             require_true(headers1.contains("etag"s));
             auto etag = headers1["etag"s];
@@ -2159,7 +2159,7 @@ auto test_set()
             // PUT with If-Match matching the ETag
             auto custom_headers = std::map<string, string>{{"If-Match", etag}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PUT"s, "/etagtest4/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PUT"s, "/etagtest4/"s + std::to_string(doc_id), custom_headers,
                 R"({"name":"Updated Name","value":100})"s
             );
             
@@ -2174,7 +2174,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post5, _unused_post6, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest5"s, R"({"name":"If-Match Fail Test"})"s
+                setup->port(), "POST"s, "/etagtest5"s, R"({"name":"If-Match Fail Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2182,7 +2182,7 @@ auto test_set()
             // PUT with If-Match with a different ETag
             auto custom_headers = std::map<string, string>{{"If-Match", "\"wrong-etag\""s}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PUT"s, "/etagtest5/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PUT"s, "/etagtest5/"s + std::to_string(doc_id), custom_headers,
                 R"({"name":"Should Not Update"})"s
             );
             
@@ -2197,14 +2197,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused9, _unused10, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest6"s, R"({"name":"PATCH If-Match Test","age":25})"s
+                setup->port(), "POST"s, "/etagtest6"s, R"({"name":"PATCH If-Match Test","age":25})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document to get ETag
             auto [get_status, _unused11, headers1, _unused12] = make_request(
-                setup->get_port(), "GET"s, "/etagtest6/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/etagtest6/"s + std::to_string(doc_id), ""s
             );
             require_true(headers1.contains("etag"s));
             auto etag = headers1["etag"s];
@@ -2212,7 +2212,7 @@ auto test_set()
             // PATCH with If-Match matching the ETag
             auto custom_headers = std::map<string, string>{{"If-Match", etag}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PATCH"s, "/etagtest6/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PATCH"s, "/etagtest6/"s + std::to_string(doc_id), custom_headers,
                 R"({"age":30})"s
             );
             
@@ -2224,7 +2224,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post7, _unused_post8, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest7"s, R"({"name":"PATCH Fail Test"})"s
+                setup->port(), "POST"s, "/etagtest7"s, R"({"name":"PATCH Fail Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2232,7 +2232,7 @@ auto test_set()
             // PATCH with If-Match with a different ETag
             auto custom_headers = std::map<string, string>{{"If-Match", "\"wrong-etag\""s}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PATCH"s, "/etagtest7/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PATCH"s, "/etagtest7/"s + std::to_string(doc_id), custom_headers,
                 R"({"value":999})"s
             );
             
@@ -2244,20 +2244,20 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused13, _unused14, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest8"s, R"({"name":"ETag After Update"})"s
+                setup->port(), "POST"s, "/etagtest8"s, R"({"name":"ETag After Update"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET to get initial ETag
             auto [get_status1, _unused15, headers1, _unused16] = make_request(
-                setup->get_port(), "GET"s, "/etagtest8/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/etagtest8/"s + std::to_string(doc_id), ""s
             );
             auto initial_etag = headers1["etag"s];
             
             // PUT to update
             auto [put_status, _unused17, headers2, put_body] = make_request(
-                setup->get_port(), "PUT"s, "/etagtest8/"s + std::to_string(doc_id), 
+                setup->port(), "PUT"s, "/etagtest8/"s + std::to_string(doc_id), 
                 R"({"name":"Updated","value":42})"s
             );
             
@@ -2273,14 +2273,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post9, _unused_post10, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest9"s, R"({"name":"HEAD ETag Test"})"s
+                setup->port(), "POST"s, "/etagtest9"s, R"({"name":"HEAD ETag Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // HEAD request
             auto [status, reason, headers, body] = make_request(
-                setup->get_port(), "HEAD"s, "/etagtest9/"s + std::to_string(doc_id), ""s
+                setup->port(), "HEAD"s, "/etagtest9/"s + std::to_string(doc_id), ""s
             );
             
             require_eq(status, "200"s);
@@ -2292,7 +2292,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post11, _unused_post12, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest10"s, R"({"name":"Wildcard Test"})"s
+                setup->port(), "POST"s, "/etagtest10"s, R"({"name":"Wildcard Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2300,7 +2300,7 @@ auto test_set()
             // PUT with If-Match: *
             auto custom_headers = std::map<string, string>{{"If-Match", "*"s}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PUT"s, "/etagtest10/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PUT"s, "/etagtest10/"s + std::to_string(doc_id), custom_headers,
                 R"({"name":"Updated with Wildcard"})"s
             );
             
@@ -2311,7 +2311,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post13, _unused_post14, post_body] = make_request(
-                setup->get_port(), "POST"s, "/etagtest11"s, R"({"name":"Wildcard None-Match"})"s
+                setup->port(), "POST"s, "/etagtest11"s, R"({"name":"Wildcard None-Match"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2319,7 +2319,7 @@ auto test_set()
             // GET with If-None-Match: *
             auto custom_headers = std::map<string, string>{{"If-None-Match", "*"s}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "GET"s, "/etagtest11/"s + std::to_string(doc_id), custom_headers
+                setup->port(), "GET"s, "/etagtest11/"s + std::to_string(doc_id), custom_headers
             );
             
             require_eq(status, "304"s); // Should return 304 because resource exists
@@ -2335,14 +2335,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post1, _unused_post2, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest"s, R"({"name":"Last-Modified Test"})"s
+                setup->port(), "POST"s, "/lastmodifiedtest"s, R"({"name":"Last-Modified Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document
             auto [status, reason, headers, body] = make_request(
-                setup->get_port(), "GET"s, "/lastmodifiedtest/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/lastmodifiedtest/"s + std::to_string(doc_id), ""s
             );
             
             require_eq(status, "200"s);
@@ -2359,14 +2359,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post3, _unused_post4, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest2"s, R"({"name":"If-Modified-Since Test"})"s
+                setup->port(), "POST"s, "/lastmodifiedtest2"s, R"({"name":"If-Modified-Since Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document to get Last-Modified
             auto [get_status, _unused_get1, headers1, _unused_get2] = make_request(
-                setup->get_port(), "GET"s, "/lastmodifiedtest2/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/lastmodifiedtest2/"s + std::to_string(doc_id), ""s
             );
             require_eq(get_status, "200"s);
             require_true(headers1.contains("last-modified"s));
@@ -2378,7 +2378,7 @@ auto test_set()
             // GET again with If-Modified-Since matching the Last-Modified date
             auto custom_headers = std::map<string, string>{{"If-Modified-Since", last_modified}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "GET"s, "/lastmodifiedtest2/"s + std::to_string(doc_id), custom_headers
+                setup->port(), "GET"s, "/lastmodifiedtest2/"s + std::to_string(doc_id), custom_headers
             );
             
             // Should return 304 if document timestamp <= If-Modified-Since date
@@ -2396,7 +2396,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post5, _unused_post6, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest3"s, R"({"name":"Future Date Test"})"s
+                setup->port(), "POST"s, "/lastmodifiedtest3"s, R"({"name":"Future Date Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2405,7 +2405,7 @@ auto test_set()
             auto future_date = "Tue, 31 Dec 2099 23:59:59 GMT"s;
             auto custom_headers = std::map<string, string>{{"If-Modified-Since", future_date}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "GET"s, "/lastmodifiedtest3/"s + std::to_string(doc_id), custom_headers
+                setup->port(), "GET"s, "/lastmodifiedtest3/"s + std::to_string(doc_id), custom_headers
             );
             
             // Document was modified before the future date, so should return 304
@@ -2417,14 +2417,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post7, _unused_post8, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest4"s, R"({"name":"If-Unmodified-Since Test"})"s
+                setup->port(), "POST"s, "/lastmodifiedtest4"s, R"({"name":"If-Unmodified-Since Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document to get Last-Modified
             auto [get_status, _unused_get3, headers1, _unused_get4] = make_request(
-                setup->get_port(), "GET"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), ""s
             );
             require_true(headers1.contains("last-modified"s));
             auto last_modified = headers1["last-modified"s];
@@ -2432,7 +2432,7 @@ auto test_set()
             // PUT with If-Unmodified-Since matching the Last-Modified date
             auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", last_modified}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PUT"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PUT"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), custom_headers,
                 R"({"name":"Updated Name","value":100})"s
             );
             
@@ -2446,7 +2446,7 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post9, _unused_post10, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest5"s, R"({"name":"Past Date Test"})"s
+                setup->port(), "POST"s, "/lastmodifiedtest5"s, R"({"name":"Past Date Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
@@ -2458,7 +2458,7 @@ auto test_set()
             auto past_date = "Mon, 01 Jan 2000 00:00:00 GMT"s;
             auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", past_date}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PUT"s, "/lastmodifiedtest5/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PUT"s, "/lastmodifiedtest5/"s + std::to_string(doc_id), custom_headers,
                 R"({"name":"Should Not Update"})"s
             );
             
@@ -2474,14 +2474,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post11, _unused_post12, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest6"s, R"({"name":"PATCH If-Unmodified-Since Test","age":25})"s
+                setup->port(), "POST"s, "/lastmodifiedtest6"s, R"({"name":"PATCH If-Unmodified-Since Test","age":25})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // GET the document to get Last-Modified
             auto [get_status, _unused_get5, headers1, _unused_get6] = make_request(
-                setup->get_port(), "GET"s, "/lastmodifiedtest6/"s + std::to_string(doc_id), ""s
+                setup->port(), "GET"s, "/lastmodifiedtest6/"s + std::to_string(doc_id), ""s
             );
             require_true(headers1.contains("last-modified"s));
             auto last_modified = headers1["last-modified"s];
@@ -2489,7 +2489,7 @@ auto test_set()
             // PATCH with If-Unmodified-Since matching the Last-Modified date
             auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", last_modified}};
             auto [status, reason, headers, body] = make_request_with_headers(
-                setup->get_port(), "PATCH"s, "/lastmodifiedtest6/"s + std::to_string(doc_id), custom_headers,
+                setup->port(), "PATCH"s, "/lastmodifiedtest6/"s + std::to_string(doc_id), custom_headers,
                 R"({"age":30})"s
             );
             
@@ -2500,14 +2500,14 @@ auto test_set()
         {
             // Create a document
             auto [post_status, _unused_post13, _unused_post14, post_body] = make_request(
-                setup->get_port(), "POST"s, "/lastmodifiedtest7"s, R"({"name":"HEAD Last-Modified Test"})"s
+                setup->port(), "POST"s, "/lastmodifiedtest7"s, R"({"name":"HEAD Last-Modified Test"})"s
             );
             auto created = json::parse(post_body);
             auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
             
             // HEAD request
             auto [status, reason, headers, body] = make_request(
-                setup->get_port(), "HEAD"s, "/lastmodifiedtest7/"s + std::to_string(doc_id), ""s
+                setup->port(), "HEAD"s, "/lastmodifiedtest7/"s + std::to_string(doc_id), ""s
             );
             
             require_eq(status, "200"s);

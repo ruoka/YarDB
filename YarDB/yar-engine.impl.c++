@@ -44,7 +44,7 @@ inline void lock(std::string_view db)
 
 // Helper template to extract metadata value from first matching document
 template<typename T, typename Extractor>
-auto get_metadata_value_impl(std::fstream& storage, const yar::db::index_view& view, const yar::db::object& selector, Extractor extractor) -> std::optional<T>
+auto metadata_value_impl(std::fstream& storage, const yar::db::index_view& view, const yar::db::object& selector, Extractor extractor) -> std::optional<T>
 {
     using xson::fson::operator >>;
     
@@ -235,23 +235,23 @@ bool yar::db::engine::read(const yar::db::object& selector, yar::db::object& doc
     return success;
 }
 
-std::optional<std::chrono::system_clock::time_point> yar::db::engine::get_metadata_timestamp(const yar::db::object& selector) const
+std::optional<std::chrono::system_clock::time_point> yar::db::engine::metadata_timestamp(const yar::db::object& selector) const
 {
     const auto it = m_index.find(m_collection);
     if(it == m_index.end())
         return std::nullopt;
     const auto& index = it->second;
-    return get_metadata_value_impl<std::chrono::system_clock::time_point>(
+    return metadata_value_impl<std::chrono::system_clock::time_point>(
         m_storage, index.view(selector), selector, [](const yar::db::metadata& m) { return m.timestamp; });
 }
 
-std::optional<std::int64_t> yar::db::engine::get_metadata_position(const yar::db::object& selector) const
+std::optional<std::int64_t> yar::db::engine::metadata_position(const yar::db::object& selector) const
 {
     const auto it = m_index.find(m_collection);
     if(it == m_index.end())
         return std::nullopt;
     const auto& index = it->second;
-    return get_metadata_value_impl<std::int64_t>(
+    return metadata_value_impl<std::int64_t>(
         m_storage, index.view(selector), selector, [](const yar::db::metadata& m) { return m.position; });
 }
 

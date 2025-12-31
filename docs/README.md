@@ -16,6 +16,7 @@ This directory contains comprehensive project documentation organized by topic a
 ### 📋 Proposals & Planning
 - **[handler_refactoring_proposal.md](handler_refactoring_proposal.md)** - HTTP handler code consolidation proposal
 - **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API design evaluation
+- **[test_refactoring_proposal.md](test_refactoring_proposal.md)** - ✅ **COMPLETED** Test framework conventions refactoring (Dec 2025)
 
 ### 📁 Archive
 - **[archive/](archive/)** - Completed/historical documentation

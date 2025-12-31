@@ -118,7 +118,7 @@ slog << error("CREATE_ERROR") << "Error creating document: " << e.what()
 Structured fields provide machine-readable context for log analysis:
 
 - **Network Fields**: `ip`, `port`, `client_ip`, `client_port`
-- **HTTP Fields**: `method`, `uri`, `version`, `status`, `content_length`
+- **HTTP Fields**: `method`, `uri`, `version`, `status`, `content_length`, `request_id`, `duration_ms`
 - **Application Fields**: `collection`, `id`, `body_size`
 - **Error Fields**: `errno`, `error_message`, `error_code`
 
@@ -127,6 +127,11 @@ Structured fields provide machine-readable context for log analysis:
 - Include relevant context fields (IP, port, method, URI, status codes)
 - Use appropriate types (integers for status codes, strings for IDs)
 - Keep field names consistent across similar log entries
+
+**⚠️ Known Gap: Request ID Correlation**
+- **Current State**: The HTTP layer (`net::http::server`) generates and logs `request_id` for all HTTP requests/responses, but application-level logs (e.g., `DOCUMENT_CREATED`, `CREATE_ERROR`) in `yar::http::rest_api_server` do not include `request_id`.
+- **Impact**: Cannot directly correlate database operations with HTTP requests in logs (requires manual correlation by timestamp/URI).
+- **Future Enhancement**: Pass `request_id` from HTTP layer to application handlers (via headers or request context) to enable end-to-end request tracing.
 
 ### Log Format
 
@@ -235,6 +240,7 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
   - **Health Checks**: `/health`, `/ready` endpoints
   - **Distributed Tracing**: OpenTelemetry integration
   - **Correlation IDs**: Request tracing across components
+  - **⚠️ Request ID Correlation**: Pass `request_id` from HTTP layer to application handlers to enable end-to-end request tracing (currently HTTP layer has `request_id`, but application logs don't)
 - **Timeline**: 1-2 months
 - **Impact**: Essential for production operations and debugging
 

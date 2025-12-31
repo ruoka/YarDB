@@ -68,7 +68,8 @@ try
     }
 
     slog << notice << "Starting up server" << flush;
-    yar::http::restful_web_server(file, service_or_port);
+    auto server = yar::http::rest_api_server{file, service_or_port};
+    server.listen(); // Blocks forever
     slog << notice << "Shutting down server" << flush;
     return 0;
 }

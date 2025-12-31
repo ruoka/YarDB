@@ -233,6 +233,24 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 - **Verification**: All tests pass (226/226 tests, 702/702 assertions)
 - **Impact**: Project now serves as a proper example of tester framework usage, improved test readability and maintainability
 
+#### C++ Convention Compliance
+- **Status**: ✅ **COMPLETED** (Dec 2025)
+- **Implementation**: Comprehensive review and fix of all convention violations
+- **Features**:
+  - **Naming Conventions**: Removed all `get_`/`set_` prefixes from member functions
+  - **Public API**: Updated `get_metadata_timestamp()` → `metadata_timestamp()` and `get_metadata_position()` → `metadata_position()`
+  - **Internal Code**: Fixed internal helper functions to follow conventions
+  - **Test Code**: Updated test fixtures to use convention-compliant accessors
+  - **Exception Handling**: Documented `#include <csignal>` as approved exception (signals defined with macros)
+- **Files Modified**:
+  - `yar-engine.c++m` - Public API method renames (2 methods)
+  - `yar-engine.impl.c++` - Internal helper rename (1 function)
+  - `yar-httpd.c++m` - Updated 9 call sites
+  - `yar-httpd.test.c++` - Test fixture accessor rename (~175 call sites)
+- **Verification**: All tests pass (226/226 tests, 702/702 assertions)
+- **Impact**: Codebase now fully compliant with project coding conventions, improved consistency and maintainability
+- **Reference**: See [convention_compliance_report.md](convention_compliance_report.md) for detailed analysis
+
 ### 🚧 Active Development Projects
 
 #### 1. 🔐 Security & Authentication System

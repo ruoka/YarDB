@@ -17,6 +17,7 @@ This directory contains comprehensive project documentation organized by topic a
 - **[handler_refactoring_proposal.md](handler_refactoring_proposal.md)** - HTTP handler code consolidation proposal
 - **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API design evaluation
 - **[test_refactoring_proposal.md](test_refactoring_proposal.md)** - ✅ **COMPLETED** Test framework conventions refactoring (Dec 2025)
+- **[convention_compliance_report.md](convention_compliance_report.md)** - ✅ **COMPLETED** C++ convention compliance review and fixes (Dec 2025)
 
 ### 📁 Archive
 - **[archive/](archive/)** - Completed/historical documentation

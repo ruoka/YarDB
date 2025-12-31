@@ -260,8 +260,8 @@ private:
                         
                         // Get actual document modification time and position from metadata
                         auto response_headers = ::http::headers{};
-                        auto metadata_timestamp = m_engine.get_metadata_timestamp(selector);
-                        auto metadata_position = m_engine.get_metadata_position(selector);
+                        auto metadata_timestamp = m_engine.metadata_timestamp(selector);
+                        auto metadata_position = m_engine.metadata_position(selector);
                         
                         // Generate ETag from position
                         if(metadata_position.has_value())
@@ -998,7 +998,7 @@ private:
                         if(exists && !existing_docs.get<xson::object::array>().empty())
                         {
                             // Check If-Match header (ETag-based)
-                            auto metadata_position = m_engine.get_metadata_position(selector);
+                            auto metadata_position = m_engine.metadata_position(selector);
                             if(metadata_position.has_value())
                             {
                                 auto current_etag = generate_etag(metadata_position.value());
@@ -1017,7 +1017,7 @@ private:
                             }
                             
                             // Check If-Unmodified-Since conditional request
-                            auto metadata_timestamp = m_engine.get_metadata_timestamp(selector);
+                            auto metadata_timestamp = m_engine.metadata_timestamp(selector);
                             if(metadata_timestamp.has_value())
                             {
                                 auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
@@ -1046,7 +1046,7 @@ private:
                             m_engine.replace(selector, document);
                             
                             // Get new ETag after update
-                            auto new_metadata_position = m_engine.get_metadata_position(selector);
+                            auto new_metadata_position = m_engine.metadata_position(selector);
                             if(new_metadata_position.has_value())
                             {
                                 auto new_etag = generate_etag(new_metadata_position.value());
@@ -1065,7 +1065,7 @@ private:
                             m_engine.create(document);
                             
                             // Get ETag after creation
-                            auto new_metadata_position = m_engine.get_metadata_position(selector);
+                            auto new_metadata_position = m_engine.metadata_position(selector);
                             if(new_metadata_position.has_value())
                             {
                                 auto new_etag = generate_etag(new_metadata_position.value());
@@ -1144,7 +1144,7 @@ private:
                         if(exists && !existing_docs.get<xson::object::array>().empty())
                         {
                             // Check If-Match header (ETag-based)
-                            auto metadata_position = m_engine.get_metadata_position(selector);
+                            auto metadata_position = m_engine.metadata_position(selector);
                             if(metadata_position.has_value())
                             {
                                 auto current_etag = generate_etag(metadata_position.value());
@@ -1163,7 +1163,7 @@ private:
                             }
                             
                             // Check If-Unmodified-Since conditional request
-                            auto metadata_timestamp = m_engine.get_metadata_timestamp(selector);
+                            auto metadata_timestamp = m_engine.metadata_timestamp(selector);
                             if(metadata_timestamp.has_value())
                             {
                                 auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
@@ -1208,7 +1208,7 @@ private:
                         response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
                         
                         // Get new ETag after update
-                        auto new_metadata_position = m_engine.get_metadata_position(selector);
+                        auto new_metadata_position = m_engine.metadata_position(selector);
                         if(new_metadata_position.has_value())
                         {
                             auto new_etag = generate_etag(new_metadata_position.value());

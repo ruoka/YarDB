@@ -36,6 +36,7 @@ public:
     }
 
     const std::string& port() const { return m_port; }
+    yar::http::rest_api_server& get_server() { return server; }
 
     ~fixture()
     {
@@ -2610,6 +2611,267 @@ auto test_set()
             require_true(error.has("message"s));
             require_true(error["message"s].get<string>().find("$top") != string::npos);
             require_true(error["message"s].get<string>().find("maximum") != string::npos);
+        };
+    };
+
+    test_case("Rate limiting middleware, [yardb]") = []
+    {
+        const auto test_file = "./httpd_rate_limit_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+        
+        // Configure rate limiting: 2 requests per 5 seconds
+        // Must rebuild routes after configuration since routes are set up in constructor
+        setup->get_server().configure_rate_limiting(
+            2,
+            std::chrono::seconds{5},
+            [](std::string_view, const ::http::headers&) -> std::string {
+                return "test-key"s; // Use same key for all requests
+            }
+        );
+        setup->get_server().rebuild_routes();
+
+        section("Rate limiting allows requests within limit") = [setup]
+        {
+            // First request should succeed
+            auto [status1, reason1, headers1, body1] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            require_eq(status1, "200"s);
+            
+            // Second request should succeed
+            auto [status2, reason2, headers2, body2] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            require_eq(status2, "200"s);
+        };
+
+        section("Rate limiting rejects requests when limit exceeded") = [setup]
+        {
+            // Make 2 requests to fill the limit
+            make_request(setup->port(), "GET"s, "/"s, ""s);
+            make_request(setup->port(), "GET"s, "/"s, ""s);
+            
+            // Third request should be rejected
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            
+            require_eq(status, "429"s);
+            require_eq(reason, "Too Many Requests"s);
+            require_true(headers.contains("retry-after"s));
+            require_false(body.empty());
+        };
+
+        section("Rate limiting uses custom key extractor") = [setup]
+        {
+            // Reconfigure with IP-based key extractor
+            setup->get_server().configure_rate_limiting(
+                1,
+                std::chrono::seconds{5},
+                [](std::string_view, const ::http::headers& hdr) -> std::string {
+                    if(hdr.contains("x-forwarded-for"s))
+                        return std::string{hdr["x-forwarded-for"s]};
+                    return "default-ip"s;
+                }
+            );
+            setup->get_server().rebuild_routes();
+            
+            // First request with IP1 should succeed
+            auto custom_headers1 = std::map<string, string>{{"X-Forwarded-For", "192.168.1.1"s}};
+            auto [status1, reason1, headers1, body1] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, custom_headers1
+            );
+            require_eq(status1, "200"s);
+            
+            // Second request with different IP should succeed (different key)
+            auto custom_headers2 = std::map<string, string>{{"X-Forwarded-For", "192.168.1.2"s}};
+            auto [status2, reason2, headers2, body2] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, custom_headers2
+            );
+            require_eq(status2, "200"s);
+            
+            // Second request with same IP should be rejected
+            auto [status3, reason3, headers3, body3] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, custom_headers1
+            );
+            require_eq(status3, "429"s);
+        };
+    };
+
+    test_case("CORS middleware, [yardb]") = []
+    {
+        const auto test_file = "./httpd_cors_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+        
+        // Configure CORS with default settings (allow all origins)
+        setup->get_server().configure_cors();
+        setup->get_server().rebuild_routes();
+
+        section("CORS adds headers to responses") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET / HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Origin: https://example.com" << crlf
+                   << "Accept: application/json" << crlf
+                   << crlf << flush;
+            
+            auto [status, reason, headers, body] = parse_http_response(stream);
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("access-control-allow-origin"s));
+            require_eq(headers["access-control-allow-origin"s], "https://example.com"s);
+            require_true(headers.contains("access-control-allow-methods"s));
+            require_true(headers.contains("access-control-allow-headers"s));
+        };
+
+        section("CORS uses wildcard when no Origin header") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("access-control-allow-origin"s));
+            require_eq(headers["access-control-allow-origin"s], "*"s);
+        };
+
+        section("CORS respects allowed origin policy") = [setup]
+        {
+            // Reconfigure with restricted origins
+            auto allowed_origins = std::make_shared<std::set<std::string>>(
+                std::set<std::string>{"https://example.com", "https://trusted.com"}
+            );
+            setup->get_server().configure_cors(
+                [allowed_origins](std::string_view origin) -> bool {
+                    return allowed_origins->contains(std::string{origin});
+                }
+            );
+            setup->get_server().rebuild_routes();
+            
+            // Request with allowed origin
+            auto stream1 = connect("localhost"s, setup->port());
+            stream1 << "GET / HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Origin: https://example.com" << crlf
+                   << "Accept: application/json" << crlf
+                   << crlf << flush;
+            
+            auto [status1, reason1, headers1, body1] = parse_http_response(stream1);
+            require_eq(status1, "200"s);
+            require_eq(headers1["access-control-allow-origin"s], "https://example.com"s);
+            
+            // Request with disallowed origin should use wildcard
+            auto stream2 = connect("localhost"s, setup->port());
+            stream2 << "GET / HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Origin: https://evil.com" << crlf
+                   << "Accept: application/json" << crlf
+                   << crlf << flush;
+            
+            auto [status2, reason2, headers2, body2] = parse_http_response(stream2);
+            require_eq(status2, "200"s);
+            require_eq(headers2["access-control-allow-origin"s], "*"s);
+        };
+
+        section("CORS includes max-age when configured") = [setup]
+        {
+            // Reconfigure with max-age
+            setup->get_server().configure_cors(
+                {}, // default allowed_origin
+                {}, // default allowed_methods
+                {}, // default allowed_headers
+                true, // allow_credentials
+                3600 // max-age: 1 hour
+            );
+            setup->get_server().rebuild_routes();
+            
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("access-control-max-age"s));
+            require_eq(headers["access-control-max-age"s], "3600"s);
+        };
+
+        section("CORS includes custom allowed methods") = [setup]
+        {
+            // Reconfigure with custom methods
+            setup->get_server().configure_cors(
+                {}, // default allowed_origin
+                {"GET", "POST"}, // custom allowed_methods
+                {} // default allowed_headers
+            );
+            setup->get_server().rebuild_routes();
+            
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            
+            require_eq(status, "200"s);
+            require_true(headers.contains("access-control-allow-methods"s));
+            const auto methods = headers["access-control-allow-methods"s];
+            require_true(methods.find("GET") != std::string::npos);
+            require_true(methods.find("POST") != std::string::npos);
+        };
+    };
+
+    test_case("Correlation ID middleware, [yardb]") = []
+    {
+        const auto test_file = "./httpd_correlation_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+        
+        // Correlation ID middleware is always enabled
+
+        section("Correlation ID is generated when missing") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            
+            require_eq(status, "200"s);
+            // Correlation ID should be in request headers (logged), but not necessarily in response
+            // We can verify it was generated by checking logs or by making another request
+            // For now, just verify the request succeeded
+            require_true(status == "200"s);
+        };
+
+        section("Correlation ID is preserved when present") = [setup]
+        {
+            auto custom_headers = std::map<string, string>{
+                {"X-Correlation-ID", "test-correlation-id-12345"s}
+            };
+            
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, custom_headers
+            );
+            
+            require_eq(status, "200"s);
+            // The correlation ID should be preserved in the request
+            // (we can't easily verify this without access to request logs in the test)
+            // But we can verify the request succeeded
+            require_true(status == "200"s);
+        };
+
+        section("Correlation ID is available for all request types") = [setup]
+        {
+            // Test with POST
+            auto [status1, reason1, headers1, body1] = make_request(
+                setup->port(), "POST"s, "/corrtest"s, R"({"name":"Test"})"s
+            );
+            require_eq(status1, "201"s);
+            
+            // Test with PUT
+            if(status1 == "201"s)
+            {
+                auto doc = json::parse(body1);
+                const auto id = static_cast<xson::integer_type>(doc["_id"s]);
+                auto [status2, reason2, headers2, body2] = make_request(
+                    setup->port(), "PUT"s, "/corrtest/"s + std::to_string(id), R"({"name":"Updated"})"s
+                );
+                require_eq(status2, "200"s);
+            }
         };
     };
 

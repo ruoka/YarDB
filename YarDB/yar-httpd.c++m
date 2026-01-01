@@ -358,7 +358,7 @@ private:
             // Generate ETag from position
             if(metadata_position.has_value())
             {
-                const auto etag = utils::generate_etag(metadata_position.value());
+                const auto etag = generate_etag(metadata_position.value());
                 response_headers.set("etag"s, etag);
                 
                 // Check If-None-Match conditional request (for GET/HEAD)
@@ -368,7 +368,7 @@ private:
                     // ETag matches - resource not modified, return 304 Not Modified
                     if(metadata_timestamp.has_value())
                     {
-                        const auto last_modified = utils::format_http_date(metadata_timestamp.value());
+                        const auto last_modified = format_http_date(metadata_timestamp.value());
                         response_headers.set("last-modified"s, last_modified);
                     }
                     return std::make_tuple(status_not_modified, ""s, std::make_optional(response_headers));
@@ -377,7 +377,7 @@ private:
             
             if(metadata_timestamp.has_value())
             {
-                const auto last_modified = utils::format_http_date(metadata_timestamp.value());
+                const auto last_modified = format_http_date(metadata_timestamp.value());
                 response_headers.set("last-modified"s, last_modified);
                 
                 // Check If-Modified-Since conditional request
@@ -952,7 +952,7 @@ private:
                 auto metadata_position = m_engine.metadata_position(selector);
                 if(metadata_position.has_value())
                 {
-                    auto current_etag = utils::generate_etag(metadata_position.value());
+                    auto current_etag = generate_etag(metadata_position.value());
                     auto match_check = check_if_match(headers, current_etag);
                     if(match_check.has_value() && !match_check.value())
                     {
@@ -1000,7 +1000,7 @@ private:
                 auto new_metadata_position = m_engine.metadata_position(selector);
                 if(new_metadata_position.has_value())
                 {
-                    auto new_etag = utils::generate_etag(new_metadata_position.value());
+                    auto new_etag = generate_etag(new_metadata_position.value());
                     response_headers.set("etag"s, new_etag);
                 }
                 
@@ -1019,7 +1019,7 @@ private:
                 auto new_metadata_position = m_engine.metadata_position(selector);
                 if(new_metadata_position.has_value())
                 {
-                    auto new_etag = utils::generate_etag(new_metadata_position.value());
+                    auto new_etag = generate_etag(new_metadata_position.value());
                     response_headers.set("etag"s, new_etag);
                 }
                 
@@ -1068,7 +1068,7 @@ private:
                 auto metadata_position = m_engine.metadata_position(selector);
                 if(metadata_position.has_value())
                 {
-                    auto current_etag = utils::generate_etag(metadata_position.value());
+                    auto current_etag = generate_etag(metadata_position.value());
                     auto match_check = check_if_match(headers, current_etag);
                     if(match_check.has_value() && !match_check.value())
                     {
@@ -1132,7 +1132,7 @@ private:
             auto new_metadata_position = m_engine.metadata_position(selector);
             if(new_metadata_position.has_value())
             {
-                auto new_etag = utils::generate_etag(new_metadata_position.value());
+                auto new_etag = generate_etag(new_metadata_position.value());
                 response_headers.set("etag"s, new_etag);
             }
             

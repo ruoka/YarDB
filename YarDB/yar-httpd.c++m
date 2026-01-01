@@ -132,6 +132,8 @@ private:
     }
 
     // Middleware: Accept header validation - checks Accept header before processing
+    // YarDB-specific version that returns JSON error responses
+    // Generic version available in ::http::accept_validation_middleware()
     auto accept_validation_middleware(bool requires_headers = false) const
     {
         return [requires_headers](handler next)
@@ -233,6 +235,8 @@ private:
     }
 
     // Middleware: Body size validation - prevents memory exhaustion from oversized requests
+    // YarDB-specific version that returns JSON error responses
+    // Generic version available in ::http::body_size_validation_middleware()
     // Available for use when body size limits are needed (e.g., for POST/PUT handlers)
     // Example usage: add to build_middleware_chain() or use directly in ::http::wrap()
     auto body_size_validation_middleware(std::size_t max_size) const

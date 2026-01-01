@@ -460,9 +460,21 @@ private:
             {
                 const auto top_value = stoll(params["$top"s]);
                 if(top_value < 0)
-                    throw std::invalid_argument{"$top must be non-negative"};
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", "$top must be non-negative"s}
+                    };
+                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
+                }
                 if(top_value > yar::db::max_query_top)
-                    throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(yar::db::max_query_top) + ")"};
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", "$top exceeds maximum ("s + std::to_string(yar::db::max_query_top) + ")"}
+                    };
+                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
+                }
                 selector["$top"s] = top_value;
             }
             
@@ -471,9 +483,21 @@ private:
             {
                 const auto skip_value = stoll(params["$skip"s]);
                 if(skip_value < 0)
-                    throw std::invalid_argument{"$skip must be non-negative"};
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", "$skip must be non-negative"s}
+                    };
+                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
+                }
                 if(skip_value > yar::db::max_query_skip)
-                    throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(yar::db::max_query_skip) + ")"};
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", "$skip exceeds maximum ("s + std::to_string(yar::db::max_query_skip) + ")"}
+                    };
+                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
+                }
                 selector["$skip"s] = skip_value;
             }
             
@@ -492,10 +516,22 @@ private:
                 
                 // Validate field name
                 if(field_name.empty())
-                    throw std::invalid_argument{"$orderby field name cannot be empty"};
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", "$orderby field name cannot be empty"s}
+                    };
+                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
+                }
                 
                 if(field_name.size() > yar::db::max_field_name_length)
-                    throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"};
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", "$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
+                    };
+                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
+                }
                 
                 // Store field name for ordering
                 selector["$orderby"s] = std::string{field_name};

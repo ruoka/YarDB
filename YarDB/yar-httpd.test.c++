@@ -2514,6 +2514,102 @@ auto test_set()
             require_true(headers.contains("last-modified"s));
             require_true(body.empty()); // HEAD should have no body
         };
+
+        section("POST to GET-only route returns 405 Method Not Allowed") = [setup]
+        {
+            // Try POST to /_reindex which only accepts GET
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "POST"s, "/_reindex"s, R"({})"s
+            );
+            
+            require_eq(status, "405"s);
+            require_eq(reason, "Method Not Allowed"s);
+        };
+
+        section("PUT to GET-only route returns 405 Method Not Allowed") = [setup]
+        {
+            // Try PUT to /_reindex which only accepts GET
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "PUT"s, "/_reindex"s, R"({})"s
+            );
+            
+            require_eq(status, "405"s);
+            require_eq(reason, "Method Not Allowed"s);
+        };
+
+        section("GET with negative $top returns 422 Unprocessable Entity") = [setup]
+        {
+            // First create a collection with some data
+            make_request(setup->port(), "POST"s, "/unprocessabletest"s, R"({"name":"Test 1"})"s);
+            make_request(setup->port(), "POST"s, "/unprocessabletest"s, R"({"name":"Test 2"})"s);
+            
+            // Try GET with negative $top
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/unprocessabletest?$top=-1"s, ""s
+            );
+            
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            
+            auto error = json::parse(body);
+            require_true(error.has("error"s));
+            require_eq(error["error"s].get<string>(), "Unprocessable Entity"s);
+            require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().find("$top") != string::npos);
+        };
+
+        section("GET with negative $skip returns 422 Unprocessable Entity") = [setup]
+        {
+            // Try GET with negative $skip
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/unprocessabletest?$skip=-5"s, ""s
+            );
+            
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            
+            auto error = json::parse(body);
+            require_true(error.has("error"s));
+            require_eq(error["error"s].get<string>(), "Unprocessable Entity"s);
+            require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().find("$skip") != string::npos);
+        };
+
+        section("GET with empty $orderby field returns 422 Unprocessable Entity") = [setup]
+        {
+            // Try GET with empty $orderby field name
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/unprocessabletest?$orderby= desc"s, ""s
+            );
+            
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            
+            auto error = json::parse(body);
+            require_true(error.has("error"s));
+            require_eq(error["error"s].get<string>(), "Unprocessable Entity"s);
+            require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().find("$orderby") != string::npos);
+        };
+
+        section("GET with $top exceeding maximum returns 422 Unprocessable Entity") = [setup]
+        {
+            // Try GET with $top exceeding max_query_top (assuming it's a reasonable limit)
+            // We'll use a very large number that should exceed any reasonable limit
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/unprocessabletest?$top=999999999"s, ""s
+            );
+            
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            
+            auto error = json::parse(body);
+            require_true(error.has("error"s));
+            require_eq(error["error"s].get<string>(), "Unprocessable Entity"s);
+            require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().find("$top") != string::npos);
+            require_true(error["message"s].get<string>().find("maximum") != string::npos);
+        };
     };
 
     // Note: Server runs in infinite loop, so we can't cleanly stop it

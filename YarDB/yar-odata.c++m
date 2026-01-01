@@ -27,7 +27,7 @@ enum class metadata_level
 // Helper function to parse OData metadata level from Accept header
 // Returns the metadata level requested, or 'none' if not specified
 // Note: Header values are already normalized (lowercase) by the http::headers class
-inline auto parse_metadata_level(const ::http::headers& headers) -> metadata_level
+inline auto parse_metadata_level(const ::http::headers& headers)
 {
     if(!headers.contains("accept"s))
         return metadata_level::none;
@@ -55,7 +55,7 @@ inline auto parse_metadata_level(const ::http::headers& headers) -> metadata_lev
 // For full metadata: adds @odata.context, @odata.id, @odata.editLink
 inline auto add_metadata(xson::object document, metadata_level level, 
                          std::string_view collection_name,
-                         std::optional<xson::integer_type> id = std::nullopt) -> xson::object
+                         std::optional<xson::integer_type> id = std::nullopt)
 {
     if(level == metadata_level::none)
         return document; // No metadata needed
@@ -91,7 +91,7 @@ inline auto add_metadata(xson::object document, metadata_level level,
 // Wraps the array in an object with @odata.context and "value" array
 // For full metadata, also adds metadata to each item in the array
 inline auto add_metadata_to_array(xson::object document, metadata_level level,
-                                   std::string_view collection_name) -> xson::object
+                                   std::string_view collection_name)
 {
     if(level == metadata_level::none)
         return document; // No metadata needed
@@ -513,6 +513,19 @@ inline auto apply_expand(const xson::object& documents, [[maybe_unused]] std::st
     
     // Return documents as-is for now
     return documents;
+}
+
+// OData metadata helper - adds metadata to document if requested
+inline void add_metadata_if_requested(
+    xson::object& document,
+    const ::http::headers& headers,
+    const std::string& collection,
+    long long id
+)
+{
+    const auto metadata_level = parse_metadata_level(headers);
+    if(metadata_level != metadata_level::none)
+        document = add_metadata(document, metadata_level, collection, id);
 }
 
 } // namespace yar::http::odata

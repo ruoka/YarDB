@@ -98,8 +98,8 @@ public:
         if(m_listen_thread.joinable())
         {
             try
-            {
-                m_listen_thread.join();
+        {
+            m_listen_thread.join();
             }
             catch(const std::system_error&)
             {
@@ -120,18 +120,12 @@ public:
     }
 
 private:
-    static std::string_view trim_trailing_nul(std::string_view sv) noexcept
-    {
-        while(!sv.empty() && sv.back() == '\0')
-            sv.remove_suffix(1);
-        return sv;
-    }
 
 
     // Middleware: Correlation ID logging - extracts and logs correlation ID for all requests
-    auto correlation_logging_middleware(std::string_view method, std::string_view log_event) const -> middleware_factory
+    auto correlation_logging_middleware(std::string_view method, std::string_view log_event) const
     {
-        return [method = std::string{method}, log_event = std::string{log_event}](handler next) -> handler
+        return [method = std::string{method}, log_event = std::string{log_event}](handler next)
         {
             return [method, log_event, next = std::move(next)](auto req, auto body, auto hdr) mutable
             {
@@ -141,7 +135,7 @@ private:
                       << std::pair{"uri"sv, req}
                       << std::pair{"body_size", body.size()}
                       << std::pair{"correlation_id", correlation_id}
-                      << flush;
+                          << flush;
 
                 auto [status, content, headers] = next(req, body, hdr);
 
@@ -160,9 +154,9 @@ private:
     }
 
     // Middleware: Accept header validation - checks Accept header before processing
-    auto accept_validation_middleware(bool requires_headers = false) const -> middleware_factory
+    auto accept_validation_middleware(bool requires_headers = false) const
     {
-        return [requires_headers](handler next) -> handler
+        return [requires_headers](handler next)
         {
             return [requires_headers, next = std::move(next)](auto req, auto body, auto hdr) mutable
             {
@@ -182,9 +176,9 @@ private:
     }
 
     // Middleware: Error handling wrapper - wraps handlers in try-catch with correlation ID logging
-    auto error_handling_middleware(std::string_view method, std::string_view error_event) const -> middleware_factory
+    auto error_handling_middleware(std::string_view method, std::string_view error_event) const
     {
-        return [method = std::string{method}, error_event = std::string{error_event}](handler next) -> handler
+        return [method = std::string{method}, error_event = std::string{error_event}](handler next)
         {
             return [method, error_event, next = std::move(next)](auto req, auto body, auto hdr) mutable
             {
@@ -202,8 +196,8 @@ private:
                           << std::pair{"status", http_status_code_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
                         {"message", std::string{e.what()}}
                     };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
@@ -263,9 +257,9 @@ private:
     // Middleware: Body size validation - prevents memory exhaustion from oversized requests
     // Available for use when body size limits are needed (e.g., for POST/PUT handlers)
     // Example usage: add to build_middleware_chain() or use directly in ::http::wrap()
-    auto body_size_validation_middleware(std::size_t max_size) const -> middleware_factory
+    auto body_size_validation_middleware(std::size_t max_size) const
     {
-        return [max_size](handler next) -> handler
+        return [max_size](handler next)
         {
             return [max_size, next = std::move(next)](auto req, auto body, auto hdr) mutable
             {
@@ -286,7 +280,7 @@ private:
     std::vector<middleware_factory> build_middleware_chain(std::string_view method, std::string_view log_event, std::string_view error_event, bool requires_headers = false) const
     {
         constexpr std::size_t standard_middleware_count = 3;
-        std::vector<middleware_factory> middlewares;
+        auto middlewares = std::vector<middleware_factory>{};
         middlewares.reserve(standard_middleware_count);
         middlewares.emplace_back(correlation_logging_middleware(method, log_event));
         middlewares.emplace_back(accept_validation_middleware(requires_headers));
@@ -297,37 +291,26 @@ private:
     void setup_routes()
     {
 
-        // Create - Refactored to use middleware pattern
+        // Create - Refactored to use middleware pattern and helper functions
         auto create_handler = [this](::http::request_view request, ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
         {
             // Validate body is not empty
             if(body.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return make_error_response_with_headers(http_status_bad_request, "Bad Request"s, "Request body is required"s);
             }
             
-            const auto uri = ::http::uri{request};
-            const auto collection = validate_collection_name(uri.path[1]);
-            auto document = xson::json::parse(trim_trailing_nul(body));
-
-            const auto guard = std::lock_guard{m_engine};
-            m_engine.collection(collection);
-            m_engine.create(document);
-            
-            // Add Location header pointing to the newly created resource
-            auto response_headers = ::http::headers{};
-            const auto id = static_cast<xson::integer_type>(document["_id"s]);
-            response_headers.set("location"s, "/"s + collection + "/"s + std::to_string(id));
-            
-            // Add OData metadata if requested
-            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-                document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
+            const auto ctx = handler_context{request, m_engine};
+            auto document = xson::json::parse(body);
+                        m_engine.create(document);
+                        
+                        // Add Location header pointing to the newly created resource
+                        auto response_headers = ::http::headers{};
+                        const auto id = static_cast<xson::integer_type>(document["_id"s]);
+            response_headers.set("location"s, "/"s + ctx.collection + "/"s + std::to_string(id));
+                        
+                        // Add OData metadata if requested
+            yar::http::odata::add_metadata_if_requested(document, headers, ctx.collection, id);
             
             return std::make_tuple(http_status_created, xson::json::stringify(document), std::make_optional(response_headers));
         };
@@ -341,17 +324,16 @@ private:
 
         // List all collections - Refactored to use middleware pattern
         auto list_collections_handler = [this]([[maybe_unused]] ::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
         {
-            const auto guard = std::lock_guard{m_engine};
-            auto response = xson::object{"collections", m_engine.collections()};
+                    const auto guard = std::lock_guard{m_engine};
+                    auto response = xson::object{"collections", m_engine.collections()};
 
-            // Add OData metadata if requested
-            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-            {
-                response["@odata.context"s] = "/$metadata#Collections"s;
-            }
+                    // Add OData metadata if requested
+                    const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                    if(metadata_level != yar::http::odata::metadata_level::none)
+                    {
+                        response["@odata.context"s] = "/$metadata#Collections"s;
+                    }
 
             return std::make_tuple(http_status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
         };
@@ -361,20 +343,16 @@ private:
             "application/json"sv,
             ::http::wrap(list_collections_handler, list_middlewares));
 
-        // Read _id - Refactored to use middleware pattern
+        // Read _id - Refactored to use middleware pattern and helper functions
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
         auto get_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
         {
-            const auto uri = ::http::uri{request};
-            const auto collection = validate_collection_name(uri.path[1]);
-            const auto id = stoll(uri.path[2]); // Regex ensures numeric format
+            const auto ctx = handler_context{request, m_engine};
+            const auto id = stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
-            auto selector = xson::object{"_id", id};
+            const auto selector = xson::object{"_id", id};
 
-            const auto guard = std::lock_guard{m_engine};
-            m_engine.collection(collection);
-            auto found = m_engine.read(selector, documents);
+            const auto found = m_engine.read(selector, documents);
 
             // Check if document was found
             if(!found || documents.get<xson::object::array>().empty())
@@ -382,7 +360,7 @@ private:
                 auto error = xson::object{
                     {"error", "Not Found"s},
                     {"message", "Document not found"s},
-                    {"collection", collection},
+                    {"collection", ctx.collection},
                     {"id", id}
                 };
                 return std::make_tuple(http_status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
@@ -392,9 +370,7 @@ private:
             auto document = documents.get<xson::object::array>()[0];
             
             // Add OData metadata if requested
-            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-                document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
+            yar::http::odata::add_metadata_if_requested(document, headers, ctx.collection, id);
             
             // Get actual document modification time and position from metadata
             auto response_headers = ::http::headers{};
@@ -447,7 +423,6 @@ private:
         // Route pattern allows optional query string: /[a-z][a-z0-9]*(\?.*)?
         // Note: Collection names must start with a letter, but can contain digits
         auto get_collection_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
         {
             const auto uri = ::http::uri{request};
             auto document = xson::object{};
@@ -620,136 +595,135 @@ private:
 
         // PUT /_db/{collection_name} - Add/update secondary indexes for a collection - Refactored to use middleware pattern
         auto put_index_handler = [this](::http::request_view request, ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
-        {
-            // Validate body is not empty
-            if(body.empty())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
+                    {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
                 return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            auto uri = ::http::uri{request};
-            auto request_body = xson::json::parse(trim_trailing_nul(body));
-            
-            // Validate request body has "keys" field
-            if(!request_body.has("keys"s))
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body must contain 'keys' field with array of field names"s}
-                };
+                        }
+                        
+                        auto uri = ::http::uri{request};
+            auto request_body = xson::json::parse(body);
+                        
+                        // Validate request body has "keys" field
+                        if(!request_body.has("keys"s))
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body must contain 'keys' field with array of field names"s}
+                            };
                 return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            // Extract and validate keys
-            auto keys_value = request_body["keys"s];
-            if(!keys_value.is_array())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' must be an array of field names"s}
-                };
+                        }
+                        
+                        // Extract and validate keys
+                        auto keys_value = request_body["keys"s];
+                        if(!keys_value.is_array())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' must be an array of field names"s}
+                            };
                 return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            auto keys_array = keys_value.get<xson::object::array>();
-            if(keys_array.empty())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' array cannot be empty"s}
-                };
+                        }
+                        
+                        auto keys_array = keys_value.get<xson::object::array>();
+                        if(keys_array.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' array cannot be empty"s}
+                            };
                 return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            // Convert keys array to vector of strings
-            auto keys = std::vector<std::string>{};
-            for(const auto& key : keys_array)
-            {
-                if(!key.is_string())
-                {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "All keys must be strings"s}
-                    };
+                        }
+                        
+                        // Convert keys array to vector of strings
+                        auto keys = std::vector<std::string>{};
+                        for(const auto& key : keys_array)
+                        {
+                            if(!key.is_string())
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "All keys must be strings"s}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                auto key_str = static_cast<std::string>(key);
-                // Validate key name (basic validation)
-                if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
-                {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
-                    };
+                            }
+                            
+                            auto key_str = static_cast<std::string>(key);
+                            // Validate key name (basic validation)
+                            if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                // Don't allow reserved field names
-                if(key_str == yar::db::reserved_field_id)
-                {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Cannot index reserved field: "s + key_str}
-                    };
+                            }
+                            
+                            // Don't allow reserved field names
+                            if(key_str == yar::db::reserved_field_id)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Cannot index reserved field: "s + key_str}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                keys.push_back(key_str);
-            }
-            
-            // Extract collection name from path (e.g., /_db/users -> users)
-            const auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
-            
-            const auto guard = std::lock_guard{m_engine};
-            
-            // Switch to target collection
-            m_engine.collection(collection_name);
-            
-            // Add keys to index (this updates the index structure)
-            m_engine.index(keys);
-            
-            // Reindex to populate the new indexes
-            m_engine.reindex();
-            
-            // Get the updated _db document to return
-            auto selector = xson::object{"collection"s, collection_name};
-            auto db_documents = xson::object{};
-            m_engine.collection("_db"s); // Switch to _db collection
-            auto found = m_engine.read(selector, db_documents);
-            m_engine.collection(collection_name); // Restore original collection
-            
-            if(!found || db_documents.get<xson::object::array>().empty())
-            {
-                // This shouldn't happen, but handle it gracefully
-                auto error = xson::object{
-                    {"error", "Internal Server Error"s},
-                    {"message", "Failed to retrieve index configuration after update"s}
-                };
+                            }
+                            
+                            keys.push_back(key_str);
+                        }
+                        
+                        // Extract collection name from path (e.g., /_db/users -> users)
+                        const auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
+                        
+                        const auto guard = std::lock_guard{m_engine};
+                        
+                        // Switch to target collection
+                        m_engine.collection(collection_name);
+                        
+                        // Add keys to index (this updates the index structure)
+                        m_engine.index(keys);
+                        
+                        // Reindex to populate the new indexes
+                        m_engine.reindex();
+                        
+                        // Get the updated _db document to return
+                        auto selector = xson::object{"collection"s, collection_name};
+                        auto db_documents = xson::object{};
+                        m_engine.collection("_db"s); // Switch to _db collection
+                        auto found = m_engine.read(selector, db_documents);
+                        m_engine.collection(collection_name); // Restore original collection
+                        
+                        if(!found || db_documents.get<xson::object::array>().empty())
+                        {
+                            // This shouldn't happen, but handle it gracefully
+                            auto error = xson::object{
+                                {"error", "Internal Server Error"s},
+                                {"message", "Failed to retrieve index configuration after update"s}
+                            };
                 return std::make_tuple(http_status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            auto result_document = db_documents.get<xson::object::array>()[0];
-            
-            // Add OData metadata if requested
-            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-            {
-                const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
-                result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
-            }
-            
-            // Determine if this was a create (201) or update (200)
-            // We can check if the document was just created by checking if it's the first one
-            // For simplicity, we'll return 200 OK (the index() method uses upsert)
-            auto response_headers = ::http::headers{};
-            response_headers.set("location"s, "/_db/"s + collection_name);
-            
+                        }
+                        
+                        auto result_document = db_documents.get<xson::object::array>()[0];
+                        
+                        // Add OData metadata if requested
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                        {
+                            const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
+                            result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+                        }
+                        
+                        // Determine if this was a create (201) or update (200)
+                        // We can check if the document was just created by checking if it's the first one
+                        // For simplicity, we'll return 200 OK (the index() method uses upsert)
+                        auto response_headers = ::http::headers{};
+                        response_headers.set("location"s, "/_db/"s + collection_name);
+                        
             return std::make_tuple(http_status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
         };
 
@@ -760,190 +734,189 @@ private:
 
         // PATCH /_db/{collection_name} - Add secondary indexes incrementally (merge with existing) - Refactored to use middleware pattern
         auto patch_index_handler = [this](::http::request_view request, ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
-        {
-            // Validate body is not empty
-            if(body.empty())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            const auto uri = ::http::uri{request};
-            auto request_body = xson::json::parse(trim_trailing_nul(body));
-            
-            // Validate request body has "keys" field
-            if(!request_body.has("keys"s))
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body must contain 'keys' field with array of field names"s}
-                };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            // Extract and validate keys
-            const auto keys_value = request_body["keys"s];
-            if(!keys_value.is_array())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' must be an array of field names"s}
-                };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            const auto keys_array = keys_value.get<xson::object::array>();
-            if(keys_array.empty())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' array cannot be empty"s}
-                };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            // Extract collection name from path
-            const auto collection_name = validate_collection_name(uri.path[2]);
-            
-            const auto guard = std::lock_guard{m_engine};
-            
-            // Get existing keys from _db collection (if any)
-            auto selector = xson::object{"collection"s, collection_name};
-            auto existing_docs = xson::object{};
-            m_engine.collection("_db"s);
-            auto has_existing = m_engine.read(selector, existing_docs);
-            
-            // Build set of existing keys to avoid duplicates
-            auto existing_keys_set = std::set<std::string>{};
-            if(has_existing && !existing_docs.get<xson::object::array>().empty())
-            {
-                const auto existing_doc = existing_docs.get<xson::object::array>()[0];
-                if(existing_doc.has("keys"s))
-                {
-                    const auto existing_keys_array = existing_doc["keys"s].get<xson::object::array>();
-                    for(const auto& key : existing_keys_array)
                     {
-                        if(key.is_string())
-                            existing_keys_set.insert(static_cast<std::string>(key));
-                    }
-                }
-            }
-            
-            // Convert new keys array to vector, validating and deduplicating
-            auto new_keys = std::vector<std::string>{};
-            for(const auto& key : keys_array)
-            {
-                if(!key.is_string())
-                {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "All keys must be strings"s}
-                    };
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
+                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        const auto uri = ::http::uri{request};
+            auto request_body = xson::json::parse(body);
+                        
+                        // Validate request body has "keys" field
+                        if(!request_body.has("keys"s))
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body must contain 'keys' field with array of field names"s}
+                            };
+                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        // Extract and validate keys
+                        const auto keys_value = request_body["keys"s];
+                        if(!keys_value.is_array())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' must be an array of field names"s}
+                            };
+                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        const auto keys_array = keys_value.get<xson::object::array>();
+                        if(keys_array.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "'keys' array cannot be empty"s}
+                            };
+                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                        }
+                        
+                        // Extract collection name from path
+                        const auto collection_name = validate_collection_name(uri.path[2]);
+                        
+                        const auto guard = std::lock_guard{m_engine};
+                        
+                        // Get existing keys from _db collection (if any)
+                        auto selector = xson::object{"collection"s, collection_name};
+                        auto existing_docs = xson::object{};
+                        m_engine.collection("_db"s);
+                        auto has_existing = m_engine.read(selector, existing_docs);
+                        
+                        // Build set of existing keys to avoid duplicates
+                        auto existing_keys_set = std::set<std::string>{};
+                        if(has_existing && !existing_docs.get<xson::object::array>().empty())
+                        {
+                            const auto existing_doc = existing_docs.get<xson::object::array>()[0];
+                            if(existing_doc.has("keys"s))
+                            {
+                                const auto existing_keys_array = existing_doc["keys"s].get<xson::object::array>();
+                                for(const auto& key : existing_keys_array)
+                                {
+                                    if(key.is_string())
+                                        existing_keys_set.insert(static_cast<std::string>(key));
+                                }
+                            }
+                        }
+                        
+                        // Convert new keys array to vector, validating and deduplicating
+                        auto new_keys = std::vector<std::string>{};
+                        for(const auto& key : keys_array)
+                        {
+                            if(!key.is_string())
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "All keys must be strings"s}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                auto key_str = static_cast<std::string>(key);
-                
-                // Validate key name
-                if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
-                {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
-                    };
+                            }
+                            
+                            auto key_str = static_cast<std::string>(key);
+                            
+                            // Validate key name
+                            if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                // Don't allow reserved field names
-                if(key_str == yar::db::reserved_field_id)
-                {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Cannot index reserved field: "s + key_str}
-                    };
+                            }
+                            
+                            // Don't allow reserved field names
+                            if(key_str == yar::db::reserved_field_id)
+                            {
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "Cannot index reserved field: "s + key_str}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                // Only add if not already in existing keys (deduplicate)
-                if(existing_keys_set.find(key_str) == existing_keys_set.end())
-                {
-                    new_keys.push_back(key_str);
-                    existing_keys_set.insert(key_str); // Track for this request too
-                }
-            }
-            
-            // If no new keys to add, return existing document
-            if(new_keys.empty())
-            {
-                if(has_existing && !existing_docs.get<xson::object::array>().empty())
-                {
-                    auto result_document = existing_docs.get<xson::object::array>()[0];
-                    
-                    // Add OData metadata if requested
-                    const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-                    if(metadata_level != yar::http::odata::metadata_level::none)
-                    {
-                        const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
-                        result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
-                    }
-                    
-                    auto response_headers = ::http::headers{};
-                    response_headers.set("location"s, "/_db/"s + collection_name);
+                            }
+                            
+                            // Only add if not already in existing keys (deduplicate)
+                            if(existing_keys_set.find(key_str) == existing_keys_set.end())
+                            {
+                                new_keys.push_back(key_str);
+                                existing_keys_set.insert(key_str); // Track for this request too
+                            }
+                        }
+                        
+                        // If no new keys to add, return existing document
+                        if(new_keys.empty())
+                        {
+                            if(has_existing && !existing_docs.get<xson::object::array>().empty())
+                            {
+                                auto result_document = existing_docs.get<xson::object::array>()[0];
+                                
+                                // Add OData metadata if requested
+                                const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                                if(metadata_level != yar::http::odata::metadata_level::none)
+                                {
+                                    const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
+                                    result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+                                }
+                                
+                                auto response_headers = ::http::headers{};
+                                response_headers.set("location"s, "/_db/"s + collection_name);
                     return std::make_tuple(http_status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
-                }
-                else
-                {
-                    // No existing document and no new keys - this shouldn't happen but handle gracefully
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "All specified keys already exist or no keys to add"s}
-                    };
+                            }
+                            else
+                            {
+                                // No existing document and no new keys - this shouldn't happen but handle gracefully
+                                auto error = xson::object{
+                                    {"error", "Bad Request"s},
+                                    {"message", "All specified keys already exist or no keys to add"s}
+                                };
                     return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-            }
-            
-            // Switch to target collection
-            m_engine.collection(collection_name);
-            
-            // Add new keys to index (this merges with existing)
-            m_engine.index(new_keys);
-            
-            // Reindex to populate the new indexes
-            m_engine.reindex();
-            
-            // Get the updated _db document to return
-            m_engine.collection("_db"s);
-            auto db_documents = xson::object{};
-            auto found = m_engine.read(selector, db_documents);
-            m_engine.collection(collection_name); // Restore original collection
-            
-            if(!found || db_documents.get<xson::object::array>().empty())
-            {
-                auto error = xson::object{
-                    {"error", "Internal Server Error"s},
-                    {"message", "Failed to retrieve index configuration after update"s}
-                };
+                            }
+                        }
+                        
+                        // Switch to target collection
+                        m_engine.collection(collection_name);
+                        
+                        // Add new keys to index (this merges with existing)
+                        m_engine.index(new_keys);
+                        
+                        // Reindex to populate the new indexes
+                        m_engine.reindex();
+                        
+                        // Get the updated _db document to return
+                        m_engine.collection("_db"s);
+                        auto db_documents = xson::object{};
+                        auto found = m_engine.read(selector, db_documents);
+                        m_engine.collection(collection_name); // Restore original collection
+                        
+                        if(!found || db_documents.get<xson::object::array>().empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Internal Server Error"s},
+                                {"message", "Failed to retrieve index configuration after update"s}
+                            };
                 return std::make_tuple(http_status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            auto result_document = db_documents.get<xson::object::array>()[0];
-            
-            // Add OData metadata if requested
-            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-            {
-                const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
-                result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
-            }
-            
-            auto response_headers = ::http::headers{};
-            response_headers.set("location"s, "/_db/"s + collection_name);
-            
-            // Return 200 OK for update (PATCH is always an update operation)
+                        }
+                        
+                        auto result_document = db_documents.get<xson::object::array>()[0];
+                        
+                        // Add OData metadata if requested
+                        const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                        {
+                            const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
+                            result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+                        }
+                        
+                        auto response_headers = ::http::headers{};
+                        response_headers.set("location"s, "/_db/"s + collection_name);
+                        
+                        // Return 200 OK for update (PATCH is always an update operation)
             return std::make_tuple(http_status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
         };
 
@@ -956,118 +929,117 @@ private:
         // Update aka replace _id (upsert behavior) - Refactored to use middleware pattern
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
         auto put_document_handler = [this](::http::request_view request, ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
-        {
-            // Validate body is not empty
-            if(body.empty())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
+                    {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
                 return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            auto uri = ::http::uri{request};
-            auto document = xson::json::parse(trim_trailing_nul(body));
-            auto id = stoll(uri.path[2]); // Regex ensures numeric format
-            
-            // Ensure the document has the correct _id from the URL
-            document["_id"s] = id;
-            
-            auto selector = xson::object{"_id", id};
-            auto existing_docs = xson::object{};
+                        }
+                        
+                        const auto uri = ::http::uri{request};
+            auto document = xson::json::parse(body);
+            const auto id = stoll(uri.path[2]); // Regex ensures numeric format
+                        
+                        // Ensure the document has the correct _id from the URL
+                        document["_id"s] = id;
+                        
+                        const auto selector = xson::object{"_id", id};
+                        auto existing_docs = xson::object{};
 
-            const auto guard = std::lock_guard{m_engine};
-            auto collection = validate_collection_name(uri.path[1]);
-            m_engine.collection(collection);
-            
-            // Check if document exists
-            auto exists = m_engine.read(selector, existing_docs);
-            auto response_headers = ::http::headers{};
-            const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
-            
-            // Check conditional requests (only if document exists)
-            if(exists && !existing_docs.get<xson::object::array>().empty())
-            {
-                // Check If-Match header (ETag-based)
+                        const auto guard = std::lock_guard{m_engine};
+                        const auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
+                        
+                        // Check if document exists
+                        const auto exists = m_engine.read(selector, existing_docs);
+                        auto response_headers = ::http::headers{};
+                        const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
+                        
+                        // Check conditional requests (only if document exists)
+                        if(exists && !existing_docs.get<xson::object::array>().empty())
+                        {
+                            // Check If-Match header (ETag-based)
                 auto metadata_position = m_engine.metadata_position(selector);
-                if(metadata_position.has_value())
-                {
-                    auto current_etag = generate_etag(metadata_position.value());
-                    auto match_check = check_if_match(headers, current_etag);
-                    if(match_check.has_value() && !match_check.value())
-                    {
-                        // Precondition failed - ETag doesn't match
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "ETag does not match current resource version"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
+                            if(metadata_position.has_value())
+                            {
+                                auto current_etag = generate_etag(metadata_position.value());
+                                auto match_check = check_if_match(headers, current_etag);
+                                if(match_check.has_value() && !match_check.value())
+                                {
+                                    // Precondition failed - ETag doesn't match
+                                    auto error = xson::object{
+                                        {"error", "Precondition Failed"s},
+                                        {"message", "ETag does not match current resource version"s},
+                                        {"collection", collection},
+                                        {"id", id}
+                                    };
                         return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
-                }
-                
-                // Check If-Unmodified-Since conditional request
+                                }
+                            }
+                            
+                            // Check If-Unmodified-Since conditional request
                 auto metadata_timestamp = m_engine.metadata_timestamp(selector);
-                if(metadata_timestamp.has_value())
-                {
-                    auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
-                    if(unmodified_check.has_value() && !unmodified_check.value())
-                    {
-                        // Precondition failed - document was modified since client's date
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "Document has been modified since the specified date"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
+                            if(metadata_timestamp.has_value())
+                            {
+                                auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
+                                if(unmodified_check.has_value() && !unmodified_check.value())
+                                {
+                                    // Precondition failed - document was modified since client's date
+                                    auto error = xson::object{
+                                        {"error", "Precondition Failed"s},
+                                        {"message", "Document has been modified since the specified date"s},
+                                        {"collection", collection},
+                                        {"id", id}
+                                    };
                         return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
-                }
-            }
-            
-            // Add OData metadata if requested
-            auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-                document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
-            
-            if(exists && !existing_docs.get<xson::object::array>().empty())
-            {
-                // Document exists - replace it
-                m_engine.replace(selector, document);
-                
-                // Get new ETag after update
+                                }
+                            }
+                        }
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                            document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
+                        
+                        if(exists && !existing_docs.get<xson::object::array>().empty())
+                        {
+                            // Document exists - replace it
+                            m_engine.replace(selector, document);
+                            
+                            // Get new ETag after update
                 auto new_metadata_position = m_engine.metadata_position(selector);
-                if(new_metadata_position.has_value())
-                {
-                    auto new_etag = generate_etag(new_metadata_position.value());
-                    response_headers.set("etag"s, new_etag);
-                }
-                
-                // Add Content-Location header for updated resource
-                response_headers.set("content-location"s, resource_path);
-                
-                // Return 200 OK for update
+                            if(new_metadata_position.has_value())
+                            {
+                                auto new_etag = generate_etag(new_metadata_position.value());
+                                response_headers.set("etag"s, new_etag);
+                            }
+                            
+                            // Add Content-Location header for updated resource
+                            response_headers.set("content-location"s, resource_path);
+                            
+                            // Return 200 OK for update
                 return std::make_tuple(http_status_ok, xson::json::stringify(document), std::make_optional(response_headers));
-            }
-            else
-            {
-                // Document doesn't exist - create it
-                m_engine.create(document);
-                
-                // Get ETag after creation
+                        }
+                        else
+                        {
+                            // Document doesn't exist - create it
+                            m_engine.create(document);
+                            
+                            // Get ETag after creation
                 auto new_metadata_position = m_engine.metadata_position(selector);
-                if(new_metadata_position.has_value())
-                {
-                    auto new_etag = generate_etag(new_metadata_position.value());
-                    response_headers.set("etag"s, new_etag);
-                }
-                
-                // Add Location header for newly created resource
-                response_headers.set("location"s, resource_path);
-                
+                            if(new_metadata_position.has_value())
+                            {
+                                auto new_etag = generate_etag(new_metadata_position.value());
+                                response_headers.set("etag"s, new_etag);
+                            }
+                            
+                            // Add Location header for newly created resource
+                            response_headers.set("location"s, resource_path);
+                            
                 return std::make_tuple(http_status_created, xson::json::stringify(document), std::make_optional(response_headers));
             }
         };
@@ -1080,105 +1052,104 @@ private:
         // Update aka modify _id - Refactored to use middleware pattern
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
         auto patch_document_handler = [this](::http::request_view request, ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
-        {
-            // Validate body is not empty
-            if(body.empty())
-            {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
+                    {
+                        // Validate body is not empty
+                        if(body.empty())
+                        {
+                            auto error = xson::object{
+                                {"error", "Bad Request"s},
+                                {"message", "Request body is required"s}
+                            };
                 return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
-            }
-            
-            auto uri = ::http::uri{request};
-            auto updates = xson::json::parse(trim_trailing_nul(body));
-            auto documents = xson::object{};
-            auto id = stoll(uri.path[2]); // Regex ensures numeric format
-            auto selector = xson::object{"_id", id};
+                        }
+                        
+                        const auto uri = ::http::uri{request};
+            auto updates = xson::json::parse(body);
+                        auto documents = xson::object{};
+            const auto id = stoll(uri.path[2]); // Regex ensures numeric format
+                        const auto selector = xson::object{"_id", id};
 
-            const auto guard = std::lock_guard{m_engine};
-            auto collection = validate_collection_name(uri.path[1]);
-            m_engine.collection(collection);
-            
-            // Check conditional requests (only if document exists)
-            auto existing_docs = xson::object{};
-            auto exists = m_engine.read(selector, existing_docs);
-            if(exists && !existing_docs.get<xson::object::array>().empty())
-            {
-                // Check If-Match header (ETag-based)
+                        const auto guard = std::lock_guard{m_engine};
+                        const auto collection = validate_collection_name(uri.path[1]);
+                        m_engine.collection(collection);
+                        
+                        // Check conditional requests (only if document exists)
+                        auto existing_docs = xson::object{};
+                        const auto exists = m_engine.read(selector, existing_docs);
+                        if(exists && !existing_docs.get<xson::object::array>().empty())
+                        {
+                            // Check If-Match header (ETag-based)
                 auto metadata_position = m_engine.metadata_position(selector);
-                if(metadata_position.has_value())
-                {
-                    auto current_etag = generate_etag(metadata_position.value());
-                    auto match_check = check_if_match(headers, current_etag);
-                    if(match_check.has_value() && !match_check.value())
-                    {
-                        // Precondition failed - ETag doesn't match
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "ETag does not match current resource version"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
+                            if(metadata_position.has_value())
+                            {
+                                auto current_etag = generate_etag(metadata_position.value());
+                                auto match_check = check_if_match(headers, current_etag);
+                                if(match_check.has_value() && !match_check.value())
+                                {
+                                    // Precondition failed - ETag doesn't match
+                                    auto error = xson::object{
+                                        {"error", "Precondition Failed"s},
+                                        {"message", "ETag does not match current resource version"s},
+                                        {"collection", collection},
+                                        {"id", id}
+                                    };
                         return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
-                }
-                
-                // Check If-Unmodified-Since conditional request
+                                }
+                            }
+                            
+                            // Check If-Unmodified-Since conditional request
                 auto metadata_timestamp = m_engine.metadata_timestamp(selector);
-                if(metadata_timestamp.has_value())
-                {
-                    auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
-                    if(unmodified_check.has_value() && !unmodified_check.value())
-                    {
-                        // Precondition failed - document was modified since client's date
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "Document has been modified since the specified date"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
+                            if(metadata_timestamp.has_value())
+                            {
+                                auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
+                                if(unmodified_check.has_value() && !unmodified_check.value())
+                                {
+                                    // Precondition failed - document was modified since client's date
+                                    auto error = xson::object{
+                                        {"error", "Precondition Failed"s},
+                                        {"message", "Document has been modified since the specified date"s},
+                                        {"collection", collection},
+                                        {"id", id}
+                                    };
                         return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
-                    }
-                }
-            }
-            
-            m_engine.upsert(selector,updates,documents);
-            
-            // Add OData metadata if requested
-            auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-            {
-                if(documents.is_array() && !documents.get<xson::object::array>().empty())
-                {
-                    // PATCH returns array with updated document(s)
-                    auto& items = documents.get<xson::object::array>();
-                    for(auto& item : items)
-                    {
-                        item = yar::http::odata::add_metadata(item, metadata_level, collection, id);
-                    }
-                }
-                else if(!documents.is_array())
-                {
-                    // Single object
-                    documents = yar::http::odata::add_metadata(documents, metadata_level, collection, id);
-                }
-            }
-            
-            // Add Content-Location header for updated resource
-            auto response_headers = ::http::headers{};
-            response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
-            
-            // Get new ETag after update
+                                }
+                            }
+                        }
+                        
+                        m_engine.upsert(selector,updates,documents);
+                        
+                        // Add OData metadata if requested
+                        auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                        if(metadata_level != yar::http::odata::metadata_level::none)
+                        {
+                            if(documents.is_array() && !documents.get<xson::object::array>().empty())
+                            {
+                                // PATCH returns array with updated document(s)
+                                auto& items = documents.get<xson::object::array>();
+                                for(auto& item : items)
+                                {
+                                    item = yar::http::odata::add_metadata(item, metadata_level, collection, id);
+                                }
+                            }
+                            else if(!documents.is_array())
+                            {
+                                // Single object
+                                documents = yar::http::odata::add_metadata(documents, metadata_level, collection, id);
+                            }
+                        }
+                        
+                        // Add Content-Location header for updated resource
+                        auto response_headers = ::http::headers{};
+                        response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
+                        
+                        // Get new ETag after update
             auto new_metadata_position = m_engine.metadata_position(selector);
-            if(new_metadata_position.has_value())
-            {
-                auto new_etag = generate_etag(new_metadata_position.value());
-                response_headers.set("etag"s, new_etag);
-            }
-            
+                        if(new_metadata_position.has_value())
+                        {
+                            auto new_etag = generate_etag(new_metadata_position.value());
+                            response_headers.set("etag"s, new_etag);
+                        }
+                        
             return std::make_tuple(http_status_ok, xson::json::stringify(documents), std::make_optional(response_headers));
         };
 
@@ -1190,24 +1161,19 @@ private:
         // Delete _id - Refactored to use middleware pattern
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
         auto delete_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
         {
-            auto uri = ::http::uri{request};
-            auto id = stoll(uri.path[2]); // Regex ensures numeric format
+            const auto ctx = handler_context{request, m_engine};
+            const auto id = stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
-            auto selector = xson::object{"_id", id};
-
-            const auto guard = std::lock_guard{m_engine};
-            auto collection = validate_collection_name(uri.path[1]);
-            m_engine.collection(collection);
-            auto deleted = m_engine.destroy(selector,documents);
+            const auto selector = xson::object{"_id", id};
+            const auto deleted = m_engine.destroy(selector, documents);
 
             if(!deleted)
             {
                 auto error = xson::object{
                     {"error", "Not Found"s},
                     {"message", "Document not found"s},
-                    {"collection", collection},
+                    {"collection", ctx.collection},
                     {"id", id}
                 };
                 return std::make_tuple(http_status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
@@ -1224,15 +1190,14 @@ private:
 
         // Delete first - Refactored to use middleware pattern
         auto delete_first_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, [[maybe_unused]] const ::http::headers& headers)
-            -> ::http::response_with_headers
-        {
-            const auto uri = ::http::uri{request};
-            auto documents = xson::object{};
-            auto selector = xson::object{"$top",1ll};
+                {
+                    const auto uri = ::http::uri{request};
+                    auto documents = xson::object{};
+                    auto selector = xson::object{"$top",1ll};
 
-            const auto guard = std::lock_guard{m_engine};
-            m_engine.collection(uri.path[1]);
-            m_engine.destroy(selector,documents);
+                    const auto guard = std::lock_guard{m_engine};
+                    m_engine.collection(uri.path[1]);
+                    m_engine.destroy(selector,documents);
             return std::make_tuple(http_status_ok, xson::json::stringify(documents), std::optional<::http::headers>{});
         };
 
@@ -1243,7 +1208,6 @@ private:
 
         // GET /_reindex - Reindex all collections (rebuild indexes from data) - Refactored to use middleware pattern
         auto reindex_handler = [this]([[maybe_unused]] ::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
-            -> ::http::response_with_headers
         {
             // Reindex all collections - this rebuilds indexes from scratch
             const auto guard = std::lock_guard{m_engine};

@@ -1790,11 +1790,11 @@ auto test_set()
             );
             require_eq(status1, "200"s);
 
-            // Invalid query parameters should return 400
+            // Invalid query parameters should return 422 (semantic validation error)
             auto [status2, reason2, headers2, body2] = make_request(
                 setup->port(), "HEAD"s, "/headtest?$top=-1"s, ""s
             );
-            require_eq(status2, "400"s);
+            require_eq(status2, "422"s);
         };
 
         section("HEAD returns same Content-Type header as GET") = [setup]
@@ -2577,9 +2577,9 @@ auto test_set()
 
         section("GET with empty $orderby field returns 422 Unprocessable Entity") = [setup]
         {
-            // Try GET with empty $orderby field name
+            // Try GET with empty $orderby field name (space before desc means empty field)
             auto [status, reason, headers, body] = make_request(
-                setup->port(), "GET"s, "/unprocessabletest?$orderby= desc"s, ""s
+                setup->port(), "GET"s, "/unprocessabletest?$orderby=%20desc"s, ""s
             );
             
             require_eq(status, "422"s);

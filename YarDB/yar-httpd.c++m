@@ -505,16 +505,25 @@ private:
             if(params.contains("$orderby"s))
             {
                 const auto orderby_value = params["$orderby"s];
-                auto orderby = trim(std::string_view{orderby_value});
+                auto orderby_view = std::string_view{orderby_value};
                 
-                // Extract field name (remove " desc" or " asc" suffix if present)
-                auto field_name = orderby;
-                if(orderby.ends_with(" desc"sv))
-                    field_name = trim(orderby.substr(0, orderby.size() - 5));
-                else if(orderby.ends_with(" asc"sv))
-                    field_name = trim(orderby.substr(0, orderby.size() - 4));
+                // Check for suffix on original value (before trimming) to handle cases like " desc" or " asc"
+                auto field_name = std::string_view{};
+                if(orderby_view.ends_with(" desc"sv))
+                {
+                    field_name = trim(orderby_view.substr(0, orderby_view.size() - 5));
+                }
+                else if(orderby_view.ends_with(" asc"sv))
+                {
+                    field_name = trim(orderby_view.substr(0, orderby_view.size() - 4));
+                }
+                else
+                {
+                    // No suffix, field_name is the whole trimmed value
+                    field_name = trim(orderby_view);
+                }
                 
-                // Validate field name
+                // Validate field name (must not be empty after trimming)
                 if(field_name.empty())
                 {
                     auto error = xson::object{
@@ -523,6 +532,9 @@ private:
                     };
                     return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
+                
+                // Use trimmed value for further processing
+                auto orderby = trim(orderby_view);
                 
                 if(field_name.size() > yar::db::max_field_name_length)
                 {

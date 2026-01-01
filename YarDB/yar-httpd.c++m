@@ -108,7 +108,7 @@ public:
         if(key_extractor)
             m_rate_limit_key_extractor = std::move(key_extractor);
         else
-            m_rate_limit_key_extractor = ::http::default_rate_limit_key_extractor;
+            m_rate_limit_key_extractor = ::http::middleware::default_rate_limit_key_extractor;
     }
 
     void disable_rate_limiting()
@@ -116,7 +116,7 @@ public:
         m_rate_limiting_enabled = false;
         m_rate_limit_max_requests = 100;
         m_rate_limit_window_seconds = std::chrono::seconds{60};
-        m_rate_limit_key_extractor = ::http::default_rate_limit_key_extractor;
+        m_rate_limit_key_extractor = ::http::middleware::default_rate_limit_key_extractor;
     }
 
     // CORS configuration
@@ -343,7 +343,7 @@ private:
         if(!m_rate_limiting_enabled)
             return std::nullopt;
         
-        return ::http::rate_limiting_middleware(
+        return ::http::middleware::rate_limiting_middleware(
             m_rate_limit_max_requests,
             m_rate_limit_window_seconds,
             m_rate_limit_key_extractor
@@ -357,7 +357,7 @@ private:
         if(!m_cors_enabled)
             return std::nullopt;
         
-        return ::http::cors_middleware(
+        return ::http::middleware::cors_middleware(
             m_cors_allowed_origin,
             m_cors_allowed_methods,
             m_cors_allowed_headers,
@@ -373,7 +373,7 @@ private:
         if(!m_authentication_enabled)
             return std::nullopt;
         
-        return ::http::authentication_middleware(
+        return ::http::middleware::authentication_middleware(
             m_is_public_path,
             m_validate_token,
             m_auth_realm
@@ -409,7 +409,7 @@ private:
         }
         
         // 3. Correlation ID (early - ensures correlation ID exists for logging)
-        middlewares.emplace_back(::http::correlation_id_middleware());
+        middlewares.emplace_back(::http::middleware::correlation_id_middleware());
         
         // 4. Authentication (before business logic)
         if(m_authentication_enabled)
@@ -459,7 +459,7 @@ private:
         auto create_middlewares = build_middleware_chain(method_post, "POST_DOCUMENT"sv, "CREATE_ERROR"sv, true);
         m_server.post("/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(create_handler, create_middlewares));
+            ::http::middleware::wrap(create_handler, create_middlewares));
 
         // HEAD / - Removed, will use GET fallback
 
@@ -482,7 +482,7 @@ private:
         auto list_middlewares = build_middleware_chain(method_get, "LIST_COLLECTIONS"sv, "LIST_COLLECTIONS_ERROR"sv, false);
         m_server.get("/"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(list_collections_handler, list_middlewares));
+            ::http::middleware::wrap(list_collections_handler, list_middlewares));
 
         // Read _id - Refactored to use middleware pattern and helper functions
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
@@ -558,7 +558,7 @@ private:
         auto get_document_middlewares = build_middleware_chain(method_get, "GET_DOCUMENT"sv, "GET_DOCUMENT_ERROR"sv, true);
         m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(get_document_handler, get_document_middlewares));
+            ::http::middleware::wrap(get_document_handler, get_document_middlewares));
 
         // Read collection with OData query parameters - Refactored to use middleware pattern
         // Route pattern allows optional query string: /[a-z][a-z0-9]*(\?.*)?
@@ -739,7 +739,7 @@ private:
         auto get_collection_middlewares = build_middleware_chain(method_get, "GET_COLLECTION"sv, "GET_COLLECTION_ERROR"sv, false);
         m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(get_collection_handler, get_collection_middlewares));
+            ::http::middleware::wrap(get_collection_handler, get_collection_middlewares));
 
 
         // PUT /_db/{collection_name} - Add/update secondary indexes for a collection - Refactored to use middleware pattern
@@ -879,7 +879,7 @@ private:
         auto put_index_middlewares = build_middleware_chain(method_put, "PUT_INDEX"sv, "PUT_INDEX_ERROR"sv, true);
         m_server.put("/_db/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(put_index_handler, put_index_middlewares));
+            ::http::middleware::wrap(put_index_handler, put_index_middlewares));
 
         // PATCH /_db/{collection_name} - Add secondary indexes incrementally (merge with existing) - Refactored to use middleware pattern
         auto patch_index_handler = [this](::http::request_view request, ::http::body_view body, ::http::headers& headers)
@@ -1072,7 +1072,7 @@ private:
         auto patch_index_middlewares = build_middleware_chain(method_patch, "PATCH_INDEX"sv, "PATCH_INDEX_ERROR"sv, true);
         m_server.patch("/_db/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(patch_index_handler, patch_index_middlewares));
+            ::http::middleware::wrap(patch_index_handler, patch_index_middlewares));
 
 
         // Update aka replace _id (upsert behavior) - Refactored to use middleware pattern
@@ -1196,7 +1196,7 @@ private:
         auto put_document_middlewares = build_middleware_chain(method_put, "PUT_DOCUMENT"sv, "PUT_DOCUMENT_ERROR"sv, true);
         m_server.put("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(put_document_handler, put_document_middlewares));
+            ::http::middleware::wrap(put_document_handler, put_document_middlewares));
 
         // Update aka modify _id - Refactored to use middleware pattern
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
@@ -1305,7 +1305,7 @@ private:
         auto patch_document_middlewares = build_middleware_chain(method_patch, "PATCH_DOCUMENT"sv, "PATCH_DOCUMENT_ERROR"sv, true);
         m_server.patch("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(patch_document_handler, patch_document_middlewares));
+            ::http::middleware::wrap(patch_document_handler, patch_document_middlewares));
 
         // Delete _id - Refactored to use middleware pattern
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
@@ -1335,7 +1335,7 @@ private:
         auto delete_document_middlewares = build_middleware_chain(method_delete, "DELETE_DOCUMENT"sv, "DELETE_DOCUMENT_ERROR"sv, false);
         m_server.destroy("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(delete_document_handler, delete_document_middlewares));
+            ::http::middleware::wrap(delete_document_handler, delete_document_middlewares));
 
         // Delete first - Refactored to use middleware pattern
         auto delete_first_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, [[maybe_unused]] ::http::headers& headers)
@@ -1353,7 +1353,7 @@ private:
         auto delete_first_middlewares = build_middleware_chain(method_delete, "DELETE_FIRST"sv, "DELETE_FIRST_ERROR"sv, false);
         m_server.destroy("/[a-z]+\\?\\$top"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(delete_first_handler, delete_first_middlewares));
+            ::http::middleware::wrap(delete_first_handler, delete_first_middlewares));
 
         // GET /_reindex - Reindex all collections (rebuild indexes from data) - Refactored to use middleware pattern
         auto reindex_handler = [this]([[maybe_unused]] ::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
@@ -1380,7 +1380,7 @@ private:
         auto reindex_middlewares = build_middleware_chain(method_get, "REINDEX"sv, "REINDEX_ERROR"sv, false);
         m_server.get("/_reindex"s).response_with_headers(
             "application/json"sv,
-            ::http::wrap(reindex_handler, reindex_middlewares));
+            ::http::middleware::wrap(reindex_handler, reindex_middlewares));
     }
 
     std::string m_file;
@@ -1394,7 +1394,7 @@ private:
     bool m_rate_limiting_enabled = false;
     std::size_t m_rate_limit_max_requests = 100;
     std::chrono::seconds m_rate_limit_window_seconds{60};
-    std::function<std::string(std::string_view request, const ::http::headers&)> m_rate_limit_key_extractor = ::http::default_rate_limit_key_extractor;
+    std::function<std::string(std::string_view request, const ::http::headers&)> m_rate_limit_key_extractor = ::http::middleware::default_rate_limit_key_extractor;
     
     // CORS configuration (optional)
     bool m_cors_enabled = false;

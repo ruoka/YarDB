@@ -2394,7 +2394,7 @@ auto test_set()
             }
         };
 
-        section("GET with If-Modified-Since in future returns 200 OK") = [setup]
+        section("GET with If-Modified-Since in future returns 304 Not Modified") = [setup]
         {
             // Create a document
             auto [post_status, _unused_post5, _unused_post6, post_body] = make_request(
@@ -2431,12 +2431,23 @@ auto test_set()
             require_true(headers1.contains("last-modified"s));
             auto last_modified = headers1["last-modified"s];
             
+            // Debug: Print timestamp values
+            tester::assertions::message(true, "DEBUG: Last-Modified header: "s + last_modified);
+            tester::assertions::message(true, "DEBUG: If-Unmodified-Since will be set to: "s + last_modified);
+            
             // PUT with If-Unmodified-Since matching the Last-Modified date
             auto custom_headers = std::map<string, string>{{"If-Unmodified-Since", last_modified}};
             auto [status, reason, headers, body] = make_request_with_headers(
                 setup->port(), "PUT"s, "/lastmodifiedtest4/"s + std::to_string(doc_id), custom_headers,
                 R"({"name":"Updated Name","value":100})"s
             );
+            
+            // Debug: Print response status and headers
+            tester::assertions::message(true, "DEBUG: PUT response status: "s + status + " "s + reason);
+            if(headers.contains("last-modified"s))
+            {
+                tester::assertions::message(true, "DEBUG: New Last-Modified after PUT: "s + headers["last-modified"s]);
+            }
             
             // Should succeed if document timestamp <= If-Unmodified-Since date
             require_eq(status, "200"s);

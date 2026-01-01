@@ -171,7 +171,7 @@ private:
                     slog << error(error_event) << "Invalid argument: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", status_code_bad_request}
+                          << std::pair{"status", status_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{
@@ -187,7 +187,7 @@ private:
                     slog << error(error_event) << "Out of range: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", status_code_bad_request}
+                          << std::pair{"status", status_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{
@@ -203,7 +203,7 @@ private:
                     slog << error(error_event) << "Runtime error: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", status_code_bad_request}
+                          << std::pair{"status", status_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{
@@ -219,7 +219,7 @@ private:
                     slog << error(error_event) << "Internal error: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", status_code_internal_server_error}
+                          << std::pair{"status", status_internal_server_error}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{

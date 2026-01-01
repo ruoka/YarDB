@@ -4,7 +4,7 @@ import std;
 import xson;
 
 using namespace std;
-using namespace ext;
+using namespace utils;
 using namespace net;
 using namespace xson;
 
@@ -93,7 +93,7 @@ try
         clog << "Enter restful request: ";
         cin >> method;
 
-        ext::ascii_to_upper(method);
+        utils::ascii_to_upper(method);
 
         if (method == "HELP")
         {

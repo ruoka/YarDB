@@ -12,6 +12,7 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using namespace net;
 using namespace xson;
+using namespace yar::http::details; // For stoll() and other details
 
 class fixture
 {
@@ -91,7 +92,7 @@ auto parse_http_response(net::endpointstream& stream, const string& method = ""s
     // For HEAD requests, Content-Length is set but body is not sent by framework
     if(headers.contains("content-length") && method != "HEAD"s)
     {
-        auto content_length = std::stoll(headers["content-length"]);
+        auto content_length = utils::stoll(headers["content-length"]);
         if(content_length > 0)
         {
             body.resize(content_length);
@@ -1245,7 +1246,7 @@ auto test_set()
             
             // Response should be just a number (JSON number)
             // Parse as integer
-            auto count = std::stoll(response_body);
+            auto count = utils::stoll(response_body);
             require_true(count >= 3); // Should have at least 3 documents we just created
             
             // Verify it matches the actual count by getting all documents
@@ -1270,7 +1271,7 @@ auto test_set()
             require_eq(reason, "OK"s);
             
             // Response should be just a number
-            auto count = std::stoll(response_body);
+            auto count = utils::stoll(response_body);
             require_true(count >= 2); // Should have at least 2 documents (CountUser2 age 30, CountUser3 age 35)
             
             // Verify it matches the filtered count

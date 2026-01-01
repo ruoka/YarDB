@@ -5,7 +5,7 @@ import xson;
 
 using namespace std;
 using namespace xson;
-using namespace ext;
+using namespace utils;
 
 const auto usage = R"(yarexport [--help] [--file=<name>])";
 

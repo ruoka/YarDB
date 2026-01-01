@@ -1,5 +1,5 @@
 export module yar:odata;
-import :helper;
+import :details;
 import :engine;
 import :constants;
 import std;
@@ -14,7 +14,7 @@ namespace yar::http::odata {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
-using namespace yar::http::helpers; // Use functions from helper module
+using namespace yar::http::details; // Use functions from details module
 
 // Enum for OData metadata level
 enum class metadata_level
@@ -125,13 +125,13 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
 // Helper function to extract field name from function arguments (e.g., "field, 'value'" -> "field")
 constexpr auto parse_field_from_function_args(std::string_view args, std::size_t comma_pos)
 {
-    return trim_end(args.substr(0, comma_pos));
+    return utils::trim_end(args.substr(0, comma_pos));
 }
 
 // Helper function to extract value without quotes from function arguments (e.g., "field, 'value'" -> "value")
 constexpr auto parse_value_from_function_args(std::string_view args, std::size_t comma_pos)
 {
-    auto value_trimmed = trim_start(args.substr(comma_pos + 1));
+    auto value_trimmed = utils::trim_start(args.substr(comma_pos + 1));
     
     // Remove quotes if present using string_view operations
     if(value_trimmed.size() >= 2)
@@ -192,7 +192,7 @@ inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::str
     // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
     
     // Trim whitespace from filter_expr using string_view
-    auto expr = trim(filter_expr);
+    auto expr = utils::trim(filter_expr);
     
     // Handle 'and' operator - split and process each part
     if(expr.contains(" and "))
@@ -294,8 +294,8 @@ inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::str
     if(op_pos == std::string_view::npos)
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
     
-    auto field = trim_end_to_string(expr.substr(0, op_pos));
-    auto value = trim_start_to_string(expr.substr(op_pos + op.size() + 1));
+    auto field = utils::trim_end_to_string(expr.substr(0, op_pos));
+    auto value = utils::trim_start_to_string(expr.substr(op_pos + op.size() + 1));
     
     // Validate field name is not empty
     if(field.empty())
@@ -328,7 +328,7 @@ inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::str
             // Try to parse as number
             try
             {
-                auto num = stoll(value);
+                auto num = utils::stoll(value);
                 selector[field] = num;
             }
             catch(...)
@@ -526,6 +526,79 @@ inline void add_metadata_if_requested(
     const auto metadata_level = parse_metadata_level(headers);
     if(metadata_level != metadata_level::none)
         document = add_metadata(document, metadata_level, collection, id);
+}
+
+// OData query parameter parsing and validation
+// These functions parse and validate OData query parameters, throwing std::invalid_argument
+// for validation errors. The handler should catch these and return 422 Unprocessable Entity.
+
+// Parse and validate $top parameter
+// Throws std::invalid_argument if value is invalid (negative or exceeds maximum)
+inline auto parse_top(std::string_view top_value)
+{
+    const auto value = utils::stoll(top_value);
+    if(value < 0)
+        throw std::invalid_argument{"$top must be non-negative"};
+    if(value > yar::db::max_query_top)
+        throw std::invalid_argument{"$top exceeds maximum ("s + std::to_string(yar::db::max_query_top) + ")"};
+    return value;
+}
+
+// Parse and validate $skip parameter
+// Throws std::invalid_argument if value is invalid (negative or exceeds maximum)
+inline auto parse_skip(std::string_view skip_value)
+{
+    const auto value = utils::stoll(skip_value);
+    if(value < 0)
+        throw std::invalid_argument{"$skip must be non-negative"};
+    if(value > yar::db::max_query_skip)
+        throw std::invalid_argument{"$skip exceeds maximum ("s + std::to_string(yar::db::max_query_skip) + ")"};
+    return value;
+}
+
+// Result structure for $orderby parsing
+struct orderby_result
+{
+    std::string field_name;
+    bool descending;
+};
+
+// Parse and validate $orderby parameter
+// Throws std::invalid_argument if value is invalid (empty field name or too long)
+inline auto parse_orderby(std::string_view orderby_value)
+{
+    auto orderby_view = std::string_view{orderby_value};
+    
+    // Check for suffix on original value (before trimming) to handle cases like " desc" or " asc"
+    auto field_name = std::string_view{};
+    if(orderby_view.ends_with(" desc"sv))
+    {
+        field_name = utils::trim(orderby_view.substr(0, orderby_view.size() - 5));
+    }
+    else if(orderby_view.ends_with(" asc"sv))
+    {
+        field_name = utils::trim(orderby_view.substr(0, orderby_view.size() - 4));
+    }
+    else
+    {
+        // No suffix, field_name is the whole trimmed value
+        field_name = utils::trim(orderby_view);
+    }
+    
+    // Validate field name (must not be empty after trimming)
+    if(field_name.empty())
+        throw std::invalid_argument{"$orderby field name cannot be empty"};
+    
+    // Use trimmed value for further processing
+    auto orderby = utils::trim(orderby_view);
+    
+    if(field_name.size() > yar::db::max_field_name_length)
+        throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"};
+    
+    // Check if it ends with " desc" or is just "desc"
+    const auto descending = orderby.ends_with(" desc"sv) || orderby == "desc"sv;
+    
+    return orderby_result{std::string{field_name}, descending};
 }
 
 } // namespace yar::http::odata

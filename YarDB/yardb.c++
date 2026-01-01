@@ -5,7 +5,7 @@ import std;
 
 using namespace std;
 using namespace net;
-using namespace ext;
+using namespace utils;
 
 const auto usage = R"(yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port])";
 

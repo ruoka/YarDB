@@ -1,7 +1,7 @@
 export module yar:httpd;
 import :engine;
 import :constants;
-import :helper;
+import :details;
 import :odata;
 import std;
 import net;
@@ -15,7 +15,7 @@ using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
 using namespace ::http;  // HTTP constants and types from net::http
-using namespace yar::http::helpers;
+using namespace yar::http::details;
 using namespace yar::http::odata;
 
 // Header name constants (YarDB-specific)
@@ -326,7 +326,7 @@ private:
         auto get_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
         {
             const auto ctx = handler_context{request, m_engine};
-            const auto id = stoll(ctx.uri.path[2]); // Regex ensures numeric format
+            const auto id = utils::stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
 
@@ -358,7 +358,7 @@ private:
             // Generate ETag from position
             if(metadata_position.has_value())
             {
-                const auto etag = generate_etag(metadata_position.value());
+                const auto etag = utils::generate_etag(metadata_position.value());
                 response_headers.set("etag"s, etag);
                 
                 // Check If-None-Match conditional request (for GET/HEAD)
@@ -368,7 +368,7 @@ private:
                     // ETag matches - resource not modified, return 304 Not Modified
                     if(metadata_timestamp.has_value())
                     {
-                        const auto last_modified = format_http_date(metadata_timestamp.value());
+                        const auto last_modified = utils::format_http_date(metadata_timestamp.value());
                         response_headers.set("last-modified"s, last_modified);
                     }
                     return std::make_tuple(status_not_modified, ""s, std::make_optional(response_headers));
@@ -377,7 +377,7 @@ private:
             
             if(metadata_timestamp.has_value())
             {
-                const auto last_modified = format_http_date(metadata_timestamp.value());
+                const auto last_modified = utils::format_http_date(metadata_timestamp.value());
                 response_headers.set("last-modified"s, last_modified);
                 
                 // Check If-Modified-Since conditional request
@@ -458,102 +458,62 @@ private:
             // Handle $top (OData: $top=n)
             if(params.contains("$top"s))
             {
-                const auto top_value = stoll(params["$top"s]);
-                if(top_value < 0)
+                try
                 {
+                    const auto top_value = yar::http::odata::parse_top(params["$top"s]);
+                    selector["$top"s] = top_value;
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    // Return 422 for OData query parameter validation errors
                     auto error = xson::object{
                         {"error", "Unprocessable Entity"s},
-                        {"message", "$top must be non-negative"s}
+                        {"message", std::string{e.what()}}
                     };
                     return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
-                if(top_value > yar::db::max_query_top)
-                {
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", "$top exceeds maximum ("s + std::to_string(yar::db::max_query_top) + ")"}
-                    };
-                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                selector["$top"s] = top_value;
             }
             
             // Handle $skip (OData: $skip=n)
             if(params.contains("$skip"s))
             {
-                const auto skip_value = stoll(params["$skip"s]);
-                if(skip_value < 0)
+                try
                 {
+                    const auto skip_value = yar::http::odata::parse_skip(params["$skip"s]);
+                    selector["$skip"s] = skip_value;
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    // Return 422 for OData query parameter validation errors
                     auto error = xson::object{
                         {"error", "Unprocessable Entity"s},
-                        {"message", "$skip must be non-negative"s}
+                        {"message", std::string{e.what()}}
                     };
                     return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
-                if(skip_value > yar::db::max_query_skip)
-                {
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", "$skip exceeds maximum ("s + std::to_string(yar::db::max_query_skip) + ")"}
-                    };
-                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                selector["$skip"s] = skip_value;
             }
             
             // Handle $orderby (OData: $orderby=field desc or $orderby=field asc)
             if(params.contains("$orderby"s))
             {
-                const auto orderby_value = params["$orderby"s];
-                auto orderby_view = std::string_view{orderby_value};
-                
-                // Check for suffix on original value (before trimming) to handle cases like " desc" or " asc"
-                auto field_name = std::string_view{};
-                if(orderby_view.ends_with(" desc"sv))
+                try
                 {
-                    field_name = trim(orderby_view.substr(0, orderby_view.size() - 5));
+                    const auto orderby_result = yar::http::odata::parse_orderby(params["$orderby"s]);
+                    selector["$orderby"s] = orderby_result.field_name;
+                    if(orderby_result.descending)
+                    {
+                        selector["$desc"s] = true;
+                    }
                 }
-                else if(orderby_view.ends_with(" asc"sv))
+                catch(const std::invalid_argument& e)
                 {
-                    field_name = trim(orderby_view.substr(0, orderby_view.size() - 4));
-                }
-                else
-                {
-                    // No suffix, field_name is the whole trimmed value
-                    field_name = trim(orderby_view);
-                }
-                
-                // Validate field name (must not be empty after trimming)
-                if(field_name.empty())
-                {
+                    // Return 422 for OData query parameter validation errors
                     auto error = xson::object{
                         {"error", "Unprocessable Entity"s},
-                        {"message", "$orderby field name cannot be empty"s}
+                        {"message", std::string{e.what()}}
                     };
                     return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
-                
-                // Use trimmed value for further processing
-                auto orderby = trim(orderby_view);
-                
-                if(field_name.size() > yar::db::max_field_name_length)
-                {
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", "$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
-                    };
-                    return std::make_tuple(status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{});
-                }
-                
-                // Store field name for ordering
-                selector["$orderby"s] = std::string{field_name};
-                
-                // Check if it ends with " desc" or is just "desc"
-                if(orderby.ends_with(" desc"sv) || orderby == "desc"sv)
-                {
-                    selector["$desc"s] = true;
-                }
-                // If it ends with " asc" or is just a field name, ascending is default
             }
             
             // Handle $filter (OData: $filter=field eq 'value' or $filter=field gt number)
@@ -968,7 +928,7 @@ private:
             
             const auto uri = ::http::uri{request};
             auto document = xson::json::parse(body);
-            const auto id = stoll(uri.path[2]); // Regex ensures numeric format
+            const auto id = utils::stoll(uri.path[2]); // Regex ensures numeric format
             
             // Ensure the document has the correct _id from the URL
             document["_id"s] = id;
@@ -992,7 +952,7 @@ private:
                 auto metadata_position = m_engine.metadata_position(selector);
                 if(metadata_position.has_value())
                 {
-                    auto current_etag = generate_etag(metadata_position.value());
+                    auto current_etag = utils::generate_etag(metadata_position.value());
                     auto match_check = check_if_match(headers, current_etag);
                     if(match_check.has_value() && !match_check.value())
                     {
@@ -1040,7 +1000,7 @@ private:
                 auto new_metadata_position = m_engine.metadata_position(selector);
                 if(new_metadata_position.has_value())
                 {
-                    auto new_etag = generate_etag(new_metadata_position.value());
+                    auto new_etag = utils::generate_etag(new_metadata_position.value());
                     response_headers.set("etag"s, new_etag);
                 }
                 
@@ -1059,7 +1019,7 @@ private:
                 auto new_metadata_position = m_engine.metadata_position(selector);
                 if(new_metadata_position.has_value())
                 {
-                    auto new_etag = generate_etag(new_metadata_position.value());
+                    auto new_etag = utils::generate_etag(new_metadata_position.value());
                     response_headers.set("etag"s, new_etag);
                 }
                 
@@ -1092,7 +1052,7 @@ private:
             const auto uri = ::http::uri{request};
             auto updates = xson::json::parse(body);
             auto documents = xson::object{};
-            const auto id = stoll(uri.path[2]); // Regex ensures numeric format
+            const auto id = utils::stoll(uri.path[2]); // Regex ensures numeric format
             const auto selector = xson::object{"_id", id};
 
             const auto guard = std::lock_guard{m_engine};
@@ -1108,7 +1068,7 @@ private:
                 auto metadata_position = m_engine.metadata_position(selector);
                 if(metadata_position.has_value())
                 {
-                    auto current_etag = generate_etag(metadata_position.value());
+                    auto current_etag = utils::generate_etag(metadata_position.value());
                     auto match_check = check_if_match(headers, current_etag);
                     if(match_check.has_value() && !match_check.value())
                     {
@@ -1172,7 +1132,7 @@ private:
             auto new_metadata_position = m_engine.metadata_position(selector);
             if(new_metadata_position.has_value())
             {
-                auto new_etag = generate_etag(new_metadata_position.value());
+                auto new_etag = utils::generate_etag(new_metadata_position.value());
                 response_headers.set("etag"s, new_etag);
             }
             
@@ -1189,7 +1149,7 @@ private:
         auto delete_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, const ::http::headers& headers)
         {
             const auto ctx = handler_context{request, m_engine};
-            const auto id = stoll(ctx.uri.path[2]); // Regex ensures numeric format
+            const auto id = utils::stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
             const auto deleted = m_engine.destroy(selector, documents);
@@ -1262,7 +1222,7 @@ private:
 
     std::string m_file;
     std::string m_port_or_service;
-    extension::lockable<yar::db::engine> m_engine;
+    utils::lockable<yar::db::engine> m_engine;
     ::http::server m_server;
     std::thread m_listen_thread;
     mutable std::mutex m_start_mutex;

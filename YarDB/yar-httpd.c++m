@@ -14,34 +14,12 @@ namespace yar::http {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
+using namespace ::http;  // HTTP constants and types from net::http
 using namespace yar::http::helpers;
 using namespace yar::http::odata;
 
-// HTTP method constants
+// Header name constants (YarDB-specific)
 namespace {
-    constexpr auto http_method_post = "POST"sv;
-    constexpr auto http_method_get = "GET"sv;
-    constexpr auto http_method_put = "PUT"sv;
-    constexpr auto http_method_patch = "PATCH"sv;
-    constexpr auto http_method_delete = "DELETE"sv;
-    
-    // HTTP status constants
-    const auto http_status_ok = "200 OK"s;
-    const auto http_status_created = "201 Created"s;
-    const auto http_status_no_content = "204 No Content"s;
-    const auto http_status_not_found = "404 Not Found"s;
-    const auto http_status_bad_request = "400 Bad Request"s;
-    const auto http_status_not_acceptable = "406 Not Acceptable"s;
-    const auto http_status_not_modified = "304 Not Modified"s;
-    const auto http_status_precondition_failed = "412 Precondition Failed"s;
-    const auto http_status_payload_too_large = "413 Payload Too Large"s;
-    const auto http_status_internal_server_error = "500 Internal Server Error"s;
-    
-    // HTTP status code constants for logging (numeric values)
-    constexpr int http_status_code_bad_request = 400;
-    constexpr int http_status_code_internal_server_error = 500;
-    
-    // Header name constants
     constexpr auto correlation_id_header = "x-correlation-id"sv;
     
     // Cached correlation ID header string (headers API requires std::string)
@@ -135,7 +113,7 @@ private:
                       << std::pair{"uri"sv, req}
                       << std::pair{"body_size", body.size()}
                       << std::pair{"correlation_id", correlation_id}
-                          << flush;
+                      << flush;
 
                 auto [status, content, headers] = next(req, body, hdr);
 
@@ -193,14 +171,14 @@ private:
                     slog << error(error_event) << "Invalid argument: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", http_status_code_bad_request}
+                          << std::pair{"status", status_code_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
-                            auto error = xson::object{
-                                {"error", "Bad Request"s},
+                    auto error = xson::object{
+                        {"error", "Bad Request"s},
                         {"message", std::string{e.what()}}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 catch(const std::out_of_range& e)
                 {
@@ -209,14 +187,14 @@ private:
                     slog << error(error_event) << "Out of range: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", http_status_code_bad_request}
+                          << std::pair{"status", status_code_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{
                         {"error", "Bad Request"s},
                         {"message", std::string{e.what()}}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 catch(const std::runtime_error& e)
                 {
@@ -225,14 +203,14 @@ private:
                     slog << error(error_event) << "Runtime error: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", http_status_code_bad_request}
+                          << std::pair{"status", status_code_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{
                         {"error", "Bad Request"s},
                         {"message", std::string{e.what()}}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 catch(const std::exception& e)
                 {
@@ -241,14 +219,14 @@ private:
                     slog << error(error_event) << "Internal error: " << e.what()
                           << std::pair{"method", method}
                           << std::pair{"uri"sv, req}
-                          << std::pair{"status", http_status_code_internal_server_error}
+                          << std::pair{"status", status_code_internal_server_error}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
                     auto error = xson::object{
                         {"error", "Internal Server Error"s},
                         {"message", "An unexpected error occurred"s}
                     };
-                    return std::make_tuple(http_status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
             };
         };
@@ -269,7 +247,7 @@ private:
                         {"error", "Payload Too Large"s},
                         {"message", "Request body exceeds maximum size"s}
                     };
-                    return std::make_tuple(http_status_payload_too_large, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_payload_too_large, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 return next(req, body, hdr);
             };
@@ -297,7 +275,7 @@ private:
             // Validate body is not empty
             if(body.empty())
             {
-                return make_error_response_with_headers(http_status_bad_request, "Bad Request"s, "Request body is required"s);
+                return make_error_response_with_headers(status_bad_request, "Bad Request"s, "Request body is required"s);
             }
             
             const auto ctx = handler_context{request, m_engine};
@@ -312,10 +290,10 @@ private:
             // Add OData metadata if requested
             yar::http::odata::add_metadata_if_requested(document, headers, ctx.collection, id);
             
-            return std::make_tuple(http_status_created, xson::json::stringify(document), std::make_optional(response_headers));
+            return std::make_tuple(status_created, xson::json::stringify(document), std::make_optional(response_headers));
         };
 
-        auto create_middlewares = build_middleware_chain(http_method_post, "POST_DOCUMENT"sv, "CREATE_ERROR"sv, true);
+        auto create_middlewares = build_middleware_chain(method_post, "POST_DOCUMENT"sv, "CREATE_ERROR"sv, true);
         m_server.post("/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(create_handler, create_middlewares));
@@ -335,10 +313,10 @@ private:
                         response["@odata.context"s] = "/$metadata#Collections"s;
                     }
 
-            return std::make_tuple(http_status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
+            return std::make_tuple(status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
         };
 
-        auto list_middlewares = build_middleware_chain(http_method_get, "LIST_COLLECTIONS"sv, "LIST_COLLECTIONS_ERROR"sv, false);
+        auto list_middlewares = build_middleware_chain(method_get, "LIST_COLLECTIONS"sv, "LIST_COLLECTIONS_ERROR"sv, false);
         m_server.get("/"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(list_collections_handler, list_middlewares));
@@ -363,7 +341,7 @@ private:
                     {"collection", ctx.collection},
                     {"id", id}
                 };
-                return std::make_tuple(http_status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
             }
 
             // Return single object (first element of array)
@@ -393,7 +371,7 @@ private:
                         const auto last_modified = format_http_date(metadata_timestamp.value());
                         response_headers.set("last-modified"s, last_modified);
                     }
-                    return std::make_tuple(http_status_not_modified, ""s, std::make_optional(response_headers));
+                    return std::make_tuple(status_not_modified, ""s, std::make_optional(response_headers));
                 }
             }
             
@@ -407,14 +385,14 @@ private:
                 if(modified_check.has_value() && !modified_check.value())
                 {
                     // Document not modified since client's date - return 304 Not Modified
-                    return std::make_tuple(http_status_not_modified, ""s, std::make_optional(response_headers));
+                    return std::make_tuple(status_not_modified, ""s, std::make_optional(response_headers));
                 }
             }
             
-            return std::make_tuple(http_status_ok, xson::json::stringify(document), std::make_optional(response_headers));
+            return std::make_tuple(::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers));
         };
 
-        auto get_document_middlewares = build_middleware_chain(http_method_get, "GET_DOCUMENT"sv, "GET_DOCUMENT_ERROR"sv, true);
+        auto get_document_middlewares = build_middleware_chain(method_get, "GET_DOCUMENT"sv, "GET_DOCUMENT_ERROR"sv, true);
         m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(get_document_handler, get_document_middlewares));
@@ -474,7 +452,7 @@ private:
                 
                 // Return count as JSON number (OData spec: $count=true returns just the number)
                 // JSON numbers are valid as plain strings (e.g., "42" is valid JSON)
-                return std::make_tuple(http_status_ok, std::to_string(count), std::optional<::http::headers>{});
+                return std::make_tuple(::http::status_ok, std::to_string(count), std::optional<::http::headers>{});
             }
 
             // Handle $top (OData: $top=n)
@@ -584,10 +562,10 @@ private:
                 }
             }
             
-            return std::make_tuple(http_status_ok, xson::json::stringify(document), std::optional<::http::headers>{});
+            return std::make_tuple(::http::status_ok, xson::json::stringify(document), std::optional<::http::headers>{});
         };
 
-        auto get_collection_middlewares = build_middleware_chain(http_method_get, "GET_COLLECTION"sv, "GET_COLLECTION_ERROR"sv, false);
+        auto get_collection_middlewares = build_middleware_chain(method_get, "GET_COLLECTION"sv, "GET_COLLECTION_ERROR"sv, false);
         m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(get_collection_handler, get_collection_middlewares));
@@ -603,7 +581,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "Request body is required"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             const auto uri = ::http::uri{request};
@@ -616,7 +594,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "Request body must contain 'keys' field with array of field names"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             // Extract and validate keys
@@ -627,7 +605,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "'keys' must be an array of field names"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             auto keys_array = keys_value.get<xson::object::array>();
@@ -637,7 +615,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "'keys' array cannot be empty"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             // Convert keys array to vector of strings
@@ -650,7 +628,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "All keys must be strings"s}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 
                 auto key_str = static_cast<std::string>(key);
@@ -661,7 +639,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 
                 // Don't allow reserved field names
@@ -671,7 +649,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "Cannot index reserved field: "s + key_str}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 
                 keys.push_back(key_str);
@@ -705,7 +683,7 @@ private:
                     {"error", "Internal Server Error"s},
                     {"message", "Failed to retrieve index configuration after update"s}
                 };
-                return std::make_tuple(http_status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             auto result_document = db_documents.get<xson::object::array>()[0];
@@ -724,10 +702,10 @@ private:
             auto response_headers = ::http::headers{};
             response_headers.set("location"s, "/_db/"s + collection_name);
             
-            return std::make_tuple(http_status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
+            return std::make_tuple(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
         };
 
-        auto put_index_middlewares = build_middleware_chain(http_method_put, "PUT_INDEX"sv, "PUT_INDEX_ERROR"sv, true);
+        auto put_index_middlewares = build_middleware_chain(method_put, "PUT_INDEX"sv, "PUT_INDEX_ERROR"sv, true);
         m_server.put("/_db/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(put_index_handler, put_index_middlewares));
@@ -742,7 +720,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "Request body is required"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             const auto uri = ::http::uri{request};
@@ -755,7 +733,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "Request body must contain 'keys' field with array of field names"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             // Extract and validate keys
@@ -766,7 +744,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "'keys' must be an array of field names"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             const auto keys_array = keys_value.get<xson::object::array>();
@@ -776,7 +754,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "'keys' array cannot be empty"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             // Extract collection name from path
@@ -816,7 +794,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "All keys must be strings"s}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 
                 auto key_str = static_cast<std::string>(key);
@@ -828,7 +806,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 
                 // Don't allow reserved field names
@@ -838,7 +816,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "Cannot index reserved field: "s + key_str}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
                 
                 // Only add if not already in existing keys (deduplicate)
@@ -866,7 +844,7 @@ private:
                     
                     auto response_headers = ::http::headers{};
                     response_headers.set("location"s, "/_db/"s + collection_name);
-                    return std::make_tuple(http_status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
+                    return std::make_tuple(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
                 }
                 else
                 {
@@ -875,7 +853,7 @@ private:
                         {"error", "Bad Request"s},
                         {"message", "All specified keys already exist or no keys to add"s}
                     };
-                    return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                    return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
                 }
             }
             
@@ -900,7 +878,7 @@ private:
                     {"error", "Internal Server Error"s},
                     {"message", "Failed to retrieve index configuration after update"s}
                 };
-                return std::make_tuple(http_status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             auto result_document = db_documents.get<xson::object::array>()[0];
@@ -917,10 +895,10 @@ private:
             response_headers.set("location"s, "/_db/"s + collection_name);
             
             // Return 200 OK for update (PATCH is always an update operation)
-            return std::make_tuple(http_status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
+            return std::make_tuple(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
         };
 
-        auto patch_index_middlewares = build_middleware_chain(http_method_patch, "PATCH_INDEX"sv, "PATCH_INDEX_ERROR"sv, true);
+        auto patch_index_middlewares = build_middleware_chain(method_patch, "PATCH_INDEX"sv, "PATCH_INDEX_ERROR"sv, true);
         m_server.patch("/_db/[a-z][a-z0-9]*"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(patch_index_handler, patch_index_middlewares));
@@ -937,7 +915,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "Request body is required"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             const auto uri = ::http::uri{request};
@@ -977,7 +955,7 @@ private:
                             {"collection", collection},
                             {"id", id}
                         };
-                        return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
+                        return std::make_tuple(status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 }
                 
@@ -995,7 +973,7 @@ private:
                             {"collection", collection},
                             {"id", id}
                         };
-                        return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
+                        return std::make_tuple(status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 }
             }
@@ -1022,7 +1000,7 @@ private:
                 response_headers.set("content-location"s, resource_path);
                 
                 // Return 200 OK for update
-                return std::make_tuple(http_status_ok, xson::json::stringify(document), std::make_optional(response_headers));
+                return std::make_tuple(::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers));
             }
             else
             {
@@ -1040,11 +1018,11 @@ private:
                 // Add Location header for newly created resource
                 response_headers.set("location"s, resource_path);
                 
-                return std::make_tuple(http_status_created, xson::json::stringify(document), std::make_optional(response_headers));
+                return std::make_tuple(status_created, xson::json::stringify(document), std::make_optional(response_headers));
             }
         };
 
-        auto put_document_middlewares = build_middleware_chain(http_method_put, "PUT_DOCUMENT"sv, "PUT_DOCUMENT_ERROR"sv, true);
+        auto put_document_middlewares = build_middleware_chain(method_put, "PUT_DOCUMENT"sv, "PUT_DOCUMENT_ERROR"sv, true);
         m_server.put("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(put_document_handler, put_document_middlewares));
@@ -1060,7 +1038,7 @@ private:
                     {"error", "Bad Request"s},
                     {"message", "Request body is required"s}
                 };
-                return std::make_tuple(http_status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{});
             }
             
             const auto uri = ::http::uri{request};
@@ -1093,7 +1071,7 @@ private:
                             {"collection", collection},
                             {"id", id}
                         };
-                        return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
+                        return std::make_tuple(status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 }
                 
@@ -1111,7 +1089,7 @@ private:
                             {"collection", collection},
                             {"id", id}
                         };
-                        return std::make_tuple(http_status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
+                        return std::make_tuple(status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{});
                     }
                 }
             }
@@ -1150,10 +1128,10 @@ private:
                 response_headers.set("etag"s, new_etag);
             }
             
-            return std::make_tuple(http_status_ok, xson::json::stringify(documents), std::make_optional(response_headers));
+            return std::make_tuple(::http::status_ok, xson::json::stringify(documents), std::make_optional(response_headers));
         };
 
-        auto patch_document_middlewares = build_middleware_chain(http_method_patch, "PATCH_DOCUMENT"sv, "PATCH_DOCUMENT_ERROR"sv, true);
+        auto patch_document_middlewares = build_middleware_chain(method_patch, "PATCH_DOCUMENT"sv, "PATCH_DOCUMENT_ERROR"sv, true);
         m_server.patch("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(patch_document_handler, patch_document_middlewares));
@@ -1176,14 +1154,14 @@ private:
                     {"collection", ctx.collection},
                     {"id", id}
                 };
-                return std::make_tuple(http_status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
+                return std::make_tuple(status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
             }
 
             // Return 204 No Content for successful deletion
-            return std::make_tuple(http_status_no_content, ""s, std::optional<::http::headers>{});
+            return std::make_tuple(status_no_content, ""s, std::optional<::http::headers>{});
         };
 
-        auto delete_document_middlewares = build_middleware_chain(http_method_delete, "DELETE_DOCUMENT"sv, "DELETE_DOCUMENT_ERROR"sv, false);
+        auto delete_document_middlewares = build_middleware_chain(method_delete, "DELETE_DOCUMENT"sv, "DELETE_DOCUMENT_ERROR"sv, false);
         m_server.destroy("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(delete_document_handler, delete_document_middlewares));
@@ -1198,10 +1176,10 @@ private:
             const auto guard = std::lock_guard{m_engine};
             m_engine.collection(uri.path[1]);
             m_engine.destroy(selector, documents);
-            return std::make_tuple(http_status_ok, xson::json::stringify(documents), std::optional<::http::headers>{});
+            return std::make_tuple(::http::status_ok, xson::json::stringify(documents), std::optional<::http::headers>{});
         };
 
-        auto delete_first_middlewares = build_middleware_chain(http_method_delete, "DELETE_FIRST"sv, "DELETE_FIRST_ERROR"sv, false);
+        auto delete_first_middlewares = build_middleware_chain(method_delete, "DELETE_FIRST"sv, "DELETE_FIRST_ERROR"sv, false);
         m_server.destroy("/[a-z]+\\?\\$top"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(delete_first_handler, delete_first_middlewares));
@@ -1225,10 +1203,10 @@ private:
                 response["@odata.context"s] = "/$metadata#ReindexResult"s;
             }
 
-            return std::make_tuple(http_status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
+            return std::make_tuple(status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
         };
 
-        auto reindex_middlewares = build_middleware_chain(http_method_get, "REINDEX"sv, "REINDEX_ERROR"sv, false);
+        auto reindex_middlewares = build_middleware_chain(method_get, "REINDEX"sv, "REINDEX_ERROR"sv, false);
         m_server.get("/_reindex"s).response_with_headers(
             "application/json"sv,
             ::http::wrap(reindex_handler, reindex_middlewares));

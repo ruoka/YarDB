@@ -13,6 +13,7 @@ namespace yar::http::helpers {
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
+using namespace ::http;  // HTTP constants and types from net::http
 
 // String conversion utilities
 inline auto stoll(std::string_view sv)
@@ -376,7 +377,7 @@ inline auto not_acceptable_response()
         {"error", "Not Acceptable"s},
         {"message", "Only application/json is supported"s}
     };
-    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error));
+    return std::make_tuple(status_not_acceptable, xson::json::stringify(error));
 }
 
 inline auto not_acceptable_response_with_headers()
@@ -385,7 +386,7 @@ inline auto not_acceptable_response_with_headers()
         {"error", "Not Acceptable"s},
         {"message", "Only application/json is supported"s}
     };
-    return std::make_tuple("406 Not Acceptable"s, xson::json::stringify(error), std::optional<::http::headers>{});
+    return std::make_tuple(status_not_acceptable, xson::json::stringify(error), std::optional<::http::headers>{});
 }
 
 // Query parameter parsing

@@ -4,9 +4,9 @@ import xson;
 
 namespace {
 
-auto make_primary_key   = [](const xson::object::value& v){return std::get<xson::integer_type>(v);};
+auto make_primary_key   = [](const xson::value& v){return std::get<xson::integer_type>(v);};
 
-auto make_secondary_key = [](const xson::object::value& v){return xson::to_string(v);};
+auto make_secondary_key = [](const xson::value& v){return xson::to_string(v);};
 
 template <typename T, typename F>
 yar::db::index_view query_analysis(const yar::db::object& selector, const T& keys, F make_key)
@@ -55,7 +55,7 @@ yar::db::index_view query_analysis(const yar::db::object& selector, const T& key
         std::ranges::advance(itr, std::min<xson::integer_type>(n, keys.size()));
         begin = itr.base();
     }
-    else // if(std::holds_alternative<typename T::mapped_type>((db::object::value)selector)) // FIXME
+    else // if(std::holds_alternative<typename T::mapped_type>((db::object::primitive)selector)) // FIXME
     {
         const auto key = make_key(selector);
         std::tie(begin,end) = keys.equal_range(key);

@@ -104,8 +104,10 @@ auto test_set()
             require_true(0u == documents.size());
         };
 
-        section("Update1ByID") = [test_file]
+        section("Update1ByID") = []
         {
+            const auto test_file = "./engine_update1_test.db";
+            const auto setup = fixture{test_file};
             auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 4}, {"D"s, 5}, {"E"s, 6}},
@@ -122,8 +124,10 @@ auto test_set()
             require_true(documents[0].match(document2));
         };
 
-        section("Update2ByValue") = [test_file]
+        section("Update2ByValue") = []
         {
+            const auto test_file = "./engine_update2_test.db";
+            const auto setup = fixture{test_file};
             auto engine = yar::db::engine{test_file};
             auto document1 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},
                 document2 = object{{"A"s, 1}, {"B"s, 2}, {"C"s, 3}},

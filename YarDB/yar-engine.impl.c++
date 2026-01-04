@@ -279,8 +279,8 @@ bool yar::db::engine::update(const yar::db::object& selector, const yar::db::obj
             m_storage.seekp(position, m_storage.beg);
             m_storage << yar::db::updated;
 
-            auto new_document = updates;
-            new_document += std::move(old_document);
+            auto new_document = std::move(old_document);
+            new_document += updates;
 
             m_storage.clear();
             m_storage.seekp(0, m_storage.end);

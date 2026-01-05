@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
 RUN set -ex && \
     apt-get update && \
@@ -7,7 +7,7 @@ RUN set -ex && \
 
 RUN set -ex && \
     wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-21 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
+    echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends git cmake make clang-21 lldb-21 lld-21 libc++-21-dev libc++abi-21-dev libssl-dev file && \
     rm -rf /var/lib/apt/lists/*

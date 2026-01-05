@@ -1,0 +1,290 @@
+export module yar:details;
+import :constants;
+import :engine;
+import std;
+import net;
+import xson;
+
+// General HTTP server helper functions
+// This module contains utilities that are not specific to OData
+
+export namespace yar::http::details {
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+using namespace net;
+using namespace ::http;  // HTTP constants and types from net::http
+
+// Collection name validation
+inline auto validate_collection_name(std::string_view collection_name)
+{
+    if(collection_name.empty())
+        throw std::invalid_argument{"Collection name cannot be empty"};
+    
+    if(collection_name.size() > yar::db::max_collection_name_length)
+        throw std::invalid_argument{"Collection name too long (max "s + std::to_string(yar::db::max_collection_name_length) + " chars)"};
+    
+    // Must start with a letter
+    if(collection_name[0] < 'a' || collection_name[0] > 'z')
+        throw std::invalid_argument{"Collection name must start with a lowercase letter"};
+    
+    // Must contain only lowercase letters, digits, and underscores
+    for(auto c : collection_name)
+    {
+        if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+            throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
+    }
+    
+    return std::string{collection_name};
+}
+
+inline auto not_acceptable_response()
+{
+    auto error = xson::object{
+        {"error", "Not Acceptable"s},
+        {"message", "Only application/json is supported"s}
+    };
+    return std::make_pair(status_not_acceptable, xson::json::stringify(error));
+}
+
+inline ::http::response_with_headers not_acceptable_response_with_headers()
+{
+    auto error = xson::object{
+        {"error", "Not Acceptable"s},
+        {"message", "Only application/json is supported"s}
+    };
+    return {status_not_acceptable, xson::json::stringify(error), std::optional<::http::headers>{}};
+}
+
+// Query parameter parsing
+inline auto parse_comma_separated_list(std::string_view list_value)
+{
+    auto fields = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    
+    while(true)
+    {
+        if(fields.size() >= yar::db::max_query_fields)
+            throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(yar::db::max_query_fields) + ")"};
+        
+        auto pos = list_value.find(',', start);
+        if(pos == std::string_view::npos)
+        {
+            auto field = utils::trim(list_value.substr(start));
+            if(!field.empty())
+                fields.push_back(field);
+            break;
+        }
+        auto field = utils::trim(list_value.substr(start, pos - start));
+        if(!field.empty())
+            fields.push_back(field);
+        start = pos + 1;
+    }
+    
+    return fields;
+}
+
+// Handler context helper - encapsulates common handler setup
+// Provides URI parsing, collection validation, and engine lock guard
+struct handler_context {
+    const ::http::uri uri;
+    const std::string collection;
+    std::lock_guard<utils::lockable<yar::db::engine>> guard;
+    
+    handler_context(std::string_view request, utils::lockable<yar::db::engine>& engine)
+        : uri{request}
+        , collection{validate_collection_name(uri.path[1])}
+        , guard{engine}
+    {
+        engine.collection(collection);
+    }
+};
+
+
+// Error response helper - creates standardized error responses
+template<typename Result>
+inline auto make_error_response(const std::string& status, const std::string& error_type, const std::string& message) -> Result
+{
+    auto error = xson::object{
+        {"error", error_type},
+        {"message", message}
+    };
+    
+    if constexpr(std::is_same_v<Result, ::http::response_with_headers>)
+        return {status, xson::json::stringify(error), std::optional<::http::headers>{}};
+    else
+        return std::make_pair(status, xson::json::stringify(error));
+}
+
+// Specialized versions for common error types
+inline ::http::response_with_headers make_error_response_with_headers(const std::string& status, const std::string& error_type, const std::string& message)
+{
+    return make_error_response<::http::response_with_headers>(status, error_type, message);
+}
+
+inline auto make_error_response_simple(const std::string& status, const std::string& error_type, const std::string& message)
+{
+    return make_error_response<std::tuple<std::string, std::string>>(status, error_type, message);
+}
+
+// Generate ETag from metadata position
+inline auto generate_etag(std::int64_t position)
+{
+    return "\""s + std::to_string(position) + "\""s;
+}
+
+// Format HTTP date (RFC 1123 format)
+inline auto format_http_date(const std::chrono::system_clock::time_point& timestamp)
+{
+    return utils::rfc1123_legacy(timestamp);
+}
+
+// Check If-Modified-Since header (for GET conditional requests)
+// Returns: std::nullopt if header not present, true if modified, false if not modified
+inline auto check_if_modified_since(const ::http::headers& headers, const std::chrono::system_clock::time_point& timestamp)
+{
+    using namespace std::string_literals;
+    using namespace std::chrono;
+    if(!headers.contains("if-modified-since"s))
+        return std::optional<bool>{};
+    
+    try
+    {
+        const auto if_modified_since_str = headers["if-modified-since"s];
+        // Parse RFC 1123 HTTP date format
+        const auto client_time = utils::parse_rfc1123_date(if_modified_since_str);
+        // Round timestamp to seconds for comparison (HTTP dates are second-precision)
+        // This ensures that timestamps formatted and parsed back match correctly
+        const auto timestamp_seconds = floor<seconds>(timestamp);
+        const auto client_time_seconds = floor<seconds>(client_time);
+        // Document is modified if timestamp is after client's time
+        return std::make_optional(timestamp_seconds > client_time_seconds);
+    }
+    catch(const std::exception&)
+    {
+        // Invalid date format - treat as modified (return fresh content)
+        return std::make_optional(true);
+    }
+}
+
+// Check If-Unmodified-Since header (for PUT/PATCH/DELETE conditional requests)
+// Returns: std::nullopt if header not present, true if unmodified, false if modified
+inline auto check_if_unmodified_since(const ::http::headers& headers, const std::chrono::system_clock::time_point& timestamp)
+{
+    using namespace std::string_literals;
+    using namespace std::chrono;
+    if(!headers.contains("if-unmodified-since"s))
+        return std::optional<bool>{};
+    
+    try
+    {
+        const auto if_unmodified_since_str = headers["if-unmodified-since"s];
+        // Parse RFC 1123 HTTP date format
+        const auto client_time = utils::parse_rfc1123_date(if_unmodified_since_str);
+        // Round timestamp to seconds for comparison (HTTP dates are second-precision)
+        // This ensures that timestamps formatted and parsed back match correctly
+        const auto timestamp_seconds = floor<seconds>(timestamp);
+        const auto client_time_seconds = floor<seconds>(client_time);
+        // Document is unmodified if timestamp is before or equal to client's time
+        return std::make_optional(timestamp_seconds <= client_time_seconds);
+    }
+    catch(const std::exception&)
+    {
+        // Invalid date format - treat as no match (precondition fails)
+        return std::make_optional(false);
+    }
+}
+
+// Check If-Match header (for PUT/PATCH/DELETE conditional requests)
+// Returns: std::nullopt if header not present, true if ETag matches, false if no match
+inline auto check_if_match(const ::http::headers& headers, const std::string& etag)
+{
+    using namespace std::string_literals;
+    if(!headers.contains("if-match"s))
+        return std::optional<bool>{};
+    
+    const auto if_match_value = headers["if-match"s];
+    // If-Match can be "*" (match any) or a specific ETag
+    if(if_match_value == "*"s)
+        return std::make_optional(true);
+    
+    // Compare ETags (remove quotes if present)
+    auto server_etag = etag;
+    auto client_etag = std::string{if_match_value};
+    
+    // Remove quotes for comparison
+    if(server_etag.size() >= 2 && server_etag.front() == '"' && server_etag.back() == '"')
+        server_etag = server_etag.substr(1, server_etag.size() - 2);
+    if(client_etag.size() >= 2 && client_etag.front() == '"' && client_etag.back() == '"')
+        client_etag = client_etag.substr(1, client_etag.size() - 2);
+    
+    return std::make_optional(server_etag == client_etag);
+}
+
+// Check If-None-Match header (for GET conditional requests)
+// Returns: std::nullopt if header not present, true if ETag doesn't match, false if matches
+inline auto check_if_none_match(const ::http::headers& headers, const std::string& etag)
+{
+    using namespace std::string_literals;
+    if(!headers.contains("if-none-match"s))
+        return std::optional<bool>{};
+    
+    const auto if_none_match_value = headers["if-none-match"s];
+    // If-None-Match can be "*" (match any) or a specific ETag
+    if(if_none_match_value == "*"s)
+        return std::make_optional(false); // "*" means match any, so return false (not modified)
+    
+    // Compare ETags (remove quotes if present)
+    auto server_etag = etag;
+    auto client_etag = std::string{if_none_match_value};
+    
+    // Remove quotes for comparison
+    if(server_etag.size() >= 2 && server_etag.front() == '"' && server_etag.back() == '"')
+        server_etag = server_etag.substr(1, server_etag.size() - 2);
+    if(client_etag.size() >= 2 && client_etag.front() == '"' && client_etag.back() == '"')
+        client_etag = client_etag.substr(1, client_etag.size() - 2);
+    
+    // If-None-Match: return true if NOT matching (document is modified)
+    return std::make_optional(server_etag != client_etag);
+}
+
+// Parse query parameters from URI into a map
+inline auto parse_query_params(const ::http::uri& uri)
+{
+    auto params = std::map<std::string, std::string>{};
+    
+    // Get query string from URI
+    const auto query_str = static_cast<std::string_view>(uri.query);
+    if(query_str.empty())
+        return params;
+    
+    // Parse query string: key1=value1&key2=value2
+    auto start = std::size_t{0};
+    while(start < query_str.size())
+    {
+        auto eq_pos = query_str.find('=', start);
+        if(eq_pos == std::string_view::npos)
+            break;
+        
+        auto key = utils::trim(query_str.substr(start, eq_pos - start));
+        start = eq_pos + 1;
+        
+        auto amp_pos = query_str.find('&', start);
+        auto value = utils::trim(query_str.substr(start, amp_pos == std::string_view::npos ? query_str.size() - start : amp_pos - start));
+        
+        if(!key.empty())
+        {
+            // URL decode both key and value
+            params[net::url_decode(key)] = net::url_decode(value);
+        }
+        
+        if(amp_pos == std::string_view::npos)
+            break;
+        start = amp_pos + 1;
+    }
+    
+    return params;
+}
+
+} // namespace yar::http::details
+

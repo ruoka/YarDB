@@ -21,12 +21,8 @@ stamps/
 *.deps
 
 # Executables (covered by build-*/bin/ pattern above)
-# Specific executables listed for clarity, but build-*/bin/ should catch them
-yardb
-yarsh
-yarproxy
-yarexport
-test_runner
+# Removed specific executable names to avoid matching substrings in source files
+# (e.g., "yardb" was matching "yar-details.c++m")
 tools/cb
 
 ###############################################################################

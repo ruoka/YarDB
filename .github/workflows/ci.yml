@@ -46,10 +46,10 @@ jobs:
       - name: Show compiler version
         run: clang++ --version
 
-      - name: Build project (${{ matrix.config }})
+      - name: Build project
         run: ./tools/CB.sh ${{ matrix.config }} build
 
-      - name: Run tests with JSONL output (${{ matrix.config }})
+      - name: Run tests with JSONL output
         run: |
           set -euo pipefail
           ./tools/CB.sh ${{ matrix.config }} test -- --output=jsonl > test_results_${{ matrix.config }}.jsonl

@@ -4,7 +4,7 @@ inputs:
   packages:
     description: "Space-separated apt packages to install (default includes libc++, clang, lld, lldb, jq)"
     required: false
-    default: "libc++-21-dev libc++abi-21-dev clang-21 lld-21 lldb-21 jq libssl-dev"
+    default: "libc++-21-dev libc++abi-21-dev clang-21 lld-21 lldb-21 jq libssl-dev clang-tools-21"
 
 runs:
   using: "composite"
@@ -19,7 +19,8 @@ runs:
           /usr/bin/clang++-21
           /usr/bin/lld-21
           /usr/bin/lldb-21
-        key: llvm-21-ubuntu-${{ runner.arch }}-2025-v5
+          /usr/bin/clang-tidy-21
+        key: llvm-21-ubuntu-${{ runner.arch }}-2025-v1
         restore-keys: |
           llvm-21-ubuntu-${{ runner.arch }}-
           llvm-21-ubuntu-

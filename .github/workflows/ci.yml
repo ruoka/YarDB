@@ -46,6 +46,20 @@ jobs:
       - name: Show compiler version
         run: clang++ --version
 
+      - name: Diagnostic - Check yar-details file and module discovery
+        run: |
+          echo "=== Checking yar-details.c++m file ==="
+          ls -la YarDB/yar-details.c++m || echo "ERROR: yar-details.c++m not found"
+          echo ""
+          echo "=== All yar-*.c++m files ==="
+          ls -la YarDB/yar-*.c++m || echo "No yar-*.c++m files found"
+          echo ""
+          echo "=== Build system module discovery (list) ==="
+          ./tools/CB.sh ${{ matrix.config }} list | grep -E "yar.*details|yar.*odata" || echo "No yar:details or yar:odata modules found in list"
+          echo ""
+          echo "=== First 20 yar modules in build order ==="
+          ./tools/CB.sh ${{ matrix.config }} list | grep -E "yar" | head -20 || echo "No yar modules found"
+
       - name: Build project
         run: ./tools/CB.sh ${{ matrix.config }} build
 

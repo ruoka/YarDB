@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/cpp
 {
-	"name": "clang++-20",
+	"name": "clang++-21",
 	"build": {
 		"dockerfile": "Dockerfile"
 	},
@@ -23,7 +23,7 @@
 		}
 	},
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "clang++-20 -v && ls -lh ~/clang-modules-cache/std.pcm 2>/dev/null || echo 'Note: std.pcm will be created during container build'",
+	"postCreateCommand": "clang++-21 -v && ls -lh ~/clang-modules-cache/std.pcm 2>/dev/null || echo 'Note: std.pcm will be created during container build'",
 
 	// Configure tool-specific properties.
 	"customizations": {

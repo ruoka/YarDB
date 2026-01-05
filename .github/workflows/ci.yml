@@ -35,21 +35,21 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-      - name: Cache LLVM 20 + libc++
+      - name: Cache LLVM 21 + libc++
         id: cache-llvm
         uses: actions/cache@v4
         with:
           path: |
-            /usr/lib/llvm-20
-            /usr/bin/clang-20
-            /usr/bin/clang++-20
-            /usr/bin/lld-20
-            /usr/bin/lldb-20
-          key: llvm-20-ubuntu-${{ runner.arch }}-2025-v4
+            /usr/lib/llvm-21
+            /usr/bin/clang-21
+            /usr/bin/clang++-21
+            /usr/bin/lld-21
+            /usr/bin/lldb-21
+          key: llvm-21-ubuntu-${{ runner.arch }}-2025-v4
           restore-keys: |
-            llvm-20-ubuntu-${{ runner.arch }}-
-            llvm-20-ubuntu-
-            llvm-20-
+            llvm-21-ubuntu-${{ runner.arch }}-
+            llvm-21-ubuntu-
+            llvm-21-
 
       - name: Install LLVM toolchain
         if: steps.cache-llvm.outputs.cache-hit != 'true'
@@ -57,20 +57,20 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y wget gnupg ca-certificates lsb-release software-properties-common
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg
-          echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/apt-llvm.org.list > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/apt-llvm.org.list > /dev/null
           sudo apt-get update -y
-          sudo apt-get install -y libc++-20-dev libc++abi-20-dev clang-20 lldb-20 lld-20 libssl-dev jq
-          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-20   100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-20 100
-          sudo update-alternatives --install /usr/bin/lld     lld     /usr/bin/lld-20     100
+          sudo apt-get install -y libc++-21-dev libc++abi-21-dev clang-21 lldb-21 lld-21 libssl-dev jq
+          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-21   100
+          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 100
+          sudo update-alternatives --install /usr/bin/lld     lld     /usr/bin/lld-21     100
 
       - name: Verify std.cppm location
         run: |
-          if [ -f /usr/lib/llvm-20/share/libc++/v1/std.cppm ]; then
-            echo "std.cppm found at /usr/lib/llvm-20/share/libc++/v1/std.cppm"
+          if [ -f /usr/lib/llvm-21/share/libc++/v1/std.cppm ]; then
+            echo "std.cppm found at /usr/lib/llvm-21/share/libc++/v1/std.cppm"
           else
             echo "Warning: std.cppm not found at expected location"
-            find /usr/lib/llvm-20 -name "std.cppm" 2>/dev/null || echo "std.cppm not found anywhere"
+            find /usr/lib/llvm-21 -name "std.cppm" 2>/dev/null || echo "std.cppm not found anywhere"
           fi
 
       - name: Build project (${{ matrix.config }})
@@ -130,35 +130,35 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-      - name: Cache LLVM 20 and static analysis tools
+      - name: Cache LLVM 21 and static analysis tools
         id: cache-tools
         uses: actions/cache@v4
         with:
           path: |
-            /usr/lib/llvm-20
-            /usr/bin/clang-20
-            /usr/bin/clang++-20
-            /usr/bin/clang-tidy-20
-            /usr/bin/run-clang-tidy-20
+            /usr/lib/llvm-21
+            /usr/bin/clang-21
+            /usr/bin/clang++-21
+            /usr/bin/clang-tidy-21
+            /usr/bin/run-clang-tidy-21
             /usr/bin/cppcheck
-          key: llvm-20-tools-ubuntu-${{ runner.arch }}-2025-v4
+          key: llvm-21-tools-ubuntu-${{ runner.arch }}-2025-v4
           restore-keys: |
-            llvm-20-tools-ubuntu-${{ runner.arch }}-
-            llvm-20-tools-ubuntu-
-            llvm-20-tools-
+            llvm-21-tools-ubuntu-${{ runner.arch }}-
+            llvm-21-tools-ubuntu-
+            llvm-21-tools-
 
       - name: Install LLVM toolchain and analysis tools
         if: steps.cache-tools.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y clang-20 clang-tools-20 cppcheck
+          sudo apt-get install -y clang-21 clang-tools-21 cppcheck
 
       - name: Run clang-tidy on core files
         run: |
           # Run clang-tidy on key source files
           find . -name "*.c++" -o -name "*.c++m" | head -5 | xargs -I {} sh -c '
             echo "Analyzing {}"
-            clang-tidy-20 {} -- -std=c++23 -I/usr/lib/llvm-20/include/c++/v1 2>/dev/null || true
+            clang-tidy-21 {} -- -std=c++23 -I/usr/lib/llvm-21/include/c++/v1 2>/dev/null || true
           '
 
       - name: Run cppcheck

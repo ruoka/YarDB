@@ -2,7 +2,3 @@ export module yar;
 export import :httpd;
 export import :engine;
 export import :metadata;
-export import :details;
-export import :odata;
-export import :constants;
-export import :index;

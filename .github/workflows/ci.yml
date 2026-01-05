@@ -31,6 +31,16 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
+      - name: Verify commit and branch
+        run: |
+          echo "=== CI Build Information ==="
+          echo "Commit SHA: $(git rev-parse HEAD)"
+          echo "Commit SHA (short): $(git rev-parse --short HEAD)"
+          echo "Commit message: $(git log -1 --pretty=%B)"
+          echo "Branch: $(git branch --show-current || echo ${{ github.ref_name }})"
+          echo "Commit date: $(git log -1 --format=%ci)"
+          echo ""
+
       - name: Setup LLVM (shared)
         uses: ./.github/actions/setup-llvm
 

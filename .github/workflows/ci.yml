@@ -35,34 +35,10 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-      - name: Cache LLVM 21 + libc++
-        id: cache-llvm
-        uses: actions/cache@v4
+      - name: Setup LLVM 21 toolchain
+        uses: ./.github/actions/setup-llvm
         with:
-          path: |
-            /usr/lib/llvm-21
-            /usr/bin/clang-21
-            /usr/bin/clang++-21
-            /usr/bin/lld-21
-            /usr/bin/lldb-21
-          key: llvm-21-ubuntu-${{ runner.arch }}-2025-v4
-          restore-keys: |
-            llvm-21-ubuntu-${{ runner.arch }}-
-            llvm-21-ubuntu-
-            llvm-21-
-
-      - name: Install LLVM toolchain
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y wget gnupg ca-certificates lsb-release software-properties-common
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg
-          echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/apt-llvm.org.list > /dev/null
-          sudo apt-get update -y
-          sudo apt-get install -y libc++-21-dev libc++abi-21-dev clang-21 lldb-21 lld-21 libssl-dev jq
-          sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-21   100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 100
-          sudo update-alternatives --install /usr/bin/lld     lld     /usr/bin/lld-21     100
+          packages: "libc++-21-dev libc++abi-21-dev clang-21 lld-21 lldb-21 jq libssl-dev"
 
       - name: Verify std.cppm location
         run: |
@@ -130,28 +106,10 @@ jobs:
           fetch-depth: 1
           submodules: recursive
 
-      - name: Cache LLVM 21 and static analysis tools
-        id: cache-tools
-        uses: actions/cache@v4
+      - name: Setup LLVM 21 toolchain with analysis tools
+        uses: ./.github/actions/setup-llvm
         with:
-          path: |
-            /usr/lib/llvm-21
-            /usr/bin/clang-21
-            /usr/bin/clang++-21
-            /usr/bin/clang-tidy-21
-            /usr/bin/run-clang-tidy-21
-            /usr/bin/cppcheck
-          key: llvm-21-tools-ubuntu-${{ runner.arch }}-2025-v4
-          restore-keys: |
-            llvm-21-tools-ubuntu-${{ runner.arch }}-
-            llvm-21-tools-ubuntu-
-            llvm-21-tools-
-
-      - name: Install LLVM toolchain and analysis tools
-        if: steps.cache-tools.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y clang-21 clang-tools-21 cppcheck
+          packages: "libc++-21-dev libc++abi-21-dev clang-21 clang-tools-21 cppcheck lld-21 lldb-21 jq libssl-dev"
 
       - name: Run clang-tidy on core files
         run: |

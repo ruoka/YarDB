@@ -229,10 +229,12 @@ The RESTful API follows OData principles and supports:
 - `PATCH /{collection}/{id}` - Update document
 - `DELETE /{collection}/{id}` - Delete document
 - `HEAD /{collection}` or `/{collection}/{id}` - Get headers only
+- `GET /$metadata` - Get OData 4.01 JSON CSDL service metadata
 
 ### Advanced Features
 
 - **OData Query Parameters**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$expand`
+- **OData Metadata Endpoint**: `GET /$metadata` returns OData 4.01 JSON CSDL metadata with inferred schemas
 - **Conditional Requests**: `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
 - **ETag Support**: Resource versioning for caching and optimistic locking
 - **Last-Modified**: Timestamp-based conditional requests

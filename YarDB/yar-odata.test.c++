@@ -416,6 +416,115 @@ auto register_odata_tests()
         };
     };
 
+    // Test metadata generation with engine
+    scenario("OData metadata generation from collections, [yardb]") = []
+    {
+        given("Database with collections containing various field types") = []
+        {
+            const auto test_file = "./metadata_test.db"s;
+            
+            when("Metadata is generated from collections") = [test_file]
+            {
+                // Remove any existing test file
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+                
+                {
+                    auto engine = yar::db::engine{test_file};
+                    
+                    // Create collection with various field types
+                    engine.collection("users"s);
+                    auto user_doc = xson::object{
+                        {"_id"s, 1ll},
+                        {"name"s, "John"s},
+                        {"age"s, 30ll},
+                        {"salary"s, 50000.5},
+                        {"active"s, true}
+                    };
+                    engine.create(user_doc);
+                    
+                    // Create another collection
+                    engine.collection("orders"s);
+                    auto order_doc = xson::object{
+                        {"_id"s, 1ll},
+                        {"userId"s, 1ll},
+                        {"total"s, 99.99}
+                    };
+                    engine.create(order_doc);
+                    
+                    // Generate metadata (no locking needed in single-threaded test)
+                    auto metadata = yar::http::odata::generate_metadata(engine);
+                    
+                    then("Metadata contains correct structure") = [metadata]
+                    {
+                        // Check version and container
+                        require_eq(metadata["$Version"s].template get<std::string>(), "4.01"s);
+                        require_eq(metadata["$EntityContainer"s].template get<std::string>(), "DefaultContainer"s);
+                        
+                        // Check EntitySets
+                        require_true(metadata.has("EntitySets"s));
+                        const auto& entity_sets = metadata["EntitySets"s].get<xson::object::array>();
+                        require_true(entity_sets.size() >= 2u); // users and orders (may have more)
+                        
+                        // Check EntityTypes
+                        require_true(metadata.has("EntityTypes"s));
+                        const auto& entity_types = metadata["EntityTypes"s].get<xson::object::array>();
+                        require_true(entity_types.size() >= 2u); // users and orders
+                        
+                        // Find users EntityType
+                        auto users_type = std::find_if(entity_types.begin(), entity_types.end(),
+                            [](const auto& t) { return t["Name"s].template get<std::string>() == "users"s; });
+                        require_true(users_type != entity_types.end());
+                        
+                        // Check users has Key
+                        require_true((*users_type).has("Key"s));
+                        
+                        // Check users has Property array
+                        require_true((*users_type).has("Property"s));
+                        const auto& users_properties = (*users_type)["Property"s].get<xson::object::array>();
+                        require_true(users_properties.size() >= 4u); // _id, name, age, salary, active (at least)
+                        
+                        // Verify _id is in properties and is non-nullable Int64
+                        auto id_prop = std::find_if(users_properties.begin(), users_properties.end(),
+                            [](const auto& p) { return p["Name"s].template get<std::string>() == "_id"s; });
+                        require_true(id_prop != users_properties.end());
+                        require_eq((*id_prop)["Type"s].template get<std::string>(), "Edm.Int64"s);
+                        const bool nullable = (*id_prop)["Nullable"s];
+                        require_eq(nullable, false);
+                        
+                        // Check name field type
+                        auto name_prop = std::find_if(users_properties.begin(), users_properties.end(),
+                            [](const auto& p) { return p["Name"s].template get<std::string>() == "name"s; });
+                        require_true(name_prop != users_properties.end());
+                        require_eq((*name_prop)["Type"s].template get<std::string>(), "Edm.String"s);
+                        
+                        // Check age field type
+                        auto age_prop = std::find_if(users_properties.begin(), users_properties.end(),
+                            [](const auto& p) { return p["Name"s].template get<std::string>() == "age"s; });
+                        require_true(age_prop != users_properties.end());
+                        require_eq((*age_prop)["Type"s].template get<std::string>(), "Edm.Int64"s);
+                        
+                        // Check salary field type
+                        auto salary_prop = std::find_if(users_properties.begin(), users_properties.end(),
+                            [](const auto& p) { return p["Name"s].template get<std::string>() == "salary"s; });
+                        require_true(salary_prop != users_properties.end());
+                        require_eq((*salary_prop)["Type"s].template get<std::string>(), "Edm.Double"s);
+                        
+                        // Check active field type
+                        auto active_prop = std::find_if(users_properties.begin(), users_properties.end(),
+                            [](const auto& p) { return p["Name"s].template get<std::string>() == "active"s; });
+                        require_true(active_prop != users_properties.end());
+                        require_eq((*active_prop)["Type"s].template get<std::string>(), "Edm.Boolean"s);
+                    };
+                }
+                
+                // Cleanup
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+            };
+        };
+    };
+
     return true;
 }
 

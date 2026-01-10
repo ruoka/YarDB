@@ -2063,6 +2063,137 @@ auto test_set()
         };
     };
 
+    test_case("GET /$metadata endpoint, [yardb]") = []
+    {
+        const auto test_file = "./metadata_endpoint_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET /$metadata returns 200 OK") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/$metadata"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto metadata = json::parse(body);
+            require_true(metadata.has("$Version"s));
+            require_eq(metadata["$Version"s].template get<string>(), "4.01"s);
+        };
+
+        section("GET /$metadata returns valid JSON CSDL") = [setup]
+        {
+            // Create collections with documents
+            make_request(setup->port(), "POST"s, "/metadatatest1"s, R"({"name":"Test User","age":25})"s);
+            make_request(setup->port(), "POST"s, "/metadatatest2"s, R"({"orderId":"123","total":99.99})"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/$metadata"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto metadata = json::parse(body);
+
+            // Check structure
+            require_eq(metadata["$Version"s].template get<string>(), "4.01"s);
+            require_eq(metadata["$EntityContainer"s].template get<string>(), "DefaultContainer"s);
+            require_true(metadata.has("EntitySets"s));
+            require_true(metadata.has("EntityTypes"s));
+
+            // Check EntitySets array
+            const auto& entity_sets = metadata["EntitySets"s].get<xson::object::array>();
+            require_false(entity_sets.empty());
+
+            // Find metadatatest1 EntitySet
+            auto test1_set = std::find_if(entity_sets.begin(), entity_sets.end(),
+                [](const auto& s) { return s["Name"s].template get<string>() == "metadatatest1"s; });
+            require_true(test1_set != entity_sets.end());
+            require_eq((*test1_set)["EntityType"s].template get<string>(), "Default.metadatatest1"s);
+
+            // Check EntityTypes array
+            const auto& entity_types = metadata["EntityTypes"s].get<xson::object::array>();
+            require_false(entity_types.empty());
+
+            // Find metadatatest1 EntityType
+            auto test1_type = std::find_if(entity_types.begin(), entity_types.end(),
+                [](const auto& t) { return t["Name"s].template get<string>() == "metadatatest1"s; });
+            require_true(test1_type != entity_types.end());
+
+            // Check it has Key with _id
+            require_true((*test1_type).has("Key"s));
+            const auto& key = (*test1_type)["Key"s].get<xson::object::array>();
+            require_false(key.empty());
+            const auto& property_ref = key[0]["PropertyRef"s].get<xson::object::array>();
+            require_eq(property_ref[0]["Name"s].template get<string>(), "_id"s);
+
+            // Check Property array exists and has _id
+            require_true((*test1_type).has("Property"s));
+            const auto& properties = (*test1_type)["Property"s].get<xson::object::array>();
+            require_false(properties.empty());
+
+            // Find _id property
+            auto id_prop = std::find_if(properties.begin(), properties.end(),
+                [](const auto& p) { return p["Name"s].template get<string>() == "_id"s; });
+            require_true(id_prop != properties.end());
+            require_eq((*id_prop)["Type"s].template get<string>(), "Edm.Int64"s);
+            const bool nullable = (*id_prop)["Nullable"s];
+            require_eq(nullable, false);
+        };
+
+        section("GET /$metadata excludes internal collections") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/$metadata"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto metadata = json::parse(body);
+
+            const auto& entity_sets = metadata["EntitySets"s].get<xson::object::array>();
+            
+            // _db collection should not be in EntitySets
+            auto db_set = std::find_if(entity_sets.begin(), entity_sets.end(),
+                [](const auto& s) { return s["Name"s].template get<string>() == "_db"s; });
+            require_true(db_set == entity_sets.end());
+
+            const auto& entity_types = metadata["EntityTypes"s].get<xson::object::array>();
+            
+            // _db collection should not be in EntityTypes
+            auto db_type = std::find_if(entity_types.begin(), entity_types.end(),
+                [](const auto& t) { return t["Name"s].template get<string>() == "_db"s; });
+            require_true(db_type == entity_types.end());
+        };
+
+        section("GET /$metadata with empty collections returns minimal schema") = [setup]
+        {
+            // Create empty collection (no documents)
+            make_request(setup->port(), "GET"s, "/emptycollection"s, ""s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/$metadata"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto metadata = json::parse(body);
+
+            // Empty collection might not appear or might have minimal schema
+            // Just verify the response is valid JSON CSDL
+            require_eq(metadata["$Version"s].template get<string>(), "4.01"s);
+            require_true(metadata.has("EntitySets"s));
+            require_true(metadata.has("EntityTypes"s));
+        };
+
+        section("GET /$metadata returns application/json content type") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/$metadata"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_true(headers.contains("content-type"s));
+            require_true(headers["content-type"s].contains("application/json"));
+        };
+    };
+
     test_case("ETag and conditional requests, [yardb]") = []
     {
         const auto test_file = "./etag_test.db";

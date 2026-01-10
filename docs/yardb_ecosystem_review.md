@@ -20,7 +20,7 @@ The YarDB ecosystem demonstrates **excellent architectural separation** across f
 - Unified testing framework (tester) used consistently across all repositories
 - Efficient binary serialization (FSON) for document storage with JSON for HTTP responses
 - Strong integration testing coverage
-- Production-ready HTTP compliance (status codes, conditional requests, OData)
+- Production-ready HTTP compliance (status codes, conditional requests, OData query parameters, OData `/$metadata` endpoint)
 
 **Key Areas for Improvement:**
 - Async I/O scalability (currently limited by select() in net4cpp)
@@ -179,7 +179,7 @@ return xson::json::stringify(response);  // RFC 8259 JSON
 - `yar:metadata` - Uses `xson::fast::encode()` for binary metadata
 - `yar:engine` - Uses FSON for document storage, JSON for HTTP responses
 - `yar:httpd` - Uses JSON for error responses and OData results
-- `yar:odata` - Uses JSON for query result serialization
+- `yar:odata` - Uses JSON for query result serialization and OData 4.01 JSON CSDL metadata (`/$metadata` endpoint)
 
 **Recommendation:** ✅ Excellent integration. xson provides efficient, dual-format serialization perfectly suited for YarDB's needs.
 
@@ -244,7 +244,7 @@ const auto _ = register_tests();
 **Clean Module Structure:**
 - `yar:engine` - Core database engine (CRUD, indexing)
 - `yar:httpd` - HTTP server integration (uses net4cpp)
-- `yar:odata` - OData protocol support
+- `yar:odata` - OData protocol support (query parameters, `/$metadata` endpoint, schema inference)
 - `yar:details` - HTTP helper utilities
 - `yar:metadata` - Document metadata handling
 - `yar:index` - Indexing implementation

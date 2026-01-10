@@ -149,6 +149,86 @@ YarDB implements OData-compliant query parameters for advanced querying:
 
 ### OData Metadata
 
+YarDB supports OData metadata in two ways:
+
+#### 1. Metadata Endpoint
+
+The `GET /$metadata` endpoint returns OData 4.01 JSON CSDL (Common Schema Definition Language) metadata describing all collections and their schemas:
+
+```
+GET /$metadata
+```
+
+Response (OData 4.01 JSON CSDL format):
+```json
+{
+  "$Version": "4.01",
+  "$EntityContainer": "DefaultContainer",
+  "EntitySets": [
+    {
+      "Name": "users",
+      "EntityType": "Default.users"
+    },
+    {
+      "Name": "orders",
+      "EntityType": "Default.orders"
+    }
+  ],
+  "EntityTypes": [
+    {
+      "Name": "users",
+      "Key": [
+        {
+          "PropertyRef": [
+            {
+              "Name": "_id"
+            }
+          ]
+        }
+      ],
+      "Property": [
+        {
+          "Name": "_id",
+          "Type": "Edm.Int64",
+          "Nullable": false
+        },
+        {
+          "Name": "name",
+          "Type": "Edm.String",
+          "Nullable": true
+        },
+        {
+          "Name": "age",
+          "Type": "Edm.Int64",
+          "Nullable": true
+        },
+        {
+          "Name": "salary",
+          "Type": "Edm.Double",
+          "Nullable": true
+        },
+        {
+          "Name": "active",
+          "Type": "Edm.Boolean",
+          "Nullable": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+The metadata endpoint automatically infers schemas from existing documents in collections. Field types are mapped as follows:
+- **Strings** → `Edm.String`
+- **Integers** → `Edm.Int64`
+- **Floating-point numbers** → `Edm.Double`
+- **Booleans** → `Edm.Boolean`
+- **Objects and arrays** → `Edm.String` (serialized as JSON strings)
+
+The `_id` field is always included as a non-nullable `Edm.Int64` key field for all entity types.
+
+#### 2. Metadata in Responses
+
 YarDB supports OData metadata formats via the `Accept` header:
 
 - **`application/json;odata=fullmetadata`** - Includes `@odata.context`, `@odata.id`, `@odata.editLink`

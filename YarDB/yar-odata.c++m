@@ -601,5 +601,133 @@ inline auto parse_orderby(std::string_view orderby_value)
     return orderby_result{std::string{field_name}, descending};
 }
 
+// OData 4.01 JSON CSDL Metadata Generation
+// Generates metadata document based on existing collections and their schemas
+
+// Infer EDM (Entity Data Model) type from xson::object value
+inline auto infer_edm_type(const xson::object& value) -> std::string
+{
+    if(value.is_null())
+        return "Edm.String"s; // Default for null
+    
+    if(value.is_string())
+        return "Edm.String"s;
+    if(value.is_integer())
+        return "Edm.Int64"s;
+    if(value.is_number())
+        return "Edm.Double"s;
+    if(value.is_boolean())
+        return "Edm.Boolean"s;
+    if(value.is_object() || value.is_array())
+        return "Edm.String"s; // Serialize complex types as JSON string
+    
+    // Fallback to String
+    return "Edm.String"s;
+}
+
+// Infer schema from a single document
+// Returns Property array with field definitions
+inline auto infer_document_schema(const xson::object& document) -> xson::object::array
+{
+    auto properties = xson::object::array{};
+    
+    // Always include _id as non-nullable Int64 key
+    properties.push_back(xson::object{
+        {"Name"s, "_id"s},
+        {"Type"s, "Edm.Int64"s},
+        {"Nullable"s, false}
+    });
+    
+    // Analyze other fields (skip _id which is already added)
+    for(const auto& [key, value] : document.get<xson::object::map>())
+    {
+        if(key == "_id"s)
+            continue; // Already added
+        
+        properties.push_back(xson::object{
+            {"Name"s, key},
+            {"Type"s, infer_edm_type(value)},
+            {"Nullable"s, true} // All fields except _id are nullable
+        });
+    }
+    
+    return properties;
+}
+
+// Infer schema from collection (use most recent document)
+// Requires engine to be locked by caller and collection to be set
+inline auto infer_collection_schema(yar::db::engine& engine) -> xson::object::array
+{
+    // Get the most recent document (first one with $top=1 as approximation)
+    auto selector = xson::object{"$top"s, 1ll};
+    auto documents = xson::object{};
+    
+    if(engine.read(selector, documents) && documents.is_array() && !documents.get<xson::object::array>().empty())
+    {
+        const auto& doc = documents.get<xson::object::array>()[0];
+        return infer_document_schema(doc);
+    }
+    
+    // No documents in collection - return empty schema with just _id
+    return xson::object::array{
+        xson::object{
+            {"Name"s, "_id"s},
+            {"Type"s, "Edm.Int64"s},
+            {"Nullable"s, false}
+        }
+    };
+}
+
+// Generate OData 4.01 JSON CSDL metadata
+// Creates complete metadata document with EntitySets and EntityTypes
+// Requires engine to be locked by caller
+export auto generate_metadata(yar::db::engine& engine) -> xson::object
+{
+    auto entity_sets = xson::object::array{};
+    auto entity_types = xson::object::array{};
+    
+    // Get all collections (returns std::vector<std::string>)
+    const auto collections_vec = engine.collections();
+    
+    for(const auto& collection_name : collections_vec)
+    {
+        // Skip internal collections
+        if(collection_name == "_db"s)
+            continue;
+        
+        // Create EntitySet
+        entity_sets.push_back(xson::object{
+            {"Name"s, collection_name},
+            {"EntityType"s, "Default."s + collection_name}
+        });
+        
+        // Infer schema and create EntityType
+        engine.collection(collection_name);
+        auto properties = infer_collection_schema(engine);
+        
+        entity_types.push_back(xson::object{
+            {"Name"s, collection_name},
+            {"Key"s, xson::object::array{
+                xson::object{
+                    {"PropertyRef"s, xson::object::array{
+                        xson::object{
+                            {"Name"s, "_id"s}
+                        }
+                    }}
+                }
+            }},
+            {"Property"s, properties}
+        });
+    }
+    
+    // Build complete metadata document
+    return xson::object{
+        {"$Version"s, "4.01"s},
+        {"$EntityContainer"s, "DefaultContainer"s},
+        {"EntitySets"s, entity_sets},
+        {"EntityTypes"s, entity_types}
+    };
+}
+
 } // namespace yar::http::odata
 

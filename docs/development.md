@@ -249,7 +249,7 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
   - `yar-httpd.test.c++` - Test fixture accessor rename (~175 call sites)
 - **Verification**: All tests pass (226/226 tests, 702/702 assertions)
 - **Impact**: Codebase now fully compliant with project coding conventions, improved consistency and maintainability
-- **Reference**: See [convention_compliance_report.md](convention_compliance_report.md) for detailed analysis
+- **Reference**: See project history and git commits for detailed analysis
 
 ### 🚧 Active Development Projects
 

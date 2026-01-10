@@ -14,16 +14,11 @@ This directory contains comprehensive project documentation organized by topic a
 - **[deployment.md](deployment.md)** - Deployment procedures and production considerations
 
 ### 📋 Proposals & Planning
-- **[handler_refactoring_proposal.md](handler_refactoring_proposal.md)** - HTTP handler code consolidation proposal
-- **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API design evaluation
-- **[test_refactoring_proposal.md](test_refactoring_proposal.md)** - ✅ **COMPLETED** Test framework conventions refactoring (Dec 2025)
-- **[convention_compliance_report.md](convention_compliance_report.md)** - ✅ **COMPLETED** C++ convention compliance review and fixes (Dec 2025)
+- **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API design evaluation and feature status
 
 ### 📁 Archive
 - **[archive/](archive/)** - Completed/historical documentation
-  - **[namespace_design_proposal.md](archive/namespace_design_proposal.md)** - ✅ **COMPLETED** namespace refactoring (implemented Dec 2025)
-  - **[index_api_proposal.md](archive/index_api_proposal.md)** - ✅ **COMPLETED** secondary indexing API (implemented Dec 2025)
-  - **[code_review.md](archive/code_review.md)** - Historical peer review from engine/index/metadata modules
+  - **[odata-metadata-plan.md](archive/odata-metadata-plan.md)** - ✅ **COMPLETED** OData /$metadata endpoint implementation (December 2025)
 
 ## 🎯 Current Development Focus
 
@@ -33,6 +28,10 @@ Based on recent architectural review, current priorities include:
 2. **📊 Observability & Monitoring** - Prometheus metrics, structured logging, health checks
 3. **🔒 TLS Proxy Implementation** - Cloud-native TLS termination approach
 4. **🌐 Net Module Modernization** - Convert to C++23 modules, remove headers
+
+## ✅ Recently Completed
+
+- **OData Metadata Endpoint** (December 2025) - Implemented `GET /$metadata` endpoint that returns OData 4.01 JSON CSDL metadata with automatically inferred schemas from existing collections. See **[archive/odata-metadata-plan.md](archive/odata-metadata-plan.md)** for implementation details.
 
 See **[development.md](development.md)** for detailed roadmap and implementation plans.
 
@@ -45,8 +44,8 @@ See **[development.md](development.md)** for detailed roadmap and implementation
 
 ### Contributing?
 1. Review **[development.md](development.md)** for development workflows
-2. Check **[code_review.md](code_review.md)** for contribution guidelines
-3. See **[project_organization.md](project_organization.md)** for code organization
+2. See **[project_organization.md](project_organization.md)** for code organization
+3. Check **[archive/](archive/)** for historical documentation and completed proposals
 
 ### Operating YarDB?
 1. Read **[programs.md](programs.md)** for detailed command documentation

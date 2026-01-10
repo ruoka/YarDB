@@ -484,6 +484,36 @@ private:
             "application/json"sv,
             ::http::middleware::wrap(list_collections_handler, list_middlewares));
 
+        // GET /$metadata - OData 4.01 JSON CSDL metadata endpoint
+        auto metadata_handler = [this]([[maybe_unused]] ::http::request_view request, 
+                                       [[maybe_unused]] ::http::body_view body, 
+                                       [[maybe_unused]] ::http::headers& headers)
+        {
+            const auto guard = std::lock_guard{m_engine};
+            
+            // Generate metadata from existing collections
+            auto metadata = yar::http::odata::generate_metadata(m_engine);
+            
+            // Return as JSON
+            return response_with_headers{
+                status_ok, 
+                xson::json::stringify(metadata), 
+                std::optional<::http::headers>{}
+            };
+        };
+
+        auto metadata_middlewares = build_middleware_chain(
+            method_get, 
+            "GET_METADATA"sv, 
+            "GET_METADATA_ERROR"sv, 
+            false
+        );
+        
+        // Route pattern: $ needs to be escaped in regex, use \\$ to match literal $
+        m_server.get("/\\$metadata"s).response_with_headers(
+            "application/json"sv,
+            ::http::middleware::wrap(metadata_handler, metadata_middlewares));
+
         // Read _id - Refactored to use middleware pattern and helper functions
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
         auto get_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)

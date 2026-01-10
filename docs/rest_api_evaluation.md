@@ -83,11 +83,14 @@
 ### 🟢 Low Priority
 
 #### OData Features
-11. **`$metadata` endpoint** - OData service metadata
-    - Implement `GET /$metadata` endpoint
-    - Return EDM (Entity Data Model) XML describing the service
-    - Include entity types, properties, and relationships
-    - **Note**: HTTP header metadata (`@odata.context`, `@odata.id`, `@odata.editLink`) is implemented, but the `GET /$metadata` endpoint is separate and not yet implemented
+11. **`$metadata` endpoint** - OData service metadata ✅ **IMPLEMENTED**
+    - ✅ Implemented `GET /$metadata` endpoint
+    - ✅ Returns OData 4.01 JSON CSDL (Common Schema Definition Language) metadata
+    - ✅ Includes entity types, properties, and relationships
+    - ✅ Automatically infers schemas from existing documents in collections
+    - ✅ Maps field types to EDM types (Edm.String, Edm.Int64, Edm.Double, Edm.Boolean)
+    - ✅ Complex types (objects/arrays) are serialized as Edm.String
+    - ✅ `_id` field is always included as non-nullable Edm.Int64 key
     - **Impact**: Enables service discovery and code generation
 
 12. **`$batch` request support** - Batch operations
@@ -117,9 +120,10 @@
     - Implement relationship navigation
     - **Impact**: RESTful relationship traversal
 
-17. **CORS Support** - Cross-Origin Resource Sharing
-    - Add CORS headers for web client access
-    - Support preflight OPTIONS requests
+17. **CORS Support** - Cross-Origin Resource Sharing ⚠️ **PARTIAL** - Configuration available
+    - ✅ CORS configuration API implemented (`configure_cors()`, `disable_cors()`)
+    - ✅ Support for allowed origins, methods, headers, credentials, max-age
+    - ⚠️ OPTIONS preflight handling - Configuration exists but needs verification
     - **Impact**: Enables browser-based clients
 
 ## Overall Assessment
@@ -250,7 +254,7 @@ All previously identified critical issues have been addressed:
 | `$count` | `$count=true` or inline count | ✅ `$count=true` returns count as JSON number | ✅ **FULLY COMPATIBLE** |
 | `$search` | `$search=keyword` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #7 |
 | `$format` | `$format=json` or `$format=xml` | ⚠️ JSON only (default) | ⚠️ **PARTIAL** - JSON only, no format selection |
-| `$metadata` | `GET /$metadata` endpoint | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #11 |
+| `$metadata` | `GET /$metadata` endpoint | ✅ Implemented | ✅ **IMPLEMENTED** - Returns OData 4.01 JSON CSDL metadata |
 | `$batch` | Batch request support | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #12 |
 
 **Recommendations:**
@@ -349,6 +353,7 @@ See the [TODO: Missing Features](#todo-missing-features-prioritized) section at 
 
 **Recently Completed:**
 - ✅ `$count` query option - Returns count as JSON number (OData compliant)
+- ✅ `GET /$metadata` endpoint - Returns OData 4.01 JSON CSDL metadata with inferred schemas from existing collections (December 2025)
 
-**Note**: HTTP header metadata (`@odata.context`, `@odata.id`, `@odata.editLink`) is implemented via `Accept` header. The `GET /$metadata` endpoint (separate service discovery endpoint) is not yet implemented.
+**Note**: HTTP header metadata (`@odata.context`, `@odata.id`, `@odata.editLink`) is implemented via `Accept` header. The `GET /$metadata` endpoint is now implemented and returns OData 4.01 JSON CSDL metadata with inferred schemas from existing collections.
 

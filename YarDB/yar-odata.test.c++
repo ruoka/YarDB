@@ -15,6 +15,14 @@ using namespace yar::http::odata;
 using namespace tester::basic;
 using namespace tester::assertions;
 
+inline auto parse_and_filter(std::string_view expr)
+{
+    const auto parsed = parse_filter(expr);
+    if(parsed.has_or())
+        throw std::runtime_error{"expected AND-only filter expression"};
+    return std::make_pair(parsed.and_selector, parsed.and_string_filters);
+}
+
 auto register_odata_tests()
 {
     using namespace tester::bdd;
@@ -190,7 +198,7 @@ auto register_odata_tests()
             {
                 then("Returns correct selector") = []
                 {
-                    const auto [selector, filters] = parse_filter("name eq 'John'"sv);
+                    const auto [selector, filters] = parse_and_filter("name eq 'John'"sv);
                     require_true(selector.has("name"s));
                     require_eq(selector["name"s].get<string>(), "John"s);
                     require_true(filters.empty());
@@ -201,7 +209,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with $gt operator") = []
                 {
-                    const auto [selector, filters] = parse_filter("age gt 25"sv);
+                    const auto [selector, filters] = parse_and_filter("age gt 25"sv);
                     require_true(selector.has("age"s));
                     // Verify the structure by checking JSON stringification
                     const auto json_str = xson::json::stringify(selector);
@@ -215,7 +223,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with $gte operator") = []
                 {
-                    const auto [selector, filters] = parse_filter("age ge 25"sv);
+                    const auto [selector, filters] = parse_and_filter("age ge 25"sv);
                     require_true(selector.has("age"s));
                     const auto json_str = xson::json::stringify(selector);
                     require_true(json_str.find("\"$gte\"") != std::string::npos);
@@ -228,7 +236,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with $lt operator") = []
                 {
-                    const auto [selector, filters] = parse_filter("age lt 100"sv);
+                    const auto [selector, filters] = parse_and_filter("age lt 100"sv);
                     require_true(selector.has("age"s));
                     const auto json_str = xson::json::stringify(selector);
                     require_true(json_str.find("\"$lt\"") != std::string::npos);
@@ -241,7 +249,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with $lte operator") = []
                 {
-                    const auto [selector, filters] = parse_filter("age le 100"sv);
+                    const auto [selector, filters] = parse_and_filter("age le 100"sv);
                     require_true(selector.has("age"s));
                     const auto json_str = xson::json::stringify(selector);
                     require_true(json_str.find("\"$lte\"") != std::string::npos);
@@ -254,7 +262,7 @@ auto register_odata_tests()
             {
                 then("Returns string filter") = []
                 {
-                    const auto [selector, filters] = parse_filter("startswith(name, 'John')"sv);
+                    const auto [selector, filters] = parse_and_filter("startswith(name, 'John')"sv);
                     require_true(selector.empty());
                     require_eq(filters.size(), 1u);
                     require_eq(filters[0].function, "startswith"sv);
@@ -267,7 +275,7 @@ auto register_odata_tests()
             {
                 then("Returns string filter") = []
                 {
-                    const auto [selector, filters] = parse_filter("contains(email, '@example')"sv);
+                    const auto [selector, filters] = parse_and_filter("contains(email, '@example')"sv);
                     require_true(selector.empty());
                     require_eq(filters.size(), 1u);
                     require_eq(filters[0].function, "contains"sv);
@@ -280,7 +288,7 @@ auto register_odata_tests()
             {
                 then("Returns string filter") = []
                 {
-                    const auto [selector, filters] = parse_filter("endswith(path, '.pdf')"sv);
+                    const auto [selector, filters] = parse_and_filter("endswith(path, '.pdf')"sv);
                     require_true(selector.empty());
                     require_eq(filters.size(), 1u);
                     require_eq(filters[0].function, "endswith"sv);
@@ -293,7 +301,7 @@ auto register_odata_tests()
             {
                 then("Returns merged selector") = []
                 {
-                    const auto [selector, filters] = parse_filter("age gt 25 and status eq 'active'"sv);
+                    const auto [selector, filters] = parse_and_filter("age gt 25 and status eq 'active'"sv);
                     require_true(selector.has("age"s));
                     require_true(selector.has("status"s));
                     const auto json_str = xson::json::stringify(selector);
@@ -307,12 +315,27 @@ auto register_odata_tests()
 
             when("Filter uses 'or' operator") = []
             {
-                then("Throws invalid_argument") = []
+                then("Returns two OR branches") = []
                 {
-                    require_throws([]
-                    {
-                        parse_filter("age gt 25 or status eq 'active'"sv);
-                    });
+                    const auto parsed = parse_filter("age gt 25 or status eq 'active'"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+                    require_true(parsed.or_branches[0].selector.has("age"s));
+                    require_true(parsed.or_branches[1].selector.has("status"s));
+                };
+            };
+
+            when("Filter uses OData precedence (and before or)") = []
+            {
+                then("Splits into (a and b) or c") = []
+                {
+                    const auto parsed = parse_filter("age gt 25 and status eq 'active' or age lt 10"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+                    require_true(parsed.or_branches[0].selector.has("age"s));
+                    require_true(parsed.or_branches[0].selector.has("status"s));
+                    require_true(parsed.or_branches[1].selector.has("age"s));
+                    require_false(parsed.or_branches[1].selector.has("status"s));
                 };
             };
 
@@ -320,7 +343,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with $in map") = []
                 {
-                    const auto [selector, filters] = parse_filter("status in ('active','pending')"sv);
+                    const auto [selector, filters] = parse_and_filter("status in ('active','pending')"sv);
                     require_true(filters.empty());
                     require_true(selector.has("status"s));
 
@@ -337,7 +360,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with $in map") = []
                 {
-                    const auto [selector, filters] = parse_filter("status in ('active', 'pending')"sv);
+                    const auto [selector, filters] = parse_and_filter("status in ('active', 'pending')"sv);
                     require_true(filters.empty());
                     require_true(selector.has("status"s));
                     require_eq(selector["status"s]["$in"s].size(), 2u);
@@ -348,7 +371,7 @@ auto register_odata_tests()
             {
                 then("Returns selector with numeric $in map") = []
                 {
-                    const auto [selector, filters] = parse_filter("id in (1, 2, 3)"sv);
+                    const auto [selector, filters] = parse_and_filter("id in (1, 2, 3)"sv);
                     require_true(filters.empty());
                     require_true(selector.has("id"s));
                     require_eq(static_cast<xson::integer_type>(selector["id"s]["$in"s]["0"s]), 1ll);
@@ -360,7 +383,7 @@ auto register_odata_tests()
             {
                 then("Returns merged selector") = []
                 {
-                    const auto [selector, filters] = parse_filter("age gt 25 and status in ('active','pending')"sv);
+                    const auto [selector, filters] = parse_and_filter("age gt 25 and status in ('active','pending')"sv);
                     require_true(filters.empty());
                     require_true(selector.has("age"s));
                     require_true(selector.has("status"s));
@@ -395,6 +418,34 @@ auto register_odata_tests()
         };
     };
 
+    scenario("parse_filter or operator matches documents, [yardb]") = []
+    {
+        given("Documents with age and status fields") = []
+        {
+            auto docs = object{object::array{
+                object{{"name"s, "Alice"s}, {"age"s, 30ll}, {"status"s, "active"s}},
+                object{{"name"s, "Bob"s}, {"age"s, 20ll}, {"status"s, "active"s}},
+                object{{"name"s, "Charlie"s}, {"age"s, 22ll}, {"status"s, "inactive"s}}
+            }};
+
+            when("Filter is age gt 25 or status eq 'active'") = [docs]
+            {
+                then("Returns union of matching documents") = [docs]
+                {
+                    const auto parsed = parse_filter("age gt 25 or status eq 'active'"sv);
+                    require_true(parsed.has_or());
+
+                    const auto result = filter_documents_by_or(docs, parsed.or_branches);
+                    require_true(result.is_array());
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 2u);
+                    require_eq(items[0]["name"s].get<string>(), "Alice"s);
+                    require_eq(items[1]["name"s].get<string>(), "Bob"s);
+                };
+            };
+        };
+    };
+
     scenario("parse_filter in operator matches documents, [yardb]") = []
     {
         given("Documents with status field") = []
@@ -409,7 +460,7 @@ auto register_odata_tests()
             {
                 then("Returns only matching documents") = [docs]
                 {
-                    const auto [selector, filters] = parse_filter("status in ('active','pending')"sv);
+                    const auto [selector, filters] = parse_and_filter("status in ('active','pending')"sv);
                     require_true(filters.empty());
 
                     auto result = object::array{};

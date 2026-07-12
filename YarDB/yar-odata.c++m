@@ -154,6 +154,26 @@ export struct string_filter
     std::string_view value;     // Filter value (from parsed filter expression, points into original filter string)
 };
 
+// One branch of an OData OR expression (selector AND string filters within the branch)
+export struct filter_branch
+{
+    xson::object selector;
+    std::vector<string_filter> string_filters;
+};
+
+// Parsed $filter: either a single AND-group or multiple OR branches (OData: AND binds tighter than OR)
+export struct parsed_filter
+{
+    xson::object and_selector;
+    std::vector<string_filter> and_string_filters;
+    std::vector<filter_branch> or_branches;
+
+    [[nodiscard]] bool has_or() const noexcept
+    {
+        return not or_branches.empty();
+    }
+};
+
 // Split comma-separated OData list values, respecting quoted strings
 inline auto split_comma_separated_values(std::string_view list)
 {
@@ -278,54 +298,14 @@ inline auto split_and_process_filter_parts(std::string_view expr, std::string_vi
     return parts;
 }
 
-// Helper function to parse OData $filter expression and convert to selector
-// Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
-// Supports: field in ('value1','value2') or field in (1, 2, 3)
-// Supports: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
-// Supports: and operator (OR operator is not yet supported)
-// Returns: pair of (selector, vector of string filters for post-processing)
-inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::string_view filter_expr)
+using filter_clause = std::pair<xson::object, std::vector<string_filter>>;
+
+// Parse a single leaf $filter expression (no top-level and/or)
+inline filter_clause parse_filter_leaf(std::string_view filter_expr)
 {
     auto selector = xson::object{};
     auto string_filters = std::vector<string_filter>{};
-    
-    // Simple parser for basic OData filter expressions
-    // Example: "age gt 25" -> {"age": {"$gt": 25}}
-    // Example: "name eq 'John'" -> {"name": "John"}
-    // Example: "startswith(name, 'John')" -> string filter for post-processing
-    // Example: "age gt 25 and status eq 'active'" -> {"age": {"$gt": 25}, "status": "active"}
-    
-    // Trim whitespace from filter_expr using string_view
     auto expr = utils::trim(filter_expr);
-    
-    // Handle 'and' operator - split and process each part
-    if(expr.contains(" and "))
-    {
-        constexpr auto op_str = " and "sv;
-        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
-        
-        // Process each part and merge into selector
-        for(const auto& part : parts)
-        {
-            auto [part_selector, part_string_filters] = parse_filter(part);
-            // Merge part_selector into selector by copying fields
-            for(const auto& [key, value] : part_selector.get<db::object::map>())
-            {
-                selector[key] = value;
-            }
-            // Collect string filters
-            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
-        }
-        return std::make_pair(selector, string_filters);
-    }
-    
-    // Handle 'or' operator
-    // NOTE: OR operator is not yet supported - YarDB selector model uses AND semantics
-    // Reject queries with OR to avoid confusion
-    if(expr.contains(" or "))
-    {
-        throw std::invalid_argument{"OR operator not yet supported in $filter expressions"};
-    }
 
     // Handle 'in' operator: field in ('a','b') or field in (1, 2, 3)
     constexpr auto in_marker = " in ("sv;
@@ -516,6 +496,59 @@ inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::str
     return std::make_pair(selector, string_filters);
 }
 
+// Parse AND-group: field eq 'x' and age gt 25 (no top-level OR)
+inline filter_clause parse_filter_and_group(std::string_view filter_expr)
+{
+    auto expr = utils::trim(filter_expr);
+
+    if(expr.contains(" and "))
+    {
+        constexpr auto op_str = " and "sv;
+        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
+
+        auto selector = xson::object{};
+        auto string_filters = std::vector<string_filter>{};
+
+        for(const auto& part : parts)
+        {
+            auto [part_selector, part_string_filters] = parse_filter_and_group(part);
+            for(const auto& [key, value] : part_selector.get<db::object::map>())
+                selector[key] = value;
+            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
+        }
+        return std::make_pair(selector, string_filters);
+    }
+
+    return parse_filter_leaf(expr);
+}
+
+// Parse OData $filter expression
+// Supports: comparisons, in, string functions, and (AND), or (OR — OData precedence: AND before OR)
+export inline parsed_filter parse_filter(std::string_view filter_expr)
+{
+    auto expr = utils::trim(filter_expr);
+
+    if(expr.contains(" or "))
+    {
+        constexpr auto op_str = " or "sv;
+        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
+
+        auto branches = std::vector<filter_branch>{};
+        branches.reserve(parts.size());
+
+        for(const auto& part : parts)
+        {
+            auto [branch_selector, branch_string_filters] = parse_filter_and_group(part);
+            branches.push_back({std::move(branch_selector), std::move(branch_string_filters)});
+        }
+
+        return parsed_filter{{}, {}, std::move(branches)};
+    }
+
+    auto [selector, string_filters] = parse_filter_and_group(expr);
+    return parsed_filter{std::move(selector), std::move(string_filters), {}};
+}
+
 // Helper function to apply $select projection to documents
 inline auto apply_select(const xson::object& documents, std::string_view select_value)
 {
@@ -619,6 +652,139 @@ inline auto apply_string_filters(const xson::object& documents, const std::vecto
     }
     
     return result;
+}
+
+// True when a document matches one OR branch (selector AND branch string filters)
+export inline auto document_matches_branch(const xson::object& doc, const filter_branch& branch)
+{
+    if(not doc.match(branch.selector))
+        return false;
+
+    if(branch.string_filters.empty())
+        return true;
+
+    const auto wrapped = xson::object{xson::object::array{doc}};
+    const auto filtered = apply_string_filters(wrapped, branch.string_filters);
+    return filtered.is_array() and not filtered.get<xson::object::array>().empty();
+}
+
+// Union branch results, deduplicating by _id
+export inline void merge_or_branch_documents(
+    xson::object& merged,
+    const xson::object& branch_docs,
+    std::unordered_set<xson::integer_type>& seen_ids)
+{
+    if(not branch_docs.is_array())
+        return;
+
+    for(const auto& doc : branch_docs.get<xson::object::array>())
+    {
+        if(not doc.has("_id"s))
+            continue;
+
+        const auto id = static_cast<xson::integer_type>(doc["_id"s]);
+        if(not seen_ids.insert(id).second)
+            continue;
+
+        merged += doc;
+    }
+}
+
+// Apply $skip then $top to a document array (used after OR branch merge)
+export inline auto apply_top_skip(
+    xson::object documents,
+    xson::integer_type skip,
+    xson::integer_type top)
+{
+    if(not documents.is_array())
+        return documents;
+
+    auto& items = documents.get<xson::object::array>();
+
+    if(skip > 0)
+    {
+        if(static_cast<std::size_t>(skip) >= items.size())
+        {
+            documents = xson::object{xson::object::array{}};
+            return documents;
+        }
+        items.erase(items.begin(), items.begin() + static_cast<std::ptrdiff_t>(skip));
+    }
+
+    if(top >= 0 && static_cast<std::size_t>(top) < items.size())
+        items.resize(static_cast<std::size_t>(top));
+
+    return documents;
+}
+
+// Filter an in-memory array to documents matching any OR branch (unit tests)
+export inline auto filter_documents_by_or(
+    const xson::object& documents,
+    const std::vector<filter_branch>& branches)
+{
+    if(not documents.is_array())
+        return documents;
+
+    auto result = xson::object{xson::object::array{}};
+    auto seen_ids = std::unordered_set<xson::integer_type>{};
+
+    for(const auto& doc : documents.get<xson::object::array>())
+    {
+        for(const auto& branch : branches)
+        {
+            if(document_matches_branch(doc, branch))
+            {
+                if(doc.has("_id"s))
+                {
+                    const auto id = static_cast<xson::integer_type>(doc["_id"s]);
+                    if(not seen_ids.insert(id).second)
+                        break;
+                }
+                result += doc;
+                break;
+            }
+        }
+    }
+
+    return result;
+}
+
+// Execute $filter via engine.read — one read per OR branch, merged by _id
+export inline auto read_with_parsed_filter(
+    yar::db::engine& engine,
+    xson::object query_selector,
+    const parsed_filter& filter)
+{
+    if(filter.has_or())
+    {
+        auto top = std::numeric_limits<xson::integer_type>::max();
+        auto skip = xson::integer_type{0};
+
+        if(query_selector.has("$top"s))
+            top = query_selector["$top"s];
+        if(query_selector.has("$skip"s))
+            skip = query_selector["$skip"s];
+
+        auto merged = xson::object{xson::object::array{}};
+        auto seen_ids = std::unordered_set<xson::integer_type>{};
+
+        for(const auto& branch : filter.or_branches)
+        {
+            auto branch_docs = xson::object{};
+            engine.read(branch.selector, branch_docs);
+            auto filtered = apply_string_filters(branch_docs, branch.string_filters);
+            merge_or_branch_documents(merged, filtered, seen_ids);
+        }
+
+        return apply_top_skip(merged, skip, top);
+    }
+
+    for(const auto& [key, value] : filter.and_selector.get<db::object::map>())
+        query_selector[key] = value;
+
+    auto documents = xson::object{};
+    engine.read(query_selector, documents);
+    return apply_string_filters(documents, filter.and_string_filters);
 }
 
 // Helper function to apply $expand to documents

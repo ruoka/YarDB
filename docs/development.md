@@ -250,9 +250,9 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 
 #### 0. 📊 OData `$filter` enhancements (API — recommended next)
 - **Priority**: HIGH (near-term, no schema change)
-- **Current State**: `$filter` supports `eq`, `ne`, comparisons, `and`, and string functions via post-processing; `or` and `in` are not implemented
+- **Current State**: `$filter` supports `eq`, `ne`, comparisons, `and`, the `in` operator, and string functions via post-processing; `or` is not implemented
 - **Planned Implementation**:
-  - `in` operator (`$filter=status in ('active','pending')`)
+  - ✅ `in` operator (`$filter=status in ('active','pending')`)
   - `$filter` `or` support
   - Index-backed string filters where practical
 - **Reference**: [rest_api_evaluation.md](rest_api_evaluation.md) — Recommended Next Improvement

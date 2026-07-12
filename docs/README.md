@@ -25,7 +25,7 @@ This directory contains comprehensive project documentation organized by topic a
 
 ## 🎯 Current Development Focus
 
-**Recommended next (API):** OData `$filter` enhancements — `in` operator, then `or` and index-backed string filters. See **[rest_api_evaluation.md](rest_api_evaluation.md)**.
+**Recommended next (API):** OData `$filter` `or` operator, then index-backed string filters and nested property paths. See **[rest_api_evaluation.md](rest_api_evaluation.md)**.
 
 Broader roadmap priorities (see **[development.md](development.md)**):
 
@@ -36,6 +36,7 @@ Broader roadmap priorities (see **[development.md](development.md)**):
 
 ## ✅ Recently Completed
 
+- **OData `$filter` `in` operator** (July 2026) - `$filter=status in ('active','pending')` and numeric lists via `parse_filter` → xson `$in` selectors. Tests in `yar-odata.test.c++` and `yar-httpd.test.c++`.
 - **OData Metadata Endpoint** (December 2025) - Implemented `GET /$metadata` endpoint that returns OData 4.01 JSON CSDL metadata with automatically inferred schemas from existing collections. See **[archive/odata-metadata-plan.md](archive/odata-metadata-plan.md)** for implementation details.
 
 See **[development.md](development.md)** for detailed roadmap and implementation plans.

@@ -138,9 +138,10 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$filter=expression`** - Filter documents
   - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
   - Logical operator: `and` (`or` is not yet supported)
+  - `in` operator: `status in ('active','pending')` or `id in (1, 2, 3)`
   - String functions: `startswith(field, 'prefix')`, `endswith(field, 'suffix')`, `contains(field, 'substring')` (post-processing)
-  - Planned: `in` operator, `or`, nested property paths — see [rest_api_evaluation.md](rest_api_evaluation.md)
-  - Example: `GET /users?$filter=age gt 25 and status eq 'active'`
+  - Planned: `or`, nested property paths — see [rest_api_evaluation.md](rest_api_evaluation.md)
+  - Example: `GET /users?$filter=age gt 25 and status in ('active','pending')`
 
 - **`$select=field1,field2`** - Project specific fields
   - Example: `GET /users?$select=name,email`

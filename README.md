@@ -193,11 +193,12 @@ yarexport [--help] [--file=<name>]
 - `--file=<name>` - Database file to export (default: `yar.db`)
 
 **Output:**
-Exports each document with its metadata (collection, status, timestamp, position, previous) as JSON.
+JSONL on stdout — one compact JSON object per line with metadata (collection, status, timestamp, position, previous) and document. Stop `yardb` before exporting the same file.
 
 **Example:**
 ```bash
-yarexport --file=mydb.db > export.json
+yarexport --file=mydb.db > export.jsonl
+./tests/yarexport/smoke.sh
 ```
 
 ## Dependencies

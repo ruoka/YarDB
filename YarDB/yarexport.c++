@@ -1,13 +1,16 @@
 import yar;
-import net;
 import std;
 import xson;
 
 using namespace std;
 using namespace xson;
-using namespace utils;
 
-const auto usage = R"(yarexport [--help] [--file=<name>])";
+const auto usage = R"(
+yarexport [--help] [--file=<name>]
+
+Export FSON database records to JSONL on stdout (one JSON object per line).
+Stop yardb before exporting the same file to avoid concurrent read issues.
+)";
 
 int main(int argc, char** argv)
 try
@@ -39,7 +42,7 @@ try
         }
     }
 
-    auto storage = ifstream{file};
+    auto storage = ifstream{file, ios::binary};
 
     if(!storage.is_open())
         throw runtime_error{"file "s + file + " not found"s};
@@ -56,8 +59,9 @@ try
                              {"timestamp"s,  xson::to_iso8601(metadata.timestamp) },
                              {"position"s,   metadata.position                    },
                              {"previous"s,   metadata.previous                    },
-                             {"document"s,   document                             }})
-                      << ",\n";
+                             {"document"s,   document                             }},
+                            0)
+                      << '\n';
     }
 }
 catch(const system_error& e)

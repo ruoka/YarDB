@@ -131,6 +131,35 @@ jobs:
           name: yarsh-smoke-results
           path: yarsh_smoke.jsonl
 
+  yarexport-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 1
+
+      - name: Setup LLVM (shared)
+        uses: ./.github/actions/setup-llvm
+
+      - name: Build debug binaries
+        run: ./tools/CB.sh debug build
+
+      - name: Run yarexport smoke tests
+        run: |
+          set -euo pipefail
+          ./tests/yarexport/smoke.sh --jsonl | tee yarexport_smoke.jsonl
+          grep '"type":"smoke_end"' yarexport_smoke.jsonl | tail -1 | grep -q '"passed":true'
+
+      - name: Upload yarexport smoke results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yarexport-smoke-results
+          path: yarexport_smoke.jsonl
+
   # Static analysis job
   static-analysis:
     runs-on: ubuntu-latest

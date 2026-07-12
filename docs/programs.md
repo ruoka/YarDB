@@ -459,19 +459,26 @@ Each exported document includes:
 - `previous` - Previous document position
 - `document` - The actual document data
 
-Output is JSON format, one document per line (JSONL format).
+Output is JSONL: one JSON object per line (no trailing commas). Stop `yardb` before exporting the same database file.
 
 ### Example
 
 ```bash
-# Export default database file
-yarexport > export.json
+# Export default database file (stop yardb first if it uses yar.db)
+yarexport > export.jsonl
 
 # Export specific database file
-yarexport --file=production.db > production_export.json
+yarexport --file=production.db > production_export.jsonl
 
 # Export and filter with jq
 yarexport --file=mydb.db | jq 'select(.collection=="users")'
+```
+
+### Smoke tests
+
+```bash
+./tests/yarexport/smoke.sh
+./tests/yarexport/smoke.sh --jsonl
 ```
 
 ### Use Cases

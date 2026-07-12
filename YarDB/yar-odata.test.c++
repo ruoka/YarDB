@@ -205,6 +205,31 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter is 'field ne value'") = []
+            {
+                then("Returns selector with $ne operator") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("status ne 'deleted'"sv);
+                    require_true(selector.has("status"s));
+                    require_true(selector["status"s].has("$ne"s));
+                    require_eq(selector["status"s]["$ne"s].get<string>(), "deleted"s);
+                    require_true(filters.empty());
+                };
+            };
+
+            when("Filter is 'field ne number'") = []
+            {
+                then("Returns selector with numeric $ne operator") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("age ne 25"sv);
+                    require_true(selector.has("age"s));
+                    const auto json_str = xson::json::stringify(selector);
+                    require_true(json_str.find("\"$ne\"") != std::string::npos);
+                    require_true(json_str.find("25") != std::string::npos);
+                    require_true(filters.empty());
+                };
+            };
+
             when("Filter is 'field gt number'") = []
             {
                 then("Returns selector with $gt operator") = []
@@ -522,6 +547,38 @@ auto register_odata_tests()
                     require_eq(items.size(), 2u);
                     require_eq(items[0]["name"s].get<string>(), "Alice"s);
                     require_eq(items[1]["name"s].get<string>(), "Bob"s);
+                };
+            };
+        };
+    };
+
+    scenario("parse_filter ne operator matches documents, [yardb]") = []
+    {
+        given("Documents with status field") = []
+        {
+            auto docs = object::array{
+                object{{"name"s, "Alice"s}, {"status"s, "active"s}},
+                object{{"name"s, "Bob"s}, {"status"s, "deleted"s}},
+                object{{"name"s, "Charlie"s}, {"status"s, "active"s}}
+            };
+
+            when("Selector uses parsed ne filter") = [docs]
+            {
+                then("Excludes matching documents") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("status ne 'deleted'"sv);
+                    require_true(filters.empty());
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs)
+                    {
+                        if(doc.match(selector))
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 2u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                    require_eq(result[1]["name"s].get<string>(), "Charlie"s);
                 };
             };
         };

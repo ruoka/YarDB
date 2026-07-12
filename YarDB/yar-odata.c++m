@@ -541,7 +541,20 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     }
     else if(op == "ne")
     {
-        throw std::invalid_argument{"$ne operator not yet supported"};
+        if(is_string)
+            set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, value}});
+        else
+        {
+            try
+            {
+                auto num = utils::stoll(value);
+                set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, num}});
+            }
+            catch(...)
+            {
+                set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, value}});
+            }
+        }
     }
     else if(op == "gt")
     {

@@ -1,175 +1,42 @@
 #!/usr/bin/env bash
-# tools/CB.sh — C++ Builder bootstrap for YarDB project
-# Works perfectly with your /usr/local/llvm setup
+# tools/CB.sh — YarDB bootstrap (library + deps)
 
 set -e
 
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$TOOLS_DIR/.." && pwd)"
-BIN="$TOOLS_DIR/cb"
 
-# Default behavior:
-# - On normal dev machines: run all tests (including network) by default.
-# - In Cursor sandbox/CI-like environments: disable network tests unless user explicitly overrides.
-if [[ -n "${CURSOR_SANDBOX:-}" && -z "${NET_DISABLE_NETWORK_TESTS+x}" ]]; then
-  export NET_DISABLE_NETWORK_TESTS=1
-fi
-
-# Resolve tester root (required).
-# Optionally clone if missing (export CB_FETCH_DEPS=1).
 TESTER_ROOT=""
-if [[ -d "$PROJECT_ROOT/deps/tester/tools" ]]; then
-  TESTER_ROOT="$PROJECT_ROOT/deps/tester"
-elif [[ "${CB_FETCH_DEPS:-0}" == "1" ]]; then
-  mkdir -p "$PROJECT_ROOT/deps"
-  log "tester dependency missing; cloning into '$PROJECT_ROOT/deps/tester'..."
-  git clone --depth 1 "https://github.com/ruoka/tester.git" "$PROJECT_ROOT/deps/tester"
-  TESTER_ROOT="$PROJECT_ROOT/deps/tester"
+if [[ -d "$PROJECT_ROOT/../tester/tools" ]]; then
+  TESTER_ROOT="$(cd "$PROJECT_ROOT/../tester" && pwd)"
+elif [[ -d "$PROJECT_ROOT/deps/tester/tools" ]]; then
+  TESTER_ROOT="$(cd "$PROJECT_ROOT/deps/tester" && pwd)"
 fi
 
-if [[ -z "$TESTER_ROOT" ]]; then
-  log "ERROR: tester dependency not found at '$PROJECT_ROOT/deps/tester'."
-  log "Fix by initializing submodules:"
-  log "  git submodule update --init --recursive"
-  log "or rerun with:"
-  log "  CB_FETCH_DEPS=1 $0 $*"
-  exit 1
+CB_TOOLS_DIR="$TOOLS_DIR"
+CB_PROJECT_ROOT="$PROJECT_ROOT"
+CB_TESTER_ROOT="$TESTER_ROOT"
+CB_SANDBOX_DISABLE_NETWORK_TESTS=1
+CB_RESPECT_CXX_ENV=0
+CB_INCLUDE_EXAMPLES_MODE=never
+
+CB_INCLUDE_DIRS=("$PROJECT_ROOT/deps/net/net")
+[[ -n "$TESTER_ROOT" && -d "$TESTER_ROOT/tester" ]] && CB_INCLUDE_DIRS+=("$TESTER_ROOT/tester")
+if [[ "$(uname -s)" == "Darwin" && -d "/opt/homebrew/include" ]]; then
+  CB_INCLUDE_DIRS+=("/opt/homebrew/include")
 fi
 
-SRC="$TESTER_ROOT/tools/cb.c++"
+CB_LINK_FLAGS="-lcrypto"
+if [[ "$(uname -s)" == "Darwin" && -d "/opt/homebrew/lib" ]]; then
+  CB_LINK_FLAGS="-L/opt/homebrew/lib $CB_LINK_FLAGS"
+fi
 
-# If we're about to run tests in JSONL mode, keep stdout machine-parseable by
-# sending wrapper logs to stderr.
-JSONL_MODE=false
-for arg in "$@"; do
-  if [[ "$arg" == "--output=jsonl" || "$arg" == "--output=JSONL" ]]; then
-    JSONL_MODE=true
-    break
-  fi
-done
-
-log() {
-  if [[ "$JSONL_MODE" == "true" ]]; then
-    echo "$@" >&2
-  else
-    echo "$@"
-  fi
-}
-
-# Detect OS and set compiler/LLVM paths
-UNAME_OUT="$(uname -s)"
-case "$UNAME_OUT" in
-    Linux)
-    CXX_COMPILER="clang++-21"
-    LLVM_PREFIX="/usr/lib/llvm-21"
-        STD_CPPM_DEFAULT="/usr/lib/llvm-21/share/libc++/v1/std.cppm"
-        ;;
-    Darwin)
-    CXX_COMPILER="/usr/local/llvm/bin/clang++"
-    LLVM_PREFIX="/usr/local/llvm"
-        STD_CPPM_DEFAULT="/usr/local/llvm/share/libc++/v1/std.cppm"
-        ;;
-    *)
-    echo "ERROR: Unsupported OS '$UNAME_OUT'"
-    exit 1
-        ;;
-esac
-
-# Ensure we always search the LLVM lib dir when linking CB itself
-export LDFLAGS="-Wl,-rpath,$LLVM_PREFIX/lib ${LDFLAGS}"
-
-# Check if binary exists and was built for the correct OS
-NEEDS_REBUILD=false
-if [[ ! -x "$BIN" ]]; then
-    NEEDS_REBUILD=true
-elif [[ "$SRC" -nt "$BIN" ]]; then
-    NEEDS_REBUILD=true
+CB_CORE=""
+if [[ -n "$TESTER_ROOT" ]]; then
+  CB_CORE="$TESTER_ROOT/tools/CB.sh.core"
+elif [[ -f "$PROJECT_ROOT/deps/tester/tools/CB.sh.core" ]]; then
+  CB_CORE="$PROJECT_ROOT/deps/tester/tools/CB.sh.core"
 else
-    # Check binary format using file command (portable across Linux and macOS)
-    if [[ -f "$BIN" ]] && command -v file >/dev/null 2>&1; then
-        FILE_TYPE=$(file "$BIN" 2>/dev/null || echo "")
-        case "$UNAME_OUT" in
-            Linux)
-                if [[ "$FILE_TYPE" != *"ELF"* ]]; then
-                    echo "CB binary was built for a different OS (not Linux), rebuilding..."
-                    NEEDS_REBUILD=true
-                fi
-                ;;
-            Darwin)
-                if [[ "$FILE_TYPE" != *"Mach-O"* ]]; then
-                    echo "CB binary was built for a different OS (not macOS), rebuilding..."
-                    NEEDS_REBUILD=true
-                fi
-                ;;
-        esac
-    fi
+  CB_CORE="$PROJECT_ROOT/../tester/tools/CB.sh.core"
 fi
-
-# Rebuild if needed
-if [[ "$NEEDS_REBUILD" == "true" ]]; then
-    log "Building CB (C++ Builder) with $CXX_COMPILER..."
-    # Use -B to tell clang++ where to find binaries (like the linker)
-    "$CXX_COMPILER" \
-        -B"$LLVM_PREFIX/bin" \
-        -std=c++23 -O3 -pthread \
-        -fuse-ld=lld \
-        -stdlib=libc++ \
-        -I"$LLVM_PREFIX/include/c++/v1" \
-        -L"$LLVM_PREFIX/lib" \
-        -Wl,-rpath,"$LLVM_PREFIX/lib" \
-        -lc++abi \
-        "$SRC" -o "$BIN"
-    log "CB compiled successfully → $BIN"
-fi
-
-# Resolve std.cppm path: explicit argument (with slash or .cppm suffix) wins,
-# otherwise use LLVM_PATH or defaults per OS.
-STD_CPPM=""
-if [[ -n "$1" && ("$1" == *.cppm || "$1" == */*) ]]; then
-        STD_CPPM="$1"
-        shift
-fi
-
-if [[ -z "$STD_CPPM" ]]; then
-    STD_CPPM="${LLVM_PATH:-$STD_CPPM_DEFAULT}"
-fi
-
-if [[ ! -f "$STD_CPPM" ]]; then
-    log "ERROR: std.cppm not found at '$STD_CPPM'."
-    log "Pass the path as the first argument or set LLVM_PATH."
-    exit 1
-fi
-
-# Find YarDB project root and build include flags
-CURRENT_DIR="$(pwd)"
-PROJECT_ROOT=""
-    CHECK_DIR="$CURRENT_DIR"
-
-# Walk up directory tree to find project root
-    while [[ "$CHECK_DIR" != "/" ]]; do
-        if [[ -d "$CHECK_DIR/YarDB" && -d "$CHECK_DIR/deps" ]]; then
-        PROJECT_ROOT="$CHECK_DIR"
-            break
-        fi
-        CHECK_DIR="$(cd "$CHECK_DIR/.." 2>/dev/null && pwd)"
-    done
-
-# Build include flags and link flags if project root found
-INCLUDE_FLAGS=()
-LINK_FLAGS_STR="-lcrypto"
-if [[ -n "$PROJECT_ROOT" ]]; then
-        INCLUDE_FLAGS=(
-        -I "$PROJECT_ROOT/deps/net/net"
-        -I "$TESTER_ROOT/tester"
-        )
-        # Add Homebrew paths on Darwin (macOS)
-        if [[ "$UNAME_OUT" == "Darwin" ]]; then
-            INCLUDE_FLAGS+=(-I "/opt/homebrew/include")
-            LINK_FLAGS_STR="-L/opt/homebrew/lib $LINK_FLAGS_STR"
-        fi
-fi
-
-# Run it with resolved std.cppm path and include flags
-# Add -lcrypto for OpenSSL support (needed for cryptic benchmark)
-exec "$BIN" "$STD_CPPM" "${INCLUDE_FLAGS[@]}" --link-flags "$LINK_FLAGS_STR" "$@"
-
+source "$CB_CORE"

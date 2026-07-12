@@ -426,6 +426,16 @@ yarproxy --clog --replica=http://db1:2112 --replica=http://db2:2112 --replica=ht
 - **Data Replication**: Ensure writes are propagated to all replicas
 - **Failover**: If one replica fails, others continue serving requests
 
+### Smoke tests
+
+```bash
+./tests/yarproxy/smoke.sh
+./tests/yarproxy/smoke.sh --jsonl
+./tests/yarproxy/smoke.sh --case write_fanout
+```
+
+Cases: `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`.
+
 ## yarexport - Data Export Utility
 
 Exports database contents from the FSON-encoded database file to JSON format.

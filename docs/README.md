@@ -38,6 +38,7 @@ Broader roadmap priorities (see **[development.md](development.md)**):
 
 - **Piped `yarsh` smoke tests** (July 2026) - `tests/yarsh/smoke.sh` starts ephemeral `yardb`, pipes CLI commands, asserts status/headers/bodies; CI job `yarsh-smoke`.
 - **`yarexport` smoke tests** (July 2026) - `tests/yarexport/smoke.sh` seeds data, stops `yardb`, exports JSONL, validates syntax and record shape; CI job `yarexport-smoke`.
+- **`yarproxy` smoke tests** (July 2026) - `tests/yarproxy/smoke.sh` starts two `yardb` replicas plus proxy, checks CRUD, write fan-out, and read round-robin; CI job `yarproxy-smoke`.
 - **Index-only `count`** (July 2026) - `engine::count(selector)` and `$count=true` use index view sizes for empty selectors, single `_id`/indexed-field constraints with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`; fall back to seek-and-match for `$ne`, multi-field AND, string post-filters, and OR branches.
 - **Expanded `[yardb]` test coverage** (July 2026) - `yar-index.test.c++`, engine range/`$in`/replace/reindex tests, `count_with_parsed_filter` OData scenarios, HTTP `$ne` and `$count` variants (288 tests).
 - **`yarsh` REPL improvements** (July 2026) - full body display (including single-digit `$count`), resilient JSON parse errors, refreshed help, optional `@Accept` / `@If-Match` / `@If-None-Match` request lines.

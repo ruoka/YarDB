@@ -146,8 +146,9 @@ Dependencies are managed as git submodules in `deps/`:
 - **Functional Tests**: In `tests/` directory
   - `tests/yarsh/smoke.sh` — black-box CLI smoke tests (piped `yarsh` + ephemeral `yardb`)
   - `tests/yarexport/smoke.sh` — export JSONL smoke tests (seed `yardb`, stop server, validate `yarexport`)
+  - `tests/yarproxy/smoke.sh` — proxy smoke tests (multi-replica cluster, fan-out writes, round-robin reads)
   - `tests/yar.sh` — manual multi-server demo
-- **Test Runner**: Unit tests via `./tools/CB.sh debug test --tags='\[yardb\]'`; smoke via `./tests/yarsh/smoke.sh` and `./tests/yarexport/smoke.sh`
+- **Test Runner**: Unit tests via `./tools/CB.sh debug test --tags='\[yardb\]'`; smoke via `./tests/yarsh/smoke.sh`, `./tests/yarexport/smoke.sh`, and `./tests/yarproxy/smoke.sh`
 
 ## References
 

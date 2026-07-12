@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_in, filter_ne, head, if_none_match, bad_json, auth_required"
+      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_in, filter_ne, filter_or, filter_startswith, head, if_none_match, bad_json, auth_required, auth_crud"
       exit 0
       ;;
     *)
@@ -298,6 +298,69 @@ EOF
   end_case filter_in
 }
 
+test_filter_or() {
+  should_run filter_or || return 0
+  begin_case filter_or
+  local coll
+  coll="$(collection for)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"young_inactive","age":20,"status":"inactive"}
+POST /${coll}
+{"name":"old_inactive","age":35,"status":"inactive"}
+POST /${coll}
+{"name":"young_active","age":20,"status":"active"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=age%20gt%2025%20or%20status%20eq%20'active'
+EXIT
+EOF
+)"
+  assert_contains " 200 " "filter_or_ok"
+  assert_last_json_array_length eq 2 "filter_or_count"
+  assert_last_json_array_includes_field_value name old_inactive "filter_or_old_inactive"
+  assert_last_json_array_includes_field_value name young_active "filter_or_young_active"
+  assert_last_json_array_excludes_field_value name young_inactive "filter_or_excludes_young_inactive"
+  end_case filter_or
+}
+
+test_filter_startswith() {
+  should_run filter_startswith || return 0
+  begin_case filter_startswith
+  local coll
+  coll="$(collection fsw)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"Alice","email":"alice@example.com"}
+POST /${coll}
+{"name":"Bob","email":"bob@test.com"}
+POST /${coll}
+{"name":"Charlie","email":"charlie@example.org"}
+POST /${coll}
+{"name":"David","email":"david@test.org"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=startswith(name,'A')
+EXIT
+EOF
+)"
+  assert_contains " 200 " "filter_startswith_ok"
+  assert_last_json_array_length eq 1 "filter_startswith_count"
+  assert_last_json_array_first_field name Alice "filter_startswith_alice"
+  assert_last_json_array_excludes_field_value name Bob "filter_startswith_excludes_bob"
+  end_case filter_startswith
+}
+
 test_filter_ne() {
   should_run filter_ne || return 0
   begin_case filter_ne
@@ -432,6 +495,45 @@ EOF
   end_case auth_required
 }
 
+test_auth_crud() {
+  should_run auth_crud || return 0
+  begin_case auth_crud
+  local pat coll
+  pat="smoke-pat-${RANDOM}"
+  coll="$(collection authcrud)"
+
+  stop_yardb
+  YARDB_PAT="${pat}"
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"secret"}
+EXIT
+EOF
+)"
+  assert_contains " 401 " "post_unauthorized_without_pat"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+@Authorization: Bearer ${pat}
+{"name":"secret"}
+GET /${coll}/1
+@Authorization: Bearer ${pat}
+DELETE /${coll}/1
+@Authorization: Bearer ${pat}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "post_authorized"
+  assert_contains " 200 " "get_authorized"
+  assert_contains " 204 " "delete_authorized"
+  assert_contains '"name" : "secret"' "body_name"
+
+  YARDB_PAT=""
+  end_case auth_crud
+}
+
 main() {
   require_bins
   trap stop_yardb EXIT
@@ -439,7 +541,7 @@ main() {
   jsonl_emit "{\"type\":\"smoke_start\",\"schema\":\"yarsh-smoke\",\"version\":1}"
   log "yarsh smoke tests (build=${BUILD_DIR})"
 
-  if [[ -z "${SELECTED_CASE}" || "${SELECTED_CASE}" != "auth_required" ]]; then
+  if [[ -z "${SELECTED_CASE}" || ( "${SELECTED_CASE}" != "auth_required" && "${SELECTED_CASE}" != "auth_crud" ) ]]; then
     start_yardb
   fi
 
@@ -453,10 +555,13 @@ main() {
   test_filter_eq_gt
   test_filter_in
   test_filter_ne
+  test_filter_or
+  test_filter_startswith
   test_head
   test_if_none_match
   test_bad_json
   test_auth_required
+  test_auth_crud
 
   local end_ms duration_ms passed
   end_ms=$(python3 - <<'PY'

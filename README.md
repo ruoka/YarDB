@@ -141,12 +141,17 @@ yarsh [--help] [URL]
 
 **Commands:** HTTP methods with paths (e.g. `GET /users?$count=true`), plus `HELP` and `EXIT`. Supports OData query parameters, `GET /$metadata`, `PUT`/`PATCH /_db/{collection}` for indexes, and optional `@Header: value` lines for `Accept`, `If-Match`, and `If-None-Match`.
 
+**Piped mode:** Pipe a script on stdin for automation and CI. Use **one JSON line** per `POST`/`PUT`/`PATCH` body so multiple commands run in one session. Invalid JSON on a body prints an error and the shell continues.
+
 **Example:**
 ```bash
 yarsh http://localhost:2112
 # GET /users?$filter=status%20ne%20'deleted'
 # @If-None-Match: "etag"
 # GET /users/1
+
+# Piped smoke test (starts ephemeral yardb)
+./tests/yarsh/smoke.sh
 ```
 
 See [Programs Documentation](docs/programs.md#yarsh---interactive-shell) for details.
@@ -180,12 +185,7 @@ yarproxy --replica=http://localhost:2112 --replica=http://localhost:2114 2113
 
 ### yarexport - Data Export Utility
 
-Exports database contents from the FSON-encoded database file to JSON format.
-
-## Notes
-
-- **Binary DB format**: YarDB stores documents in a binary format (FSON + metadata). If the database file is corrupted or you point YarDB at the wrong file, you may see errors like “Invalid FSON type encountered during decoding”.
-- **HTTP request bodies**: Some HTTP stacks may pass request bodies with trailing `'\0'` bytes. YarDB trims trailing NUL bytes before parsing JSON request bodies to avoid spurious “trailing garbage” parse failures.
+Exports records from an FSON database file to **JSONL** on stdout (one compact JSON object per line).
 
 **Usage:**
 ```bash
@@ -196,13 +196,21 @@ yarexport [--help] [--file=<name>]
 - `--file=<name>` - Database file to export (default: `yar.db`)
 
 **Output:**
-JSONL on stdout — one compact JSON object per line with metadata (collection, status, timestamp, position, previous) and document. Stop `yardb` before exporting the same file.
+Each line includes metadata (`collection`, `status`, `timestamp`, `position`, `previous`) and `document`. Stop `yardb` before exporting the same file it has open.
 
 **Example:**
 ```bash
 yarexport --file=mydb.db > export.jsonl
+yarexport --file=mydb.db | jq 'select(.collection=="users")'
 ./tests/yarexport/smoke.sh
 ```
+
+See [Programs Documentation](docs/programs.md#yarexport---data-export-utility) for details.
+
+## Notes
+
+- **Binary DB format**: YarDB stores documents in a binary format (FSON + metadata). If the database file is corrupted or you point YarDB at the wrong file, you may see errors like “Invalid FSON type encountered during decoding”.
+- **HTTP request bodies**: Some HTTP stacks may pass request bodies with trailing `'\0'` bytes. YarDB trims trailing NUL bytes before parsing JSON request bodies to avoid spurious “trailing garbage” parse failures.
 
 ## Dependencies
 

@@ -28,9 +28,9 @@
 
 ### Available Programs
 - **`yardb`** - Main database server
-- **`yarsh`** - Interactive client
+- **`yarsh`** - Interactive client (supports piped stdin for scripts/CI; see `./tests/yarsh/smoke.sh`)
 - **`yarproxy`** - HTTP fan-out proxy (dev/testing; not production HA)
-- **`yarexport`** - Data export utility
+- **`yarexport`** - Offline DB export to JSONL (stop `yardb` first; see `./tests/yarexport/smoke.sh`)
 - **`benchmark`** - Performance testing
 
 ## 🐳 Container Deployment
@@ -154,12 +154,16 @@ yardb --file=/var/lib/yardb/production.db
 
 ### Backup Strategy
 ```bash
-# Current: Manual export
-yarexport --file=production.db > backup.json
+# Stop yardb before exporting the file it has open
+yarexport --file=production.db > backup.jsonl
 
-# Future: Automated backup/restore
-# Will include point-in-time recovery
+# Validate lines (optional)
+yarexport --file=production.db | jq -e . >/dev/null
+
+# Smoke test locally: ./tests/yarexport/smoke.sh
 ```
+
+Automated backup/restore and point-in-time recovery are not implemented yet.
 
 ### Storage Requirements
 - **Database Files**: FSON-encoded binary format

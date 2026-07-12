@@ -450,7 +450,7 @@ Cases: `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`. 
 
 ## yarexport - Data Export Utility
 
-Exports database contents from the FSON-encoded database file to JSON format.
+Exports database contents from the FSON-encoded database file to JSONL on stdout.
 
 ### Purpose
 
@@ -501,11 +501,14 @@ yarexport --file=mydb.db | jq 'select(.collection=="users")'
 ```bash
 ./tests/yarexport/smoke.sh
 ./tests/yarexport/smoke.sh --jsonl
+./tests/yarexport/smoke.sh --case export_seeded
 ```
+
+Cases: `export_seeded`, `missing_file`, `help`. Seeds data via `yarsh`, stops `yardb`, exports the DB file, and validates JSONL syntax plus record shape.
 
 ### Use Cases
 
-- **Backup**: Create JSON backups of database contents
+- **Backup**: Create JSONL backups of database contents
 - **Migration**: Export data for migration to another system
 - **Debugging**: Inspect database contents when server is not running
 - **Data Analysis**: Extract data for analysis with external tools

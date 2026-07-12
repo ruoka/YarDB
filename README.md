@@ -183,6 +183,8 @@ yarproxy --replica=http://localhost:2112 --replica=http://localhost:2114 2113
 ./tests/yarproxy/smoke.sh --replicas=5
 ```
 
+See [Programs Documentation](docs/programs.md#yarproxy---http-fan-out-proxy) for details.
+
 ### yarexport - Data Export Utility
 
 Exports records from an FSON database file to **JSONL** on stdout (one compact JSON object per line).

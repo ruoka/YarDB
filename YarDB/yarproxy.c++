@@ -7,7 +7,14 @@ using namespace chrono;
 using namespace utils;
 using namespace net;
 
-const auto usage = R"(yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_port])";
+const auto usage = R"(
+yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_port]
+
+HTTP fan-out proxy for local testing (not built-in replication or HA).
+GET/HEAD: round-robin to one yardb backend per request.
+POST/PUT/PATCH/DELETE: best-effort fan-out to every --replica backend;
+client sees one response (from the last backend). Backends use separate DB files.
+)";
 
 using replica = endpointstream;
 

@@ -88,5 +88,12 @@ EXIT
 EOF
 
 echo ""
+echo "=== Test 8: GET with \$count=true (single-digit counts must show body) ==="
+cat <<EOF | $CLI "$SERVER" 2>&1 | grep -A 3 "Response Body:"
+GET /${TEST_COLLECTION}?\$count=true
+EXIT
+EOF
+
+echo ""
 echo "=== Tests completed ==="
 echo "Note: Query parameters with spaces need URL encoding (e.g., \$filter=age%20gt%2025)"

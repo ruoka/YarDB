@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_ne, head, if_none_match, bad_json"
+      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_in, filter_ne, head, if_none_match, bad_json"
       exit 0
       ;;
     *)
@@ -267,6 +267,37 @@ EOF
   end_case filter_eq_gt
 }
 
+test_filter_in() {
+  should_run filter_in || return 0
+  begin_case filter_in
+  local coll
+  coll="$(collection fin)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"Alice","status":"active"}
+POST /${coll}
+{"name":"Bob","status":"pending"}
+POST /${coll}
+{"name":"Charlie","status":"inactive"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=status%20in%20('active','pending')
+EXIT
+EOF
+)"
+  assert_contains " 200 " "filter_in_ok"
+  assert_last_json_array_length eq 2 "filter_in_count"
+  assert_last_json_array_includes_field_value name Alice "filter_in_alice"
+  assert_last_json_array_includes_field_value name Bob "filter_in_bob"
+  assert_last_json_array_excludes_field_value name Charlie "filter_in_excludes_charlie"
+  end_case filter_in
+}
+
 test_filter_ne() {
   should_run filter_ne || return 0
   begin_case filter_ne
@@ -389,6 +420,7 @@ main() {
   test_orderby
   test_select
   test_filter_eq_gt
+  test_filter_in
   test_filter_ne
   test_head
   test_if_none_match

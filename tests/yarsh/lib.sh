@@ -220,6 +220,33 @@ PY
   return 0
 }
 
+assert_last_json_array_includes_field_value() {
+  local field=$1
+  local value=$2
+  local label=${3:-includes_field_value}
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if ! extract_last_response_body; then
+    fail "no response body for ${label}"
+    return 0
+  fi
+  if python3 - "${field}" "${value}" "${LAST_RESPONSE_BODY}" <<'PY'
+import json, sys
+field, value, body = sys.argv[1], sys.argv[2], sys.argv[3]
+data = json.loads(body)
+for item in data:
+    if str(item.get(field)) == str(value):
+        raise SystemExit(0)
+print(f"missing required {field}={value!r} in array", file=sys.stderr)
+raise SystemExit(1)
+PY
+  then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"${label}\"}"
+    return 0
+  fi
+  fail "expected array to include ${field}=${value}"
+  return 0
+}
+
 assert_last_json_array_excludes_field_value() {
   local field=$1
   local value=$2

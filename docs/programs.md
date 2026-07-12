@@ -363,7 +363,7 @@ Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines
 
 `tools/cli_test.sh` is a thin wrapper around the same harness. Piped scripts use **one JSON line** per `POST`/`PUT`/`PATCH` body so multiple commands can run in one session.
 
-Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_ne`, `head`, `if_none_match`, `bad_json`.
+Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `head`, `if_none_match`, `bad_json`.
 
 ## yarproxy - HTTP Fan-out Proxy
 

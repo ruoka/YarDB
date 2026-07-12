@@ -959,6 +959,55 @@ auto test_set()
             }
         };
 
+        section("GET with $filter - status ne 'deleted'") = [setup]
+        {
+            auto test_data = std::vector<std::pair<std::string, std::string>>{
+                {"NeAlice"s, "active"s},
+                {"NeBob"s, "deleted"s},
+                {"NeCharlie"s, "active"s}
+            };
+
+            for(const auto& [name, item_status] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/netest"s,
+                    R"({"name":")"s + name + R"(", "status":")"s + item_status + R"("})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->port(), "POST"s, "/netest"s,
+                        R"({"name":")"s + name + R"(", "status":")"s + item_status + R"("})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/netest?$filter=status%20ne%20'deleted'"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_eq(items.size(), 2u);
+
+            for(const auto& item : items)
+            {
+                require_true(item.has("status"s));
+                require_true(item["status"s].get<string>() != "deleted"s);
+            }
+        };
+
         section("GET with $select - name,email") = [setup]
         {
             // Create a document with multiple fields
@@ -1447,6 +1496,69 @@ auto test_set()
             
             // Response should be "0"
             require_eq(response_body, "0"s);
+        };
+
+        section("GET with $count=true and $filter or returns union count") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/usersor?$count=true&$filter=age%20gt%2025%20or%20status%20eq%20'active'"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            const auto count = utils::stoll(response_body);
+            require_true(count >= 2);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/usersor?$filter=age%20gt%2025%20or%20status%20eq%20'active'"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            require_eq(static_cast<long long>(documents.get<object::array>().size()), count);
+        };
+
+        section("GET with $count=true and $filter startswith returns prefix count") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/users3?$count=true&$filter=startswith(name,'A')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            const auto count = utils::stoll(response_body);
+            require_true(count >= 1);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/users3?$filter=startswith(name,'A')"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            require_eq(static_cast<long long>(documents.get<object::array>().size()), count);
+        };
+
+        section("GET with $count=true and $filter ne returns filtered count") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/netest?$count=true&$filter=status%20ne%20'deleted'"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            const auto count = utils::stoll(response_body);
+            require_eq(count, 2);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/netest?$filter=status%20ne%20'deleted'"s, ""s
+            );
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_true(documents.is_array());
+            require_eq(static_cast<long long>(documents.get<object::array>().size()), count);
         };
     };
 

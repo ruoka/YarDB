@@ -1,0 +1,161 @@
+module yar;
+import :index;
+import :metadata;
+import tester;
+import std;
+import xson;
+
+namespace yar::index_unit_test {
+
+using namespace std;
+using namespace std::string_literals;
+using namespace xson;
+using namespace tester::basic;
+using namespace tester::assertions;
+
+class index_fixture
+{
+public:
+    explicit index_fixture(string_view f) : m_file{f}
+    {
+        remove(m_file.c_str());
+        remove((m_file + ".pid"s).c_str());
+        m_storage.open(m_file, ios::out | ios::in | ios::binary | ios::trunc);
+    }
+
+    ~index_fixture()
+    {
+        m_storage.close();
+        remove(m_file.c_str());
+        remove((m_file + ".pid"s).c_str());
+    }
+
+    yar::db::index& index() { return m_index; }
+
+    void add_keys(std::initializer_list<string> keys)
+    {
+        m_index.add(vector<string>{keys});
+    }
+
+    void insert(object doc)
+    {
+        using xson::fson::operator<<;
+
+        auto metadata = yar::db::metadata{"index_test"s};
+        m_index.update(doc);
+        m_storage.seekp(0, ios::end);
+        const auto position = m_storage.tellp();
+        m_index.insert(doc, position);
+        m_storage << metadata << doc;
+        m_storage.flush();
+    }
+
+    std::size_t count(const object& selector)
+    {
+        return m_index.count(m_storage, selector);
+    }
+
+    std::size_t view_count(const object& selector)
+    {
+        auto n = std::size_t{0};
+        for(auto it = m_index.view(selector).begin(); it != m_index.view(selector).end(); ++it)
+            ++n;
+        return n;
+    }
+
+private:
+    std::string m_file;
+    std::fstream m_storage;
+    yar::db::index m_index;
+};
+
+auto test_set()
+{
+    test_case("index count and view behavior, [yardb]") = []
+    {
+        section("CountEmptySelectorUsesPrimaryIndexSize") = []
+        {
+            index_fixture fixture{"./index_count_empty.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "active"s}});
+            fixture.insert(object{{"status"s, "pending"s}});
+            fixture.insert(object{{"status"s, "active"s}});
+
+            require_eq(fixture.count(object{}), 3u);
+            require_eq(fixture.view_count(object{}), 3u);
+        };
+
+        section("CountEqualityOnIndexedFieldIsIndexOnly") = []
+        {
+            index_fixture fixture{"./index_count_eq.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "active"s}});
+            fixture.insert(object{{"status"s, "pending"s}});
+            fixture.insert(object{{"status"s, "active"s}});
+
+            const auto active = object{{"status"s, "active"s}};
+            require_eq(fixture.count(active), 2u);
+            require_eq(fixture.view_count(active), 2u);
+        };
+
+        section("CountRangeOnIndexedFieldIsIndexOnly") = []
+        {
+            index_fixture fixture{"./index_count_range.db"s};
+            fixture.add_keys({"age"s});
+            fixture.insert(object{{"age"s, 20ll}, {"name"s, "twenty"s}});
+            fixture.insert(object{{"age"s, 30ll}, {"name"s, "thirty"s}});
+            fixture.insert(object{{"age"s, 40ll}, {"name"s, "forty"s}});
+
+            const auto over_25 = object{{"age"s, object{{"$gt"s, 25ll}}}};
+            require_eq(fixture.count(over_25), 2u);
+            require_eq(fixture.view_count(over_25), 2u);
+        };
+
+        section("CountPrimaryKeyRangeIsIndexOnly") = []
+        {
+            index_fixture fixture{"./index_count_id_range.db"s};
+            fixture.insert(object{{"name"s, "first"s}});
+            fixture.insert(object{{"name"s, "second"s}});
+            fixture.insert(object{{"name"s, "third"s}});
+
+            const auto after_first = object{{"_id"s, object{{"$gt"s, 1ll}}}};
+            require_eq(fixture.count(after_first), 2u);
+            require_eq(fixture.view_count(after_first), 2u);
+        };
+
+        section("CountNeUsesScanFallback") = []
+        {
+            index_fixture fixture{"./index_count_ne.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "active"s}});
+            fixture.insert(object{{"status"s, "deleted"s}});
+            fixture.insert(object{{"status"s, "pending"s}});
+
+            const auto not_deleted = object{{"status"s, object{{"$ne"s, "deleted"s}}}};
+            require_eq(fixture.count(not_deleted), 2u);
+            // View still narrows by status key presence; count verifies via document.match
+            require_eq(fixture.view_count(not_deleted), 3u);
+        };
+
+        section("CountMultiFieldAndUsesScanFallback") = []
+        {
+            index_fixture fixture{"./index_count_multi.db"s};
+            fixture.add_keys({"status"s, "age"s});
+            fixture.insert(object{{"status"s, "active"s}, {"age"s, 30ll}});
+            fixture.insert(object{{"status"s, "active"s}, {"age"s, 20ll}});
+            fixture.insert(object{{"status"s, "pending"s}, {"age"s, 40ll}});
+
+            const auto selector = object{
+                {"status"s, "active"s},
+                {"age"s, object{{"$gt"s, 25ll}}}
+            };
+            require_eq(fixture.count(selector), 1u);
+        };
+    };
+
+    return true;
+}
+
+const auto test_registrar = test_set();
+
+} // namespace yar::index_unit_test

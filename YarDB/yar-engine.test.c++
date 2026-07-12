@@ -330,6 +330,82 @@ auto test_set()
             require_false(documents[0].match(documents[1]));
         };
 
+        section("ReadCountRangeOnIndexedField") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"age"s, 20ll}, {"name"s, "young"s}},
+                document2 = object{{"age"s, 30ll}, {"name"s, "mid"s}},
+                document3 = object{{"age"s, 40ll}, {"name"s, "old"s}},
+                over_25 = object{{"age"s, object{{"$gt"s, 25ll}}}},
+                documents = object{};
+            engine.collection("ReadCountRange"s);
+            engine.index({"age"s});
+            require_true(engine.create(document1));
+            require_true(engine.create(document2));
+            require_true(engine.create(document3));
+
+            require_eq(engine.count(over_25), 2u);
+            require_true(engine.read(over_25, documents));
+            require_eq(documents.get<object::array>().size(), 2u);
+        };
+
+        section("ReadCountInSelector") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"status"s, "active"s}},
+                document2 = object{{"status"s, "pending"s}},
+                document3 = object{{"status"s, "inactive"s}},
+                in_map = object{{"0"s, "active"s}, {"1"s, "pending"s}},
+                in_selector = object{{"status"s, object{{"$in"s, in_map}}}},
+                documents = object{};
+            engine.collection("ReadCountIn"s);
+            engine.index({"status"s});
+            require_true(engine.create(document1));
+            require_true(engine.create(document2));
+            require_true(engine.create(document3));
+
+            require_eq(engine.count(in_selector), 2u);
+            require_true(engine.read(in_selector, documents));
+            require_eq(documents.get<object::array>().size(), 2u);
+        };
+
+        section("ReplaceExistingDocument") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "before"s}, {"value"s, 1ll}},
+                replacement = object{{"name"s, "after"s}, {"value"s, 2ll}},
+                selector = object{},
+                documents = object{};
+            engine.collection("Replace"s);
+            require_true(engine.create(original));
+            selector = object{{"_id"s, original["_id"s]}};
+            replacement["_id"s] = original["_id"s];
+
+            require_true(engine.replace(selector, replacement));
+            require_true(engine.read(selector, documents));
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "after"s);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 2ll);
+        };
+
+        section("ReindexDiscoversExistingDocuments") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"tag"s, "alpha"s}, {"value"s, 1ll}},
+                document2 = object{{"tag"s, "beta"s}, {"value"s, 2ll}},
+                selector = object{{"tag"s, "alpha"s}},
+                documents = object{};
+            engine.collection("Reindex"s);
+            require_true(engine.create(document1));
+            require_true(engine.create(document2));
+            engine.index({"tag"s});
+            engine.reindex();
+
+            require_true(engine.read(selector, documents));
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(documents[0]["value"s], 1ll);
+        };
+
         section("IndexOnlyCount") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

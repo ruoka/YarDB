@@ -780,6 +780,117 @@ auto register_odata_tests()
         };
     };
 
+    scenario("count_with_parsed_filter counts documents correctly, [yardb]") = []
+    {
+        given("Collection with indexed age and name fields") = []
+        {
+            const auto test_file = "./count_parsed_filter_test.db"s;
+
+            when("Filter uses OR branches") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"age"s, "status"s});
+
+                auto alice = object{{"name"s, "Alice"s}, {"age"s, 30ll}, {"status"s, "active"s}},
+                    bob = object{{"name"s, "Bob"s}, {"age"s, 20ll}, {"status"s, "active"s}},
+                    charlie = object{{"name"s, "Charlie"s}, {"age"s, 22ll}, {"status"s, "inactive"s}};
+                require_true(engine.create(alice));
+                require_true(engine.create(bob));
+                require_true(engine.create(charlie));
+
+                const auto parsed = parse_filter("age gt 25 or status eq 'active'"sv);
+                require_true(parsed.has_or());
+                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+
+                then("Returns union count without reading all documents into caller") = [count]
+                {
+                    require_eq(count, 2u);
+                };
+            };
+
+            when("Filter uses contains post-filter") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"email"s});
+
+                auto alice = object{{"name"s, "Alice"s}, {"email"s, "alice@example.com"s}},
+                    bob = object{{"name"s, "Bob"s}, {"email"s, "bob@test.com"s}},
+                    charlie = object{{"name"s, "Charlie"s}, {"email"s, "charlie@example.org"s}};
+                require_true(engine.create(alice));
+                require_true(engine.create(bob));
+                require_true(engine.create(charlie));
+
+                const auto parsed = parse_filter("contains(email, '@example')"sv);
+                require_false(parsed.has_or());
+                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+
+                then("Counts only documents matching string filter") = [count]
+                {
+                    require_eq(count, 2u);
+                };
+            };
+
+            when("Filter uses indexed startswith lowered to range") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"name"s});
+
+                auto alice = object{{"name"s, "Alice"s}},
+                    bob = object{{"name"s, "Bob"s}},
+                    charlie = object{{"name"s, "Charlie"s}};
+                require_true(engine.create(alice));
+                require_true(engine.create(bob));
+                require_true(engine.create(charlie));
+
+                const auto parsed = parse_filter("startswith(name, 'A')"sv);
+                require_false(parsed.has_or());
+                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+
+                then("Uses engine.count on lowered selector") = [count]
+                {
+                    require_eq(count, 1u);
+                };
+            };
+
+            when("Filter uses ne operator") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"status"s});
+
+                auto alice = object{{"name"s, "Alice"s}, {"status"s, "active"s}},
+                    bob = object{{"name"s, "Bob"s}, {"status"s, "deleted"s}},
+                    charlie = object{{"name"s, "Charlie"s}, {"status"s, "active"s}};
+                require_true(engine.create(alice));
+                require_true(engine.create(bob));
+                require_true(engine.create(charlie));
+
+                const auto parsed = parse_filter("status ne 'deleted'"sv);
+                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+
+                then("Falls back to scan count via engine.count") = [count]
+                {
+                    require_eq(count, 2u);
+                };
+            };
+        };
+    };
+
     // Test apply_select
     scenario("apply_select projects fields correctly, [yardb]") = []
     {

@@ -250,12 +250,12 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 
 #### 0. 📊 OData `$filter` enhancements (API — recommended next)
 - **Priority**: HIGH (near-term, no schema change)
-- **Current State**: `$filter` supports `eq`, `ne`, comparisons, `and`, `or`, the `in` operator, and string functions via post-processing
+- **Current State**: `$filter` supports `eq`, `ne`, comparisons, `and`, `or`, `in`, nested property paths, and string functions via post-processing
 - **Planned Implementation**:
   - ✅ `in` operator (`$filter=status in ('active','pending')`)
   - ✅ `or` operator (`$filter=age gt 25 or status eq 'active'` — multi-query merge)
+  - ✅ Nested property paths (`$filter=Customer/Country eq 'USA'`)
   - Index-backed string filters where practical
-  - Nested property paths (`Customer/Country eq 'USA'`)
 - **Reference**: [rest_api_evaluation.md](rest_api_evaluation.md) — Recommended Next Improvement
 
 #### 1. 🔐 Security & Authentication System

@@ -415,6 +415,87 @@ auto register_odata_tests()
                     });
                 };
             };
+
+            when("Filter uses nested property path") = []
+            {
+                then("Returns nested selector") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("Customer/Country eq 'USA'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("Customer"s));
+                    require_true(selector["Customer"s].has("Country"s));
+                    require_eq(selector["Customer"s]["Country"s].get<string>(), "USA"s);
+                };
+            };
+
+            when("Filter combines nested paths with and") = []
+            {
+                then("Deep-merges nested selector") = []
+                {
+                    const auto [selector, filters] = parse_and_filter(
+                        "Customer/Country eq 'USA' and Customer/Name eq 'Acme'"sv);
+                    require_true(filters.empty());
+                    require_true(selector["Customer"s].has("Country"s));
+                    require_true(selector["Customer"s].has("Name"s));
+                    require_eq(selector["Customer"s]["Country"s].get<string>(), "USA"s);
+                    require_eq(selector["Customer"s]["Name"s].get<string>(), "Acme"s);
+                };
+            };
+
+            when("Filter uses nested path in startswith") = []
+            {
+                then("Returns string filter with path") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("startswith(Customer/Name, 'Ac')"sv);
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_eq(filters[0].field, "Customer/Name"sv);
+                    require_eq(filters[0].value, "Ac"sv);
+                };
+            };
+        };
+    };
+
+    scenario("parse_filter nested paths match documents, [yardb]") = []
+    {
+        given("Documents with nested Customer object") = []
+        {
+            auto docs = object{object::array{
+                object{{"name"s, "Alice"s}, {"Customer"s, object{{"Country"s, "USA"s}, {"Name"s, "Acme"s}}}},
+                object{{"name"s, "Bob"s}, {"Customer"s, object{{"Country"s, "UK"s}, {"Name"s, "Beta"s}}}}
+            }};
+
+            when("Selector uses nested eq filter") = [docs]
+            {
+                then("Returns matching documents") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("Customer/Country eq 'USA'"sv);
+                    require_true(filters.empty());
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        if(doc.match(selector))
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 1u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("String filter uses nested startswith") = [docs]
+            {
+                then("Returns matching documents") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("startswith(Customer/Name, 'Ac')"sv);
+                    require_true(selector.empty());
+
+                    const auto filtered = apply_string_filters(docs, filters);
+                    require_eq(filtered.get<object::array>().size(), 1u);
+                    require_eq(filtered[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
         };
     };
 

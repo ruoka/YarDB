@@ -860,6 +860,54 @@ auto test_set()
             }
         };
 
+        section("GET with $filter - Customer/Country eq 'USA'") = [setup]
+        {
+            auto test_data = std::vector<std::tuple<std::string, std::string, std::string>>{
+                {"NestAlice"s, "USA"s, "Acme"s},
+                {"NestBob"s, "UK"s, "Beta"s}
+            };
+
+            for(const auto& [name, country, company] : test_data)
+            {
+                auto body = R"({"name":")"s + name + R"(", "Customer": {"Country":")"s + country
+                    + R"(", "Name":")"s + company + R"("}})"s;
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/usersnested"s, body
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->port(), "POST"s, "/usersnested"s, body
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/usersnested?$filter=Customer/Country%20eq%20'USA'"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_true(items.size() >= 1);
+
+            for(const auto& item : items)
+            {
+                require_true(item.has("Customer"s));
+                require_eq(item["Customer"s]["Country"s].get<string>(), "USA"s);
+            }
+        };
+
         section("GET with $filter - age gt 25 or status eq 'active'") = [setup]
         {
             auto test_data = std::vector<std::tuple<std::string, int, std::string>>{

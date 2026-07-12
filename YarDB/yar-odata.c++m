@@ -265,6 +265,108 @@ inline auto parse_in_value_list(std::string_view list_content)
     return values;
 }
 
+// Split OData property path: Customer/Country -> ["Customer", "Country"]
+inline auto split_property_path(std::string_view path)
+{
+    auto segments = std::vector<std::string>{};
+    auto start = std::size_t{0};
+
+    while(start <= path.size())
+    {
+        const auto slash = path.find('/', start);
+        const auto end = slash == std::string_view::npos ? path.size() : slash;
+        const auto segment = utils::trim(path.substr(start, end - start));
+
+        if(segment.empty())
+            throw std::invalid_argument{"Invalid property path: "s + std::string{path}};
+
+        segments.emplace_back(segment);
+        if(slash == std::string_view::npos)
+            break;
+        start = slash + 1;
+    }
+
+    if(segments.empty())
+        throw std::invalid_argument{"Property path cannot be empty"};
+
+    return segments;
+}
+
+// Deep-merge selector maps (needed when AND combines Customer/Country and Customer/Name)
+inline void merge_selector_into(xson::object& target, const xson::object& source)
+{
+    for(const auto& [key, value] : source.get<db::object::map>())
+    {
+        if(target.has(key) && target[key].has_objects() && value.has_objects())
+        {
+            auto nested = target[key];
+            merge_selector_into(nested, value);
+            target[key] = std::move(nested);
+        }
+        else
+            target[key] = value;
+    }
+}
+
+// Set a leaf constraint at a possibly nested path (Customer/Country -> {Customer:{Country:leaf}})
+inline void set_nested_selector_leaf(xson::object& selector, std::string_view path, xson::object leaf)
+{
+    const auto segments = split_property_path(path);
+
+    if(segments.size() == 1)
+    {
+        if(selector.has(segments[0]) && selector[segments[0]].has_objects() && leaf.has_objects())
+        {
+            auto nested = selector[segments[0]];
+            merge_selector_into(nested, leaf);
+            selector[segments[0]] = std::move(nested);
+        }
+        else
+            selector[segments[0]] = std::move(leaf);
+        return;
+    }
+
+    auto nested = std::move(leaf);
+    for(auto i = segments.size(); i-- > 1;)
+    {
+        auto wrapper = xson::object{};
+        wrapper[segments[i]] = std::move(nested);
+        nested = std::move(wrapper);
+    }
+
+    auto top = xson::object{};
+    top[segments[0]] = std::move(nested);
+
+    if(selector.has(segments[0]) && selector[segments[0]].has_objects())
+        merge_selector_into(selector[segments[0]], top[segments[0]]);
+    else
+        selector[segments[0]] = std::move(top[segments[0]]);
+}
+
+// Resolve nested document field for string filter post-processing
+inline const xson::object* get_field_by_path(const xson::object& document, std::string_view path)
+{
+    const auto segments = split_property_path(path);
+    const xson::object* current = &document;
+
+    for(std::size_t i = 0; i < segments.size(); ++i)
+    {
+        if(not current->has(segments[i]))
+            return nullptr;
+
+        const auto& next = (*current)[segments[i]];
+        if(i + 1 == segments.size())
+            return &next;
+
+        if(not next.has_objects())
+            return nullptr;
+
+        current = &next;
+    }
+
+    return nullptr;
+}
+
 // Build xson $in map (xson match uses map keys, not arrays)
 inline auto make_in_selector(std::string_view field, const std::vector<xson::object>& values)
 {
@@ -273,7 +375,7 @@ inline auto make_in_selector(std::string_view field, const std::vector<xson::obj
         in_map[std::to_string(i)] = values[i];
 
     auto selector = xson::object{};
-    selector[utils::trim_end_to_string(field)] = xson::object{{"$in"s, std::move(in_map)}};
+    set_nested_selector_leaf(selector, field, xson::object{{"$in"s, std::move(in_map)}});
     return selector;
 }
 
@@ -419,29 +521,26 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     if(value.empty() && !is_string)
         throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
     
-    // Convert to selector format
+    // Convert to selector format (supports nested paths: Customer/Country)
     if(op == "eq")
     {
         if(is_string)
-            selector[field] = value;
+            set_nested_selector_leaf(selector, field, xson::object{value});
         else
         {
-            // Try to parse as number
             try
             {
                 auto num = utils::stoll(value);
-                selector[field] = num;
+                set_nested_selector_leaf(selector, field, xson::object{num});
             }
             catch(...)
             {
-                selector[field] = value; // Fallback to string
+                set_nested_selector_leaf(selector, field, xson::object{value});
             }
         }
     }
     else if(op == "ne")
     {
-        // YarDB doesn't have $ne, so we'll use a workaround
-        // For now, store as string and handle in match logic (or skip)
         throw std::invalid_argument{"$ne operator not yet supported"};
     }
     else if(op == "gt")
@@ -449,7 +548,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         try
         {
             auto num = stoll(value);
-            selector[field] = xson::object{{"$gt"s, num}};
+            set_nested_selector_leaf(selector, field, xson::object{{"$gt"s, num}});
         }
         catch(const std::exception&)
         {
@@ -461,7 +560,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         try
         {
             auto num = stoll(value);
-            selector[field] = xson::object{{"$gte"s, num}};
+            set_nested_selector_leaf(selector, field, xson::object{{"$gte"s, num}});
         }
         catch(const std::exception&)
         {
@@ -473,7 +572,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         try
         {
             auto num = stoll(value);
-            selector[field] = xson::object{{"$lt"s, num}};
+            set_nested_selector_leaf(selector, field, xson::object{{"$lt"s, num}});
         }
         catch(const std::exception&)
         {
@@ -485,7 +584,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         try
         {
             auto num = stoll(value);
-            selector[field] = xson::object{{"$lte"s, num}};
+            set_nested_selector_leaf(selector, field, xson::object{{"$lte"s, num}});
         }
         catch(const std::exception&)
         {
@@ -512,8 +611,7 @@ inline filter_clause parse_filter_and_group(std::string_view filter_expr)
         for(const auto& part : parts)
         {
             auto [part_selector, part_string_filters] = parse_filter_and_group(part);
-            for(const auto& [key, value] : part_selector.get<db::object::map>())
-                selector[key] = value;
+            merge_selector_into(selector, part_selector);
             string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
         }
         return std::make_pair(selector, string_filters);
@@ -600,21 +698,14 @@ inline auto apply_string_filters(const xson::object& documents, const std::vecto
         
         for(const auto& filter : filters)
         {
-            if(!doc.has(filter.field))
+            const auto* field_value = get_field_by_path(doc, filter.field);
+            if(field_value == nullptr || not field_value->is_string())
             {
                 matches = false;
                 break;
             }
-            
-            const auto field_value = doc[filter.field];
-            if(!field_value.is_string())
-            {
-                matches = false;
-                break;
-            }
-            
-            // Get string value from object - use get() to get const reference, then create string_view
-            const std::string_view field = field_value.get<std::string>();
+
+            const std::string_view field = field_value->get<std::string>();
             
             if(filter.function == "startswith")
             {
@@ -779,8 +870,7 @@ export inline auto read_with_parsed_filter(
         return apply_top_skip(merged, skip, top);
     }
 
-    for(const auto& [key, value] : filter.and_selector.get<db::object::map>())
-        query_selector[key] = value;
+    merge_selector_into(query_selector, filter.and_selector);
 
     auto documents = xson::object{};
     engine.read(query_selector, documents);

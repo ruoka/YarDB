@@ -2,9 +2,9 @@
 
 ## Recommended Next Improvement
 
-**Enhanced `$filter` — index-backed string functions and nested paths** (see TODO #1 below).
+**Enhanced `$filter` — index-backed string functions** (see TODO #1 below).
 
-Rationale: `$expand` and `$apply` depend on a **relationship/navigation model** YarDB does not define yet (`apply_expand` in `yar-odata.c++m` is a documented placeholder). `$filter` `in` and `or` are implemented; remaining gaps are index-backed `startswith`/`contains`/`endswith` (today post-processing only) and nested property paths (`Customer/Country`).
+Rationale: `$expand` and `$apply` depend on a **relationship/navigation model** YarDB does not define yet (`apply_expand` in `yar-odata.c++m` is a documented placeholder). `$filter` `in`, `or`, and nested property paths are implemented; remaining gap is pushing `startswith`/`contains`/`endswith` into indexed reads where practical (today post-processing only).
 
 ## TODO: Missing Features (Prioritized)
 
@@ -14,8 +14,8 @@ Rationale: `$expand` and `$apply` depend on a **relationship/navigation model** 
 1. **Enhanced `$filter` operators** - Expand filter capabilities
    - ✅ Support `in` operator: `$filter=status in ('active','pending')` or `$filter=id in (1, 2, 3)`
    - ✅ Support `or` in `$filter` (multi-branch `engine.read`, merged by `_id`; OData AND-before-OR precedence)
+   - ✅ Nested property paths: `$filter=Customer/Country eq 'USA'` (nested objects only; not collection `any`/`all`)
    - Push `startswith`, `contains`, `endswith` into indexed reads where possible (currently post-processing only)
-   - Support nested property access: `$filter=Customer/Country eq 'USA'`
    - **Impact**: More powerful querying without a new data model
 
 ### 🔴 High Priority (after relationship model)
@@ -215,8 +215,8 @@ All previously identified critical issues have been addressed:
 
 ### Query Capabilities
 - **✅ Pagination**: `$top=n` and `$skip=n` now accept numeric values (e.g., `$top=10&$skip=20`). Both fully implemented and OData compliant.
-- **⚠️ Filtering (partial)**: `$filter` supports comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`), logical `and`/`or`, the `in` operator, and string functions via post-processing. Nested paths are planned (TODO #1).
-  - Examples: `$filter=age gt 25`, `$filter=age gt 25 or status eq 'active'`, `$filter=status in ('active','pending')`
+- **⚠️ Filtering (partial)**: `$filter` supports comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`), logical `and`/`or`, the `in` operator, nested property paths, and string functions via post-processing.
+  - Examples: `$filter=Customer/Country eq 'USA'`, `$filter=age gt 25 or status eq 'active'`, `$filter=status in ('active','pending')`
 - **✅ Sorting**: `$orderby=field desc` now supported (OData compliant).
 - **✅ Projection**: `$select=field1,field2` now supports field selection (OData compliant). Always includes `_id` field.
 - **✅ Expansion**: `$expand` parameter parsed (placeholder implementation, returns documents as-is)
@@ -249,7 +249,7 @@ All previously identified critical issues have been addressed:
 - **`$top`**: ✅ Now accepts numeric values (e.g., `$top=10`). OData compliant.
 - **`$skip`**: ✅ Now accepts numeric values (e.g., `$skip=20`). Fully implemented in engine. OData compliant.
 - **`$orderby`**: ✅ Implemented with standard OData syntax (e.g., `$orderby=field desc`). Supports both ascending (default) and descending order.
-- **`$filter`**: ✅ Partial — comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`), logical `and`/`or`, `in`, and string functions (`startswith`, `contains`, `endswith`) via post-processing. ❌ Nested paths not yet supported.
+- **`$filter`**: ✅ Partial — comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`), logical `and`/`or`, `in`, nested paths (`Customer/Country`), and string functions (`startswith`, `contains`, `endswith`) via post-processing.
 - **`$select`**: ✅ Implemented for field projection (e.g., `$select=name,email`). Always includes `_id` field. OData compliant.
 - **`$expand`**: ✅ Parsed and processed (placeholder implementation, returns documents as-is for future related entity expansion).
 - **Query Parameter Parsing**: ✅ Now properly parses query parameters from `uri.query` instead of relying on regex patterns in route paths.
@@ -276,11 +276,12 @@ All previously identified critical issues have been addressed:
 - ✅ **DONE**: `$top` with numeric values - **COMPLETED**
 - ✅ **DONE**: `$skip` in the engine - **COMPLETED**
 - ✅ **DONE**: `$orderby` parameter support - **COMPLETED**
-- ⚠️ **PARTIAL**: `$filter` — comparisons, `and`, `or`, and `in` done; index-backed strings/nested paths — TODO #1
+- ⚠️ **PARTIAL**: `$filter` — comparisons, `and`, `or`, `in`, and nested paths done; index-backed strings — TODO #1
 - ✅ **DONE**: `$select` for field projection - **COMPLETED**
 - ✅ **DONE**: `$filter` `in` and `or` operators - **COMPLETED**
 - ⚠️ **TODO**: Relationship model (TODO #2), then `$expand` expansion logic (TODO #3)
-- ⚠️ **TODO**: Index-backed string filters and nested property paths (TODO #1 — **recommended next**)
+- ✅ **DONE**: Nested `$filter` property paths - **COMPLETED**
+- ⚠️ **TODO**: Index-backed string filters (TODO #1 — **recommended next**)
 
 ## Comparison with REST Best Practices
 
@@ -322,7 +323,7 @@ All previously identified critical issues have been addressed:
 - ✅ `$top` - Pagination limit (e.g., `$top=10`)
 - ✅ `$skip` - Pagination offset (e.g., `$skip=20`)
 - ✅ `$orderby` - Sorting (e.g., `$orderby=field desc`)
-- ⚠️ `$filter` - Comparison, `and`, `or`, `in`, string functions (post-process); nested paths planned (TODO #1)
+- ⚠️ `$filter` - Comparison, `and`, `or`, `in`, nested paths, string functions (post-process); index-backed strings planned (TODO #1)
 - ✅ `$select` - Field projection (e.g., `$select=name,email`)
 - ✅ `$expand` - Parsed (placeholder implementation)
 - ✅ `$count` - Return count of items (e.g., `$count=true`)
@@ -364,7 +365,7 @@ The API now follows REST best practices and provides a production-ready foundati
 
 ### Next Steps
 
-1. **Immediate:** Index-backed `$filter` string functions and nested paths (TODO #1)
+1. **Immediate:** Index-backed `$filter` string functions (TODO #1)
 2. **Design:** Relationship / navigation model (TODO #2)
 3. **Then:** Full `$expand` (TODO #3) and `$apply` aggregation (TODO #4)
 

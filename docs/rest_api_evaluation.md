@@ -1,24 +1,54 @@
 # YarDB REST API Design Evaluation
 
+## Recommended Next Improvement
+
+**Enhanced `$filter` — `in` operator** (see TODO #1 below).
+
+Rationale: `$expand` and `$apply` are wired or listed as high priority but depend on a **relationship/navigation model** YarDB does not define yet (`apply_expand` in `yar-odata.c++m` is a documented placeholder). Extending `$filter` builds on the existing `parse_filter` → selector → engine path without schema changes.
+
+Suggested first slice:
+
+- `in` operator: `$filter=status in ('active','pending')`
+- Engine/index support for `$in` selectors
+- Tests in `yar-odata.test.c++` and HTTP cases in `yar-httpd.test.c++`
+
+Follow-ups in the same area: `$filter` `or` support (currently rejected), index-backed `startswith`/`contains`/`endswith` (today post-processing only), nested property paths (`Customer/Country`).
+
 ## TODO: Missing Features (Prioritized)
 
-### 🔴 High Priority
+### 🔴 Next (immediate)
 
 #### OData Features
-1. **`$apply` with `aggregate` and `groupby`** - Implement OData aggregation support
-   - Support `aggregate` functions: `sum`, `count`, `min`, `max`, `average`, `distinctcount`
-   - Support `groupby` for grouping results by fields
-   - Example: `$apply=groupby((Category),aggregate(Price with sum as Total))`
-   - **Impact**: Enables analytics and reporting queries
+1. **Enhanced `$filter` operators** - Expand filter capabilities
+   - Support `in` operator: `$filter=status in ('active','pending')`
+   - Support `or` in `$filter` (currently rejected with `invalid_argument`)
+   - Push `startswith`, `contains`, `endswith` into indexed reads where possible (currently post-processing only)
+   - Support nested property access: `$filter=Customer/Country eq 'USA'`
+   - **Impact**: More powerful querying without a new data model
 
-2. **Full `$expand` implementation** - Currently placeholder, needs actual expansion logic
+### 🔴 High Priority (after relationship model)
+
+#### OData Features
+2. **Relationship / navigation model** - Prerequisite for `$expand` and richer `$metadata` relationships
+   - Document conventions (e.g. foreign-key fields, collection naming, embedded vs referenced documents)
+   - **Impact**: Unblocks expansion and aggregation semantics
+
+3. **Full `$expand` implementation** - Currently placeholder, needs actual expansion logic
    - Parse related entity names from `$expand` parameter
    - Query related collections and embed results
    - Handle nested expansions if needed
+   - **Blocked by:** TODO #2 (no explicit relationships today)
    - **Impact**: Enables relationship traversal and nested data retrieval
 
-#### REST Features
-3. **✅ Content Negotiation** - ✅ **COMPLETED** - Support `Accept` header for response format
+4. **`$apply` with `aggregate` and `groupby`** - Implement OData aggregation support
+   - Support `aggregate` functions: `sum`, `count`, `min`, `max`, `average`, `distinctcount`
+   - Support `groupby` for grouping results by fields
+   - Example: `$apply=groupby((Category),aggregate(Price with sum as Total))`
+   - **Blocked by:** clear grouping semantics and likely TODO #2
+   - **Impact**: Enables analytics and reporting queries
+
+#### REST Features (completed — were high priority)
+5. **✅ Content Negotiation** - ✅ **COMPLETED** - Support `Accept` header for response format
    - ✅ Support `application/json` (current default)
    - ✅ Accept `application/json;odata=minimalmetadata` and `application/json;odata=fullmetadata` header formats
    - ✅ **OData Metadata Format** (fully implemented):
@@ -29,7 +59,7 @@
    - ✅ Return appropriate `Content-Type` header
    - ✅ **Impact**: Full OData metadata support enables better client-server negotiation and OData compliance
 
-4. **✅ ETag Support** - ✅ **COMPLETED** - For caching and optimistic locking
+6. **✅ ETag Support** - ✅ **COMPLETED** - For caching and optimistic locking
    - ✅ Generate ETags for resources (using unique document position from metadata)
    - ✅ Support `If-Match` and `If-None-Match` headers for conditional requests
    - ✅ Return `ETag` header in all GET, HEAD, PUT, PATCH responses
@@ -47,12 +77,6 @@
    - ✅ Works with `$filter` to return filtered count
    - ✅ Example: `GET /Products?$count=true` returns `42`
    - ✅ **Impact**: Efficient counting without fetching all data
-
-6. **Enhanced `$filter` operators** - Expand filter capabilities
-   - Support `in` operator: `$filter=status in ('active','pending')`
-   - Support `startswith`, `contains`, `endswith` in filter (currently post-processing only)
-   - Support nested property access: `$filter=Customer/Country eq 'USA'`
-   - **Impact**: More powerful querying capabilities
 
 7. **`$search` query option** - Full-text search support
    - Implement basic full-text search across fields
@@ -199,9 +223,7 @@ All previously identified critical issues have been addressed:
 
 ### Query Capabilities
 - **✅ Pagination**: `$top=n` and `$skip=n` now accept numeric values (e.g., `$top=10&$skip=20`). Both fully implemented and OData compliant.
-- **✅ Filtering**: `$filter` parameter now supports filtering documents with OData-compliant expressions:
-  - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
-  - Logical operators: `and`, `or`
+- **⚠️ Filtering (partial)**: `$filter` supports comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`), logical `and`, and string functions via post-processing. `or`, `in`, and nested paths are planned (TODO #1).
   - Examples: `$filter=age gt 25`, `$filter=name eq 'Alice'`, `$filter=status eq 'active' and age ge 25`
 - **✅ Sorting**: `$orderby=field desc` now supported (OData compliant).
 - **✅ Projection**: `$select=field1,field2` now supports field selection (OData compliant). Always includes `_id` field.
@@ -235,7 +257,7 @@ All previously identified critical issues have been addressed:
 - **`$top`**: ✅ Now accepts numeric values (e.g., `$top=10`). OData compliant.
 - **`$skip`**: ✅ Now accepts numeric values (e.g., `$skip=20`). Fully implemented in engine. OData compliant.
 - **`$orderby`**: ✅ Implemented with standard OData syntax (e.g., `$orderby=field desc`). Supports both ascending (default) and descending order.
-- **`$filter`**: ✅ Implemented with OData-compliant filter expressions. Supports comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`) and logical operators (`and`, `or`).
+- **`$filter`**: ✅ Partial — comparison operators (`eq`, `ne`, `gt`, `ge`, `lt`, `le`), logical `and`, and string functions (`startswith`, `contains`, `endswith`) via post-processing. ❌ `or`, `in`, and nested paths not yet supported.
 - **`$select`**: ✅ Implemented for field projection (e.g., `$select=name,email`). Always includes `_id` field. OData compliant.
 - **`$expand`**: ✅ Parsed and processed (placeholder implementation, returns documents as-is for future related entity expansion).
 - **Query Parameter Parsing**: ✅ Now properly parses query parameters from `uri.query` instead of relying on regex patterns in route paths.
@@ -247,10 +269,10 @@ All previously identified critical issues have been addressed:
 | `$top` | `$top=n` (e.g., `$top=10`) | ✅ `$top=n` (accepts numeric value) | ✅ **FULLY COMPATIBLE** |
 | `$skip` | `$skip=n` (e.g., `$skip=20`) | ✅ `$skip=n` (accepts numeric value) | ✅ **FULLY COMPATIBLE** |
 | `$orderby` | `$orderby=field desc` or `$orderby=field asc` | ✅ `$orderby=field desc` | ✅ **FULLY COMPATIBLE** |
-| `$filter` | `$filter=field eq 'value'` | ✅ `$filter=field eq 'value'` (supports eq, ne, gt, ge, lt, le, and, or) | ✅ **FULLY COMPATIBLE** |
+| `$filter` | `$filter=field eq 'value'` | ⚠️ eq, ne, gt, ge, lt, le, `and`; string functions post-process only; `or`/`in` not implemented | ⚠️ **PARTIAL** — see TODO #1 |
 | `$select` | `$select=field1,field2` | ✅ `$select=field1,field2` (always includes `_id`) | ✅ **FULLY COMPATIBLE** |
 | `$expand` | `$expand=relatedEntity` | ⚠️ Parsed but placeholder (returns as-is) | ⚠️ **PARTIAL** - parsed but expansion not yet implemented |
-| `$apply` | `$apply=groupby((field),aggregate(Price with sum))` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #1 |
+| `$apply` | `$apply=groupby((field),aggregate(Price with sum))` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #4 |
 | `$count` | `$count=true` or inline count | ✅ `$count=true` returns count as JSON number | ✅ **FULLY COMPATIBLE** |
 | `$search` | `$search=keyword` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #7 |
 | `$format` | `$format=json` or `$format=xml` | ⚠️ JSON only (default) | ⚠️ **PARTIAL** - JSON only, no format selection |
@@ -262,9 +284,10 @@ All previously identified critical issues have been addressed:
 - ✅ **DONE**: `$top` with numeric values - **COMPLETED**
 - ✅ **DONE**: `$skip` in the engine - **COMPLETED**
 - ✅ **DONE**: `$orderby` parameter support - **COMPLETED**
-- ✅ **DONE**: `$filter` for filtering capabilities - **COMPLETED**
+- ⚠️ **PARTIAL**: `$filter` — comparisons and `and` done; `in`/`or`/index-backed strings — TODO #1
 - ✅ **DONE**: `$select` for field projection - **COMPLETED**
-- ⚠️ **TODO**: Implement actual expansion logic for `$expand` (currently placeholder)
+- ⚠️ **TODO**: Relationship model (TODO #2), then `$expand` expansion logic (TODO #3)
+- ⚠️ **TODO**: `$filter` `in` operator and related enhancements (TODO #1 — **recommended next**)
 
 ## Comparison with REST Best Practices
 
@@ -306,7 +329,7 @@ All previously identified critical issues have been addressed:
 - ✅ `$top` - Pagination limit (e.g., `$top=10`)
 - ✅ `$skip` - Pagination offset (e.g., `$skip=20`)
 - ✅ `$orderby` - Sorting (e.g., `$orderby=field desc`)
-- ✅ `$filter` - Filtering with comparison and logical operators
+- ⚠️ `$filter` - Comparison, `and`, string functions (post-process); `in`/`or`/nested paths planned (TODO #1)
 - ✅ `$select` - Field projection (e.g., `$select=name,email`)
 - ✅ `$expand` - Parsed (placeholder implementation)
 - ✅ `$count` - Return count of items (e.g., `$count=true`)
@@ -347,9 +370,12 @@ YarDB now has a **production-ready REST API** with proper HTTP semantics, correc
 The API now follows REST best practices and provides a production-ready foundation for client applications. All major OData query parameters have been implemented, providing comprehensive query capabilities. Content negotiation, HEAD method support, ETag support, and conditional requests enable efficient client-server interaction, caching strategies, and optimistic locking.
 
 ### Next Steps
-See the [TODO: Missing Features](#todo-missing-features-prioritized) section at the top of this document for prioritized next steps. High-priority items include:
-- Implementing `$apply` with aggregation and grouping
-- Full `$expand` implementation (currently placeholder)
+
+1. **Immediate:** Enhanced `$filter` — `in` operator (TODO #1)
+2. **Design:** Relationship / navigation model (TODO #2)
+3. **Then:** Full `$expand` (TODO #3) and `$apply` aggregation (TODO #4)
+
+See [TODO: Missing Features](#todo-missing-features-prioritized) for the full list.
 
 **Recently Completed:**
 - ✅ `$count` query option - Returns count as JSON number (OData compliant)

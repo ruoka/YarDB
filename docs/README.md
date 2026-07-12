@@ -14,7 +14,10 @@ This directory contains comprehensive project documentation organized by topic a
 - **[deployment.md](deployment.md)** - Deployment procedures and production considerations
 
 ### 📋 Proposals & Planning
-- **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API design evaluation and feature status
+- **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API evaluation, feature status, and prioritized roadmap
+
+### 🤖 Agent / automation
+- **[../AGENTS.md](../AGENTS.md)** - JSONL commands and triage for AI agents and CI
 
 ### 📁 Archive
 - **[archive/](archive/)** - Completed/historical documentation
@@ -22,12 +25,14 @@ This directory contains comprehensive project documentation organized by topic a
 
 ## 🎯 Current Development Focus
 
-Based on recent architectural review, current priorities include:
+**Recommended next (API):** OData `$filter` enhancements — `in` operator, then `or` and index-backed string filters. See **[rest_api_evaluation.md](rest_api_evaluation.md)**.
 
-1. **🔐 Security & Authentication** - Enterprise-grade auth system (JWT, RBAC)
-2. **📊 Observability & Monitoring** - Prometheus metrics, structured logging, health checks
-3. **🔒 TLS Proxy Implementation** - Cloud-native TLS termination approach
-4. **🌐 Net Module Modernization** - Convert to C++23 modules, remove headers
+Broader roadmap priorities (see **[development.md](development.md)**):
+
+1. **🔐 Security & Authentication** - JWT, RBAC
+2. **📊 Observability & Monitoring** - Prometheus metrics, health checks
+3. **🔒 TLS Proxy Implementation** - Cloud-native TLS termination
+4. **🔗 Relationship model** - Prerequisite for full `$expand` / `$apply`
 
 ## ✅ Recently Completed
 

@@ -41,15 +41,15 @@ YarDB is a production-ready C++23 application that implements:
 ## Requirements
 
 ### Compiler
-- **Clang 20 or higher** (required for C++23 modules and built-in std module support)
+- **Clang 21 or higher** (required for C++23 modules and built-in std module support)
 - libc++ development libraries with module support
 
 ### Linux
-- Clang 20+ (`/usr/lib/llvm-20/bin/clang++`) or later
-- libc++ development libraries
+- Clang 21+ (`clang++-21`, LLVM at `/usr/lib/llvm-21/`) — CI and devcontainer use apt.llvm.org
+- libc++ development libraries (`libc++-21-dev`, `libc++abi-21-dev`)
 
 ### macOS
-- LLVM 20+ installed at `/usr/local/llvm/` (not Homebrew)
+- LLVM 21+ installed at `/usr/local/llvm/` (not Homebrew)
 - The build system expects `/usr/local/llvm/bin/clang++` to be available
 - System clang from Xcode doesn't fully support C++23 modules
 
@@ -100,7 +100,7 @@ YarDB/
 │   ├── cryptic/       # Cryptographic functions
 │   └── tester/       # Testing framework
 │
-│   Note: std module is built from libc++ source (Clang 20+), not from a submodule
+│   Note: std module is built from libc++ source (Clang 21+), not from a submodule
 ├── build-{os}-{config}/  # Build artifacts (generated, e.g., build-darwin-debug/, build-linux-release/)
 ├── tools/            # Build tools (CB.sh)
 └── docs/             # Documentation
@@ -213,7 +213,7 @@ The project uses git submodules for dependencies:
 - `cryptic`: Cryptographic functions (SHA1, SHA2, Base64)
 - `tester`: Testing framework
 
-**Note**: The `std` module is built from libc++ source (provided by Clang 20+), not from a submodule.
+**Note**: The `std` module is built from libc++ source (provided by Clang 21+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core`.
 
 ## API Endpoints
 

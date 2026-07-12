@@ -26,19 +26,14 @@ git pull --recurse-submodules
 
 #### macOS
 ```bash
-# Install Homebrew LLVM 20+ (required for C++23 modules and built-in std module)
-brew install llvm@20
-
-# Or use latest LLVM (must be 20+)
-brew install llvm
+# LLVM 21+ at /usr/local/llvm/ (required for C++23 modules; system Xcode clang is insufficient)
+# See README.md for install notes
 ```
 
 #### Linux
 ```bash
-# Install Clang 20+
-sudo apt-get install clang-20 libc++-20-dev
-
-# Or use LLVM 20 from /usr/lib/llvm-20
+# Clang 21+ (CI and devcontainer use apt.llvm.org — see .devcontainer/Dockerfile)
+sudo apt-get install clang-21 libc++-21-dev libc++abi-21-dev lld-21
 ```
 
 ### Common Tasks
@@ -252,6 +247,15 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 - **Reference**: See project history and git commits for detailed analysis
 
 ### 🚧 Active Development Projects
+
+#### 0. 📊 OData `$filter` enhancements (API — recommended next)
+- **Priority**: HIGH (near-term, no schema change)
+- **Current State**: `$filter` supports `eq`, `ne`, comparisons, `and`, and string functions via post-processing; `or` and `in` are not implemented
+- **Planned Implementation**:
+  - `in` operator (`$filter=status in ('active','pending')`)
+  - `$filter` `or` support
+  - Index-backed string filters where practical
+- **Reference**: [rest_api_evaluation.md](rest_api_evaluation.md) — Recommended Next Improvement
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

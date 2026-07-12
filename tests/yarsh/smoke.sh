@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: crud, count, filter_ne, head, if_none_match, bad_json"
+      echo "cases: crud, put, patch, count, filter_ne, head, if_none_match, bad_json"
       exit 0
       ;;
     *)
@@ -63,6 +63,56 @@ EOF
   assert_contains " 204 " "status_no_content"
   assert_contains '"name" : "alpha"' "body_name"
   end_case crud
+}
+
+test_put() {
+  should_run put || return 0
+  begin_case put
+  local coll
+  coll="$(collection put)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"original","value":1}
+PUT /${coll}/1
+{"name":"replaced","value":99}
+GET /${coll}/1
+PUT /${coll}/999
+{"name":"upserted","value":200}
+GET /${coll}/999
+EXIT
+EOF
+)"
+  assert_contains " 201 " "post_created"
+  assert_contains " 200 " "put_update_ok"
+  assert_contains '"name" : "replaced"' "put_replace_name"
+  assert_contains '"value" : 99' "put_replace_value"
+  assert_contains " 201 " "put_upsert_created"
+  assert_contains '"name" : "upserted"' "put_upsert_name"
+  assert_contains '"value" : 200' "put_upsert_value"
+  end_case put
+}
+
+test_patch() {
+  should_run patch || return 0
+  begin_case patch
+  local coll
+  coll="$(collection patch)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"keep","value":10}
+PATCH /${coll}/1
+{"value":20}
+GET /${coll}/1
+EXIT
+EOF
+)"
+  assert_contains " 201 " "post_created"
+  assert_contains " 200 " "patch_update_ok"
+  assert_contains '"name" : "keep"' "patch_preserves_name"
+  assert_contains '"value" : 20' "patch_updates_value"
+  end_case patch
 }
 
 test_count() {
@@ -206,6 +256,8 @@ main() {
   start_yardb
 
   test_crud
+  test_put
+  test_patch
   test_count
   test_filter_ne
   test_head

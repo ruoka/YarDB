@@ -18,7 +18,7 @@ The main database server that provides a RESTful HTTP API for document storage a
 ### Usage
 
 ```bash
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
 ```
 
 ### Options
@@ -42,15 +42,20 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port]
 
 - `--help` - Display usage information
 
+- `--pat=<token>` - Accept a personal access token (repeatable). Clients send `Authorization: Bearer <token>`.
+- `--pat-file=<path>` - Load PATs from a file (one token per line; `#` comments allowed)
+
+When any PAT is configured, **all API routes** require a valid Bearer token (via `net` `authentication_middleware`).
+
 ### Security Note
 
-**⚠️ Security Warning**: Currently, `yardb` provides **no authentication or access control**. All endpoints are publicly accessible. For production use, deploy behind a reverse proxy with proper authentication and TLS termination.
+**Default:** No PAT flags → open API (development only).
 
-**Future Security Features** (development roadmap):
-- JWT-based authentication with refresh tokens
-- Role-based access control (RBAC)
-- TLS/HTTPS support via proxy integration
-- Security audit logging
+**With `--pat` / `--pat-file`:** Bearer PAT required on every route. Suitable for simple deployments; use TLS in production.
+
+**Future:** JWT/OAuth2, RBAC, scoped tokens, token hashing at rest.
+
+**`yarsh`:** send `@Authorization: Bearer <token>` before the request line.
 
 ### Example
 
@@ -363,7 +368,7 @@ Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines
 
 `tools/cli_test.sh` is a thin wrapper around the same harness. Piped scripts use **one JSON line** per `POST`/`PUT`/`PATCH` body so multiple commands can run in one session.
 
-Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `head`, `if_none_match`, `bad_json`.
+Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `head`, `if_none_match`, `bad_json`, `auth_required`.
 
 ## yarproxy - HTTP Fan-out Proxy
 

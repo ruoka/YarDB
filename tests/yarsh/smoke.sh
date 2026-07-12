@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_in, filter_ne, head, if_none_match, bad_json"
+      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_in, filter_ne, head, if_none_match, bad_json, auth_required"
       exit 0
       ;;
     *)
@@ -403,6 +403,35 @@ EOF
   end_case bad_json
 }
 
+test_auth_required() {
+  should_run auth_required || return 0
+  begin_case auth_required
+  local pat
+  pat="smoke-pat-${RANDOM}"
+
+  stop_yardb
+  YARDB_PAT="${pat}"
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+GET /
+EXIT
+EOF
+)"
+  assert_contains " 401 " "unauthorized_without_pat"
+
+  run_yarsh "$(cat <<EOF
+GET /
+@Authorization: Bearer ${pat}
+EXIT
+EOF
+)"
+  assert_contains " 200 " "authorized_with_pat"
+
+  YARDB_PAT=""
+  end_case auth_required
+}
+
 main() {
   require_bins
   trap stop_yardb EXIT
@@ -410,7 +439,9 @@ main() {
   jsonl_emit "{\"type\":\"smoke_start\",\"schema\":\"yarsh-smoke\",\"version\":1}"
   log "yarsh smoke tests (build=${BUILD_DIR})"
 
-  start_yardb
+  if [[ -z "${SELECTED_CASE}" || "${SELECTED_CASE}" != "auth_required" ]]; then
+    start_yardb
+  fi
 
   test_crud
   test_put
@@ -425,6 +456,7 @@ main() {
   test_head
   test_if_none_match
   test_bad_json
+  test_auth_required
 
   local end_ms duration_ms passed
   end_ms=$(python3 - <<'PY'

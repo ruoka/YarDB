@@ -3278,6 +3278,52 @@ auto test_set()
         };
     };
 
+    test_case("PAT authentication middleware, [yardb]") = []
+    {
+        const auto test_file = "./httpd_pat_auth_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto valid_pat = "Bearer smoke-test-pat"s;
+        setup->get_server().configure_authentication(
+            [](string_view) -> bool { return false; },
+            [valid_pat](string_view authorization) -> bool {
+                return authorization == valid_pat;
+            },
+            "YarDB API"sv
+        );
+
+        section("Protected route without Authorization returns 401") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/"s, ""s
+            );
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+            require_true(headers.contains("www-authenticate"s));
+            require_eq(body, "Unauthorized"s);
+        };
+
+        section("Protected route with invalid token returns 401") = [setup]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", "Bearer wrong-token"s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, auth_headers
+            );
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("Protected route with valid Bearer PAT returns 200") = [setup, valid_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", valid_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, auth_headers
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

@@ -27,6 +27,7 @@ YARDB_PID=""
 YARDB_DB=""
 YARDB_PORT=""
 YARDB_URL=""
+YARDB_PAT=""
 RUN_ID=""
 
 jsonl_emit() {
@@ -76,12 +77,19 @@ start_yardb() {
   RUN_ID="smoke$(date +%s)${RANDOM}"
 
   log "Starting yardb on ${YARDB_URL} (db=${YARDB_DB})"
-  "${YARDB_BIN}" --clog --file="${YARDB_DB}" "${YARDB_PORT}" >"${YARDB_DB}.log" 2>&1 &
+  local yardb_args=(--clog --file="${YARDB_DB}")
+  if [[ -n "${YARDB_PAT}" ]]; then
+    yardb_args+=(--pat="${YARDB_PAT}")
+  fi
+  "${YARDB_BIN}" "${yardb_args[@]}" "${YARDB_PORT}" >"${YARDB_DB}.log" 2>&1 &
   YARDB_PID=$!
 
-  local attempt
+  local attempt curl_args=(-sf)
+  if [[ -n "${YARDB_PAT}" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${YARDB_PAT}")
+  fi
   for attempt in $(seq 1 60); do
-    if curl -sf "${YARDB_URL}/" >/dev/null 2>&1; then
+    if curl "${curl_args[@]}" "${YARDB_URL}/" >/dev/null 2>&1; then
       log "yardb ready (pid=${YARDB_PID})"
       return 0
     fi

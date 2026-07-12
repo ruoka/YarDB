@@ -158,6 +158,7 @@ public:
         m_is_public_path = std::move(is_public_path);
         m_validate_token = std::move(validate_token);
         m_auth_realm = std::string{realm};
+        rebuild_routes();
     }
 
     void disable_authentication()
@@ -166,6 +167,7 @@ public:
         m_is_public_path = nullptr;
         m_validate_token = nullptr;
         m_auth_realm = "YarDB API"s;
+        rebuild_routes();
     }
 
     // Rebuild routes after middleware configuration changes

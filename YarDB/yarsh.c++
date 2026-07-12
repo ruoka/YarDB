@@ -31,6 +31,7 @@ PATCH /_db/collection    Add secondary indexes incrementally
 
 Optional request headers (before JSON body; one per line):
   @Accept: application/json;odata=minimalmetadata
+  @Authorization: Bearer <pat-token>
   @If-Match: "etag-value"
   @If-None-Match: "etag-value"
 

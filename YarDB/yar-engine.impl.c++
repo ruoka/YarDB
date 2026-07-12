@@ -160,6 +160,14 @@ void yar::db::engine::reindex()
     populate_indexes();
 }
 
+std::vector<std::string> yar::db::engine::indexed_keys() const
+{
+    const auto it = m_index.find(m_collection);
+    if(it == m_index.end())
+        return {};
+    return it->second.keys();
+}
+
 void yar::db::engine::index(std::vector<std::string> keys)
 {
     auto& index = m_index[m_collection];

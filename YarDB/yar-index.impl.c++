@@ -55,7 +55,7 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
         std::ranges::advance(itr, -std::min<xson::integer_type>(n, static_cast<xson::integer_type>(std::ranges::distance(begin, end))));
         begin = itr;
     }
-    else
+    else if(selector.has_value())
     {
         const auto key = make_key(selector);
         std::tie(begin, end) = keys.equal_range(key);
@@ -125,7 +125,7 @@ yar::db::index_view query_analysis_secondary(
         const auto key = make_secondary_key(selector["$eq"s]);
         std::tie(key_begin, key_end) = keys.equal_range(key);
     }
-    else
+    else if(selector.has_value())
     {
         const auto key = make_secondary_key(selector);
         std::tie(key_begin, key_end) = keys.equal_range(key);

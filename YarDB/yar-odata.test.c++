@@ -615,6 +615,114 @@ auto register_odata_tests()
         };
     };
 
+    scenario("startswith lowers to indexed prefix range, [yardb]") = []
+    {
+        given("prefix_exclusive_upper_bound helper") = []
+        {
+            when("Prefix is a single letter") = []
+            {
+                then("Upper bound increments the last byte") = []
+                {
+                    const auto upper = prefix_exclusive_upper_bound("A"sv);
+                    require_true(upper.has_value());
+                    require_eq(*upper, "B"s);
+                };
+            };
+
+            when("Prefix is a word") = []
+            {
+                then("Upper bound increments the final character") = []
+                {
+                    const auto upper = prefix_exclusive_upper_bound("John"sv);
+                    require_true(upper.has_value());
+                    require_eq(*upper, "Joho"s);
+                };
+            };
+        };
+
+        given("Collection with indexed name field") = []
+        {
+            const auto test_file = "./startswith_index_test.db"s;
+
+            when("read_with_parsed_filter uses startswith on indexed field") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"name"s});
+
+                auto alice = object{{"name"s, "Alice"s}};
+                auto bob = object{{"name"s, "Bob"s}};
+                auto charlie = object{{"name"s, "Charlie"s}};
+                require_true(engine.create(alice));
+                require_true(engine.create(bob));
+                require_true(engine.create(charlie));
+
+                const auto parsed = parse_filter("startswith(name, 'A')"sv);
+                auto documents = read_with_parsed_filter(engine, object{}, parsed);
+
+                then("Returns only names with prefix A") = [documents]
+                {
+                    require_true(documents.is_array());
+                    const auto& items = documents.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("lower_startswith_filters skips nested paths") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"Customer"s});
+
+                auto selector = object{};
+                auto filters = std::vector<string_filter>{
+                    {"startswith"sv, "Customer/Name"sv, "Ac"sv}
+                };
+                lower_startswith_filters(engine, selector, filters);
+
+                then("Keeps post-filter and leaves selector empty") = [selector, filters]
+                {
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_eq(filters[0].function, "startswith"sv);
+                };
+            };
+
+            when("lower_startswith_filters builds range selector") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                engine.collection("users"s);
+                engine.index({"name"s});
+
+                auto selector = object{};
+                auto filters = std::vector<string_filter>{
+                    {"startswith"sv, "name"sv, "Al"sv}
+                };
+                lower_startswith_filters(engine, selector, filters);
+
+                then("Moves constraint into selector and clears string filter") = [selector, filters]
+                {
+                    require_true(filters.empty());
+                    require_true(selector.has("name"s));
+                    require_true(selector["name"s].has("$gte"s));
+                    require_true(selector["name"s].has("$lt"s));
+                    require_eq(selector["name"s]["$gte"s].get<string>(), "Al"s);
+                    require_eq(selector["name"s]["$lt"s].get<string>(), "Am"s);
+                };
+            };
+        };
+    };
+
     // Test apply_select
     scenario("apply_select projects fields correctly, [yardb]") = []
     {

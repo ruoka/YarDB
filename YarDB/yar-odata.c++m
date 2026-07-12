@@ -683,6 +683,77 @@ inline auto apply_select(const xson::object& documents, std::string_view select_
     return result;
 }
 
+// Smallest string strictly greater than all strings with the given prefix (for index range scans)
+export inline auto prefix_exclusive_upper_bound(std::string_view prefix) -> std::optional<std::string>
+{
+    if(prefix.empty())
+        return std::nullopt;
+
+    auto upper = std::string{prefix};
+    while(not upper.empty())
+    {
+        auto& byte = upper.back();
+        if(static_cast<unsigned char>(byte) < 0xFF)
+        {
+            ++byte;
+            return upper;
+        }
+        upper.pop_back();
+    }
+
+    return std::nullopt;
+}
+
+// Lower startswith(field, prefix) to indexed {$gte, $lt} range when field is a top-level secondary key
+export inline void lower_startswith_filters(
+    yar::db::engine& engine,
+    xson::object& selector,
+    std::vector<string_filter>& string_filters)
+{
+    if(string_filters.empty())
+        return;
+
+    const auto indexed_keys = engine.indexed_keys();
+    auto indexed = std::unordered_set<std::string>{};
+    indexed.reserve(indexed_keys.size());
+    for(const auto& key : indexed_keys)
+        indexed.insert(key);
+
+    auto remaining = std::vector<string_filter>{};
+    remaining.reserve(string_filters.size());
+
+    for(const auto& filter : string_filters)
+    {
+        if(filter.function != "startswith"sv || filter.field.contains('/'))
+        {
+            remaining.push_back(filter);
+            continue;
+        }
+
+        const auto field = std::string{filter.field};
+        if(not indexed.contains(field) || selector.has(field))
+        {
+            remaining.push_back(filter);
+            continue;
+        }
+
+        const auto prefix = std::string{filter.value};
+        const auto upper = prefix_exclusive_upper_bound(prefix);
+        if(not upper)
+        {
+            remaining.push_back(filter);
+            continue;
+        }
+
+        set_nested_selector_leaf(
+            selector,
+            field,
+            xson::object{{"$gte"s, prefix}, {"$lt"s, *upper}});
+    }
+
+    string_filters = std::move(remaining);
+}
+
 // Helper function to apply string filters to documents (post-processing)
 inline auto apply_string_filters(const xson::object& documents, const std::vector<string_filter>& filters)
 {
@@ -859,8 +930,9 @@ export inline auto read_with_parsed_filter(
         auto merged = xson::object{xson::object::array{}};
         auto seen_ids = std::unordered_set<xson::integer_type>{};
 
-        for(const auto& branch : filter.or_branches)
+        for(auto branch : filter.or_branches)
         {
+            lower_startswith_filters(engine, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
             engine.read(branch.selector, branch_docs);
             auto filtered = apply_string_filters(branch_docs, branch.string_filters);
@@ -872,9 +944,12 @@ export inline auto read_with_parsed_filter(
 
     merge_selector_into(query_selector, filter.and_selector);
 
+    auto string_filters = filter.and_string_filters;
+    lower_startswith_filters(engine, query_selector, string_filters);
+
     auto documents = xson::object{};
     engine.read(query_selector, documents);
-    return apply_string_filters(documents, filter.and_string_filters);
+    return apply_string_filters(documents, string_filters);
 }
 
 // Helper function to apply $expand to documents

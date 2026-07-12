@@ -36,6 +36,10 @@ public:
     // Can be called at runtime after adding new secondary keys to index existing documents
     void reindex();
 
+    // Secondary index field names for the current collection
+    // @return Indexed field names (empty if none)
+    std::vector<std::string> indexed_keys() const;
+
 //  CRUD
 
     // Create a new document in the current collection

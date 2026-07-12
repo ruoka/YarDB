@@ -76,7 +76,9 @@ jobs:
       - name: Run tests with JSONL output
         run: |
           set -euo pipefail
-          ./tools/CB.sh ${{ matrix.config }} test -- --output=jsonl > test_results_${{ matrix.config }}.jsonl
+          # Scope to YarDB tests only — full suite includes deps/tester [jsonl-probe]
+          # intentional-failure probes and hundreds of dependency tests.
+          ./tools/CB.sh ${{ matrix.config }} test --jsonl --tags='\[yardb\]' > test_results_${{ matrix.config }}.jsonl
 
       - name: Validate JSONL output
         run: |
@@ -89,6 +91,8 @@ jobs:
           if command -v jq >/dev/null 2>&1; then
             last_line="$(tail -1 "test_results_${{ matrix.config }}.jsonl")"
             echo "$last_line" | jq -e '.type == "eof"' >/dev/null
+            summary_line="$(grep '"type":"summary"' "test_results_${{ matrix.config }}.jsonl" | tail -1)"
+            echo "$summary_line" | jq -e '.passed == true' >/dev/null
           fi
 
       - name: Upload test results

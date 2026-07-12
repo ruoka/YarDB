@@ -168,6 +168,96 @@ void remove_position(yar::db::positions_type& positions, yar::db::position_type 
         positions.erase(it);
 }
 
+bool is_pagination_key(const std::string& key)
+{
+    return key == "$top"s || key == "$skip"s || key == "$desc"s;
+}
+
+auto selector_count_keys(const yar::db::object& selector)
+{
+    auto keys = std::vector<std::string>{};
+    if(not selector.has_objects())
+        return keys;
+
+    for(const auto& entry : selector.get<yar::db::object::map>())
+    {
+        if(not is_pagination_key(entry.first))
+            keys.push_back(entry.first);
+    }
+    return keys;
+}
+
+bool index_only_field_selector(const yar::db::object& field_selector)
+{
+    if(field_selector.has_value())
+        return true;
+
+    if(not field_selector.has_objects())
+        return false;
+
+    for(const auto& entry : field_selector.get<yar::db::object::map>())
+    {
+        const auto& op = entry.first;
+        if(op != "$eq"s && op != "$gt"s && op != "$gte"s && op != "$lt"s && op != "$lte"s)
+            return false;
+    }
+
+    return true;
+}
+
+std::size_t count_index_view(const yar::db::index_view& view)
+{
+    auto count = std::size_t{0};
+    for(auto it = view.begin(); it != view.end(); ++it)
+        ++count;
+    return count;
+}
+
+std::optional<std::size_t> try_index_only_count(
+    const yar::db::index& index,
+    const yar::db::object& selector)
+{
+    const auto keys = selector_count_keys(selector);
+    if(keys.empty())
+        return count_index_view(index.view(selector));
+
+    if(keys.size() != 1)
+        return std::nullopt;
+
+    if(keys[0] == "_id"s)
+    {
+        if(not index_only_field_selector(selector["_id"s]))
+            return std::nullopt;
+        return count_index_view(index.view(selector));
+    }
+
+    if(not index.secondary_key(selector) || not index_only_field_selector(selector[keys[0]]))
+        return std::nullopt;
+
+    return count_index_view(index.view(selector));
+}
+
+std::size_t count_by_scan(
+    std::fstream& storage,
+    const yar::db::index& index,
+    const yar::db::object& selector)
+{
+    using xson::fson::operator >>;
+
+    auto count = std::size_t{0};
+    for(const auto position : index.view(selector))
+    {
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        storage.clear();
+        storage.seekg(position, storage.beg);
+        storage >> metadata >> document;
+        if(document.match(selector))
+            ++count;
+    }
+    return count;
+}
+
 } // namespace
 
 void yar::db::index::add(const std::string& key)
@@ -202,6 +292,14 @@ bool yar::db::index::secondary_key(const yar::db::object& selector) const
         if(selector.has(field_name))
             return true;
     return false;
+}
+
+std::size_t yar::db::index::count(std::fstream& storage, const yar::db::object& selector) const
+{
+    if(const auto fast = try_index_only_count(*this, selector))
+        return *fast;
+
+    return count_by_scan(storage, *this, selector);
 }
 
 yar::db::index_view yar::db::index::view(const yar::db::object& selector) const

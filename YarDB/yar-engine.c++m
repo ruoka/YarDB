@@ -54,6 +54,11 @@ public:
     // @param documents Output array of matching documents
     // @return true if any documents found, false otherwise
     bool read(const object& selector, object& documents);
+
+    // Count documents matching the selector (index-only when possible)
+    // @param selector Query selector (ignores $top, $skip, $desc)
+    // @return Number of matching documents in the current collection
+    std::size_t count(const object& selector) const;
     
     // Get metadata timestamp for the first document matching the selector
     // Used for Last-Modified HTTP header generation

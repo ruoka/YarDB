@@ -200,6 +200,15 @@ bool yar::db::engine::create(yar::db::object& document)
     return true;
 }
 
+std::size_t yar::db::engine::count(const yar::db::object& selector) const
+{
+    const auto it = m_index.find(m_collection);
+    if(it == m_index.end())
+        return 0;
+
+    return it->second.count(m_storage, selector);
+}
+
 bool yar::db::engine::read(const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;

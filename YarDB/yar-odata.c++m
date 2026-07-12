@@ -924,6 +924,51 @@ export inline auto filter_documents_by_or(
     return result;
 }
 
+// Count documents for $count=true — index-only when the parsed filter allows it
+export inline auto count_with_parsed_filter(
+    yar::db::engine& engine,
+    xson::object query_selector,
+    const parsed_filter& filter) -> std::size_t
+{
+    if(filter.has_or())
+    {
+        auto merged = xson::object{xson::object::array{}};
+        auto seen_ids = std::unordered_set<xson::integer_type>{};
+
+        for(auto branch : filter.or_branches)
+        {
+            lower_startswith_filters(engine, branch.selector, branch.string_filters);
+            auto branch_docs = xson::object{};
+            engine.read(branch.selector, branch_docs);
+            auto filtered = apply_string_filters(branch_docs, branch.string_filters);
+            merge_or_branch_documents(merged, filtered, seen_ids);
+        }
+
+        if(not merged.is_array())
+            return 0;
+
+        return merged.get<xson::object::array>().size();
+    }
+
+    merge_selector_into(query_selector, filter.and_selector);
+
+    auto string_filters = filter.and_string_filters;
+    lower_startswith_filters(engine, query_selector, string_filters);
+
+    if(not string_filters.empty())
+    {
+        auto documents = xson::object{};
+        engine.read(query_selector, documents);
+        documents = apply_string_filters(documents, string_filters);
+        if(not documents.is_array())
+            return 0;
+
+        return documents.get<xson::object::array>().size();
+    }
+
+    return engine.count(query_selector);
+}
+
 // Execute $filter via engine.read — one read per OR branch, merged by _id
 export inline auto read_with_parsed_filter(
     yar::db::engine& engine,

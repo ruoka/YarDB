@@ -290,6 +290,14 @@ public:
     // @return Index view providing iterator over matching document positions
     index_view view(const xson::object& selector) const;
 
+    // Count documents matching the selector
+    // Uses index-only counting when the selector is a single indexed constraint;
+    // otherwise scans candidate positions and applies document.match
+    // @param storage Database file stream for fallback scans
+    // @param selector Query selector (ignores $top, $skip, $desc)
+    // @return Number of matching documents
+    std::size_t count(std::fstream& storage, const xson::object& selector) const;
+
     // Update document and assign _id if missing
     // Increments sequence counter for new _id assignment
     // @param document Document to update (may be modified to add _id)

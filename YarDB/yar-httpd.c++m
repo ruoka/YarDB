@@ -612,27 +612,20 @@ private:
                 const auto collection_name = validate_collection_name(uri.path[1]);
                 m_engine.collection(collection_name);
 
-                auto documents = xson::object{};
-                if(params.contains("$filter"s))
+                const auto count = [&]() -> std::size_t
                 {
-                    const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
-                    documents = yar::http::odata::read_with_parsed_filter(m_engine, count_selector, parsed_filter);
-                }
-                else
-                {
-                    m_engine.read(count_selector, documents);
-                }
-                
-                // Count the documents
-                auto count = 0ll;
-                if(documents.is_array())
-                {
-                    count = static_cast<long long>(documents.get<xson::object::array>().size());
-                }
+                    if(params.contains("$filter"s))
+                    {
+                        const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
+                        return yar::http::odata::count_with_parsed_filter(m_engine, count_selector, parsed_filter);
+                    }
+
+                    return m_engine.count(count_selector);
+                }();
                 
                 // Return count as JSON number (OData spec: $count=true returns just the number)
                 // JSON numbers are valid as plain strings (e.g., "42" is valid JSON)
-                return response_with_headers{::http::status_ok, std::to_string(count), std::optional<::http::headers>{}};
+                return response_with_headers{::http::status_ok, std::to_string(static_cast<long long>(count)), std::optional<::http::headers>{}};
             }
 
             // Handle $top (OData: $top=n)

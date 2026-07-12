@@ -330,6 +330,30 @@ auto test_set()
             require_false(documents[0].match(documents[1]));
         };
 
+        section("IndexOnlyCount") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"status"s, "active"s}, {"name"s, "alpha"s}},
+                document2 = object{{"status"s, "active"s}, {"name"s, "beta"s}},
+                document3 = object{{"status"s, "pending"s}, {"name"s, "gamma"s}},
+                active = object{{"status"s, "active"s}},
+                not_deleted = object{{"status"s, object{{"$ne"s, "deleted"s}}}},
+                documents = object{};
+            engine.collection("IndexOnlyCount"s);
+            engine.index({"status"s});
+            require_true(engine.create(document1));
+            require_true(engine.create(document2));
+            require_true(engine.create(document3));
+
+            require_eq(engine.count(object{}), 3u);
+            require_eq(engine.count(active), 2u);
+
+            require_true(engine.read(active, documents));
+            require_eq(engine.count(active), documents.get<object::array>().size());
+
+            require_eq(engine.count(not_deleted), 3u);
+        };
+
         section("Create2Keys") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

@@ -315,6 +315,115 @@ auto register_odata_tests()
                     });
                 };
             };
+
+            when("Filter uses 'in' operator with strings") = []
+            {
+                then("Returns selector with $in map") = []
+                {
+                    const auto [selector, filters] = parse_filter("status in ('active','pending')"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("status"s));
+
+                    const auto& status_selector = selector["status"s];
+                    require_true(status_selector.has("$in"s));
+                    const auto& in_map = status_selector["$in"s];
+                    require_eq(in_map.size(), 2u);
+                    require_eq(in_map["0"s].get<string>(), "active"s);
+                    require_eq(in_map["1"s].get<string>(), "pending"s);
+                };
+            };
+
+            when("Filter uses 'in' operator with spaced strings") = []
+            {
+                then("Returns selector with $in map") = []
+                {
+                    const auto [selector, filters] = parse_filter("status in ('active', 'pending')"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("status"s));
+                    require_eq(selector["status"s]["$in"s].size(), 2u);
+                };
+            };
+
+            when("Filter uses 'in' operator with numbers") = []
+            {
+                then("Returns selector with numeric $in map") = []
+                {
+                    const auto [selector, filters] = parse_filter("id in (1, 2, 3)"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("id"s));
+                    require_eq(static_cast<xson::integer_type>(selector["id"s]["$in"s]["0"s]), 1ll);
+                    require_eq(static_cast<xson::integer_type>(selector["id"s]["$in"s]["2"s]), 3ll);
+                };
+            };
+
+            when("Filter combines 'and' with 'in' operator") = []
+            {
+                then("Returns merged selector") = []
+                {
+                    const auto [selector, filters] = parse_filter("age gt 25 and status in ('active','pending')"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("age"s));
+                    require_true(selector.has("status"s));
+                    require_true(selector["status"s].has("$in"s));
+                    const auto json_str = xson::json::stringify(selector);
+                    require_true(json_str.find("\"$gt\"") != std::string::npos);
+                    require_true(json_str.find("\"$in\"") != std::string::npos);
+                };
+            };
+
+            when("Filter uses empty 'in' list") = []
+            {
+                then("Throws invalid_argument") = []
+                {
+                    require_throws([]
+                    {
+                        parse_filter("status in ()"sv);
+                    });
+                };
+            };
+
+            when("Filter uses mixed-type 'in' list") = []
+            {
+                then("Throws invalid_argument") = []
+                {
+                    require_throws([]
+                    {
+                        parse_filter("status in ('active', 1)"sv);
+                    });
+                };
+            };
+        };
+    };
+
+    scenario("parse_filter in operator matches documents, [yardb]") = []
+    {
+        given("Documents with status field") = []
+        {
+            auto docs = object::array{
+                object{{"name"s, "Alice"s}, {"status"s, "active"s}},
+                object{{"name"s, "Bob"s}, {"status"s, "pending"s}},
+                object{{"name"s, "Charlie"s}, {"status"s, "inactive"s}}
+            };
+
+            when("Selector uses parsed in filter") = [docs]
+            {
+                then("Returns only matching documents") = [docs]
+                {
+                    const auto [selector, filters] = parse_filter("status in ('active','pending')"sv);
+                    require_true(filters.empty());
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs)
+                    {
+                        if(doc.match(selector))
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 2u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                    require_eq(result[1]["name"s].get<string>(), "Bob"s);
+                };
+            };
         };
     };
 

@@ -154,6 +154,109 @@ export struct string_filter
     std::string_view value;     // Filter value (from parsed filter expression, points into original filter string)
 };
 
+// Split comma-separated OData list values, respecting quoted strings
+inline auto split_comma_separated_values(std::string_view list)
+{
+    auto result = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+
+    for(auto i = std::size_t{0}; i < list.size(); ++i)
+    {
+        const auto c = list[i];
+        if(in_quote)
+        {
+            if(c == quote_char)
+                in_quote = false;
+        }
+        else if(c == '\'' || c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+        }
+        else if(c == ',')
+        {
+            auto token = utils::trim(list.substr(start, i - start));
+            if(not token.empty())
+                result.push_back(token);
+            start = i + 1;
+        }
+    }
+
+    auto token = utils::trim(list.substr(start));
+    if(not token.empty())
+        result.push_back(token);
+
+    return result;
+}
+
+// Parse OData 'in' list: ('active','pending') or (1, 2, 3)
+inline auto parse_in_value_list(std::string_view list_content)
+{
+    auto tokens = split_comma_separated_values(list_content);
+    if(tokens.empty())
+        throw std::invalid_argument{"'in' operator requires at least one value"};
+
+    enum class value_kind { string, integer };
+    auto kind = std::optional<value_kind>{};
+    auto values = std::vector<xson::object>{};
+
+    for(const auto token : tokens)
+    {
+        auto is_string = false;
+        auto raw = std::string_view{token};
+
+        if(raw.size() >= 2 &&
+           ((raw.front() == '\'' && raw.back() == '\'') ||
+            (raw.front() == '"' && raw.back() == '"')))
+        {
+            raw = raw.substr(1, raw.size() - 2);
+            is_string = true;
+        }
+
+        if(is_string)
+        {
+            if(kind && *kind != value_kind::string)
+                throw std::invalid_argument{"'in' operator values must be all strings or all numbers"};
+            kind = value_kind::string;
+            values.emplace_back(utils::trim_end_to_string(raw));
+        }
+        else
+        {
+            try
+            {
+                if(kind && *kind != value_kind::integer)
+                    throw std::invalid_argument{"'in' operator values must be all strings or all numbers"};
+                kind = value_kind::integer;
+                values.emplace_back(utils::stoll(std::string{raw}));
+            }
+            catch(const std::invalid_argument&)
+            {
+                throw;
+            }
+            catch(...)
+            {
+                throw std::invalid_argument{"Invalid numeric value in 'in' list: "s + std::string{token}};
+            }
+        }
+    }
+
+    return values;
+}
+
+// Build xson $in map (xson match uses map keys, not arrays)
+inline auto make_in_selector(std::string_view field, const std::vector<xson::object>& values)
+{
+    auto in_map = xson::object{};
+    for(std::size_t i = 0; i < values.size(); ++i)
+        in_map[std::to_string(i)] = values[i];
+
+    auto selector = xson::object{};
+    selector[utils::trim_end_to_string(field)] = xson::object{{"$in"s, std::move(in_map)}};
+    return selector;
+}
+
 // Helper function to split filter expression by operator and process parts
 inline auto split_and_process_filter_parts(std::string_view expr, std::string_view op_str, std::size_t op_len)
 {
@@ -177,6 +280,7 @@ inline auto split_and_process_filter_parts(std::string_view expr, std::string_vi
 
 // Helper function to parse OData $filter expression and convert to selector
 // Supports: field eq 'value', field gt number, field ge number, field lt number, field le number, field ne 'value'
+// Supports: field in ('value1','value2') or field in (1, 2, 3)
 // Supports: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
 // Supports: and operator (OR operator is not yet supported)
 // Returns: pair of (selector, vector of string filters for post-processing)
@@ -221,6 +325,23 @@ inline std::pair<xson::object, std::vector<string_filter>> parse_filter(std::str
     if(expr.contains(" or "))
     {
         throw std::invalid_argument{"OR operator not yet supported in $filter expressions"};
+    }
+
+    // Handle 'in' operator: field in ('a','b') or field in (1, 2, 3)
+    constexpr auto in_marker = " in ("sv;
+    if(const auto in_pos = expr.find(in_marker); in_pos != std::string_view::npos)
+    {
+        if(not expr.ends_with(')'))
+            throw std::invalid_argument{"Invalid 'in' expression: "s + std::string{expr}};
+
+        auto field = utils::trim(expr.substr(0, in_pos));
+        if(field.empty())
+            throw std::invalid_argument{"Field name cannot be empty in 'in' expression: "s + std::string{expr}};
+
+        const auto list_start = in_pos + in_marker.size();
+        const auto list_content = expr.substr(list_start, expr.size() - list_start - 1);
+        const auto values = parse_in_value_list(list_content);
+        return std::make_pair(make_in_selector(field, values), string_filters);
     }
     
     // Check for string functions: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')

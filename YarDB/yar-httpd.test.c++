@@ -802,11 +802,61 @@ auto test_set()
             for(const auto& item : items)
             {
                 require_true(item.has("status"s));
-                const string status = item["status"s];
-                require_eq(status, "active"s);
+                const string item_status = item["status"s];
+                require_eq(item_status, "active"s);
                 require_true(item.has("age"s));
                 const auto age = static_cast<xson::integer_type>(item["age"s]);
                 require_true(age >= 25);
+            }
+        };
+
+        section("GET with $filter - status in ('active','pending')") = [setup]
+        {
+            auto test_data = std::vector<std::tuple<std::string, std::string>>{
+                {"InAlice"s, "active"s},
+                {"InBob"s, "pending"s},
+                {"InCharlie"s, "inactive"s}
+            };
+
+            for(const auto& [name, item_status] : test_data)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/usersin"s,
+                    R"({"name":")"s + name + R"(", "status":")"s + item_status + R"("})"s
+                );
+                if(post_status != "201"s)
+                {
+                    std::this_thread::sleep_for(100ms);
+                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                        setup->port(), "POST"s, "/usersin"s,
+                        R"({"name":")"s + name + R"(", "status":")"s + item_status + R"("})"s
+                    );
+                    require_eq(retry_status, "201"s);
+                }
+                else
+                {
+                    require_eq(post_status, "201"s);
+                }
+                std::this_thread::sleep_for(100ms);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/usersin?$filter=status%20in%20('active','pending')"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_true(items.size() >= 2);
+
+            for(const auto& item : items)
+            {
+                require_true(item.has("status"s));
+                const string status_value = item["status"s];
+                require_true(status_value == "active"s || status_value == "pending"s);
             }
         };
 

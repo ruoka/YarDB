@@ -29,7 +29,7 @@
 ### Available Programs
 - **`yardb`** - Main database server
 - **`yarsh`** - Interactive client
-- **`yarproxy`** - Load balancing proxy
+- **`yarproxy`** - HTTP fan-out proxy (dev/testing; not production HA)
 - **`yarexport`** - Data export utility
 - **`benchmark`** - Performance testing
 
@@ -170,13 +170,13 @@ yarexport --file=production.db > backup.json
 ## 🚨 High Availability & Scaling
 
 ### Current Limitations
-- **Single Node**: No clustering or replication
-- **No Load Balancing**: Basic proxy available but limited
-- **No Backup**: Manual export only
+- **Single Node**: Each `yardb` process owns one database file; no built-in clustering
+- **`yarproxy`**: Round-robin reads and write fan-out only — independent DBs, no sync, no guaranteed consistency (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
+- **No Backup**: Manual export only (`yarexport`)
 
 ### Future HA Features (Roadmap)
-- **Multi-node Replication** with automatic failover
-- **Load Balancing** with read/write splitting
+- **Multi-node Replication** with automatic failover and conflict handling
+- **Production-grade proxy** with health checks, partial-failure reporting, and read-your-writes semantics
 - **Automated Backups** with retention policies
 - **Horizontal Scaling** support
 

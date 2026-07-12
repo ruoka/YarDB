@@ -151,9 +151,9 @@ yarsh http://localhost:2112
 
 See [Programs Documentation](docs/programs.md#yarsh---interactive-shell) for details.
 
-### yarproxy - Replication Proxy
+### yarproxy - HTTP Fan-out Proxy
 
-A proxy server that forwards requests to replica yardb servers, providing load balancing for read operations and replication for write operations.
+A development proxy that forwards HTTP to multiple independent `yardb` instances. Each replica uses its own database file — this is **not** built-in replication or HA.
 
 **Usage:**
 ```bash
@@ -161,18 +161,21 @@ yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_po
 ```
 
 **Options:**
-- `--replica=<URL>` - Add a replica server URL (can be specified multiple times)
+- `--replica=<URL>` - Add a backend `yardb` URL (repeat for each instance)
 - `--clog` - Redirect logging to console
 - `--slog_level=<level>` - Set syslog severity level
 - `service_or_port` - Port number for proxy server (default: `2113`)
 
 **Behavior:**
-- **Read operations** (GET, HEAD): Load balanced across replicas using round-robin
-- **Write operations** (POST, PUT, PATCH, DELETE): Replicated to all replicas
+- **Read operations** (GET, HEAD): Round-robin to one backend per request
+- **Write operations** (POST, PUT, PATCH, DELETE): Best-effort fan-out to every backend; the client sees one response (from the last backend contacted)
+
+**Limitations:** No sync protocol, no partial-failure reporting, no strong consistency. Suitable for local multi-instance testing, not production multi-node deployment.
 
 **Example:**
 ```bash
 yarproxy --replica=http://localhost:2112 --replica=http://localhost:2114 2113
+./tests/yarproxy/smoke.sh --replicas=5
 ```
 
 ### yarexport - Data Export Utility

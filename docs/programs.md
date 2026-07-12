@@ -365,16 +365,17 @@ Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines
 
 Cases: `crud`, `count`, `filter_ne`, `head`, `if_none_match`, `bad_json`.
 
-## yarproxy - Replication Proxy
+## yarproxy - HTTP Fan-out Proxy
 
-A proxy server that forwards requests to replica yardb servers, providing load balancing and replication.
+Forwards HTTP requests to multiple independent `yardb` backends. Each backend has its own database file.
 
 ### Purpose
 
-`yarproxy` acts as a:
-- **Load balancer** for read operations (GET, HEAD)
-- **Replication proxy** for write operations (POST, PUT, PATCH, DELETE)
-- **High availability** gateway to multiple database servers
+`yarproxy` is a **thin HTTP forwarder** for development and testing:
+- **Read fan-out** (GET, HEAD): round-robin — one backend per request
+- **Write fan-out** (POST, PUT, PATCH, DELETE): same request sent to every backend
+
+It does **not** implement database replication, leader election, or conflict resolution.
 
 ### Usage
 
@@ -384,9 +385,8 @@ yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_po
 
 ### Options
 
-- `--replica=<URL>` - Add a replica server URL
-  - Can be specified multiple times to add multiple replicas
-  - Required: At least one replica must be specified
+- `--replica=<URL>` - Add a backend `yardb` URL
+  - Repeat for each instance (at least one required)
   - Example: `--replica=http://localhost:2112`
 
 - `--clog` - Redirect logging to console instead of syslog
@@ -400,41 +400,53 @@ yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_po
 ### Behavior
 
 #### Read Operations (GET, HEAD)
-- Requests are load balanced across replicas using **round-robin**
-- Each read request goes to the next replica in rotation
-- Provides horizontal scaling for read-heavy workloads
+- Round-robin across backends: each request hits **one** backend
+- `any_of` retry can reach the next backend if a connection is dead
+- Backends may return **different data** (separate DB files)
 
 #### Write Operations (POST, PUT, PATCH, DELETE)
-- Requests are **replicated to all replicas**
-- Ensures data consistency across all database instances
-- All replicas receive the same write operations
+- Request is forwarded to **all** backends
+- Client receives **one** response — from the last backend in the list
+- Failures on individual backends are not surfaced to the client today
+- `_id` values and timestamps may **diverge** across backends
+
+### Limitations
+
+| Topic | Reality |
+|-------|---------|
+| Consistency | None — independent databases |
+| Partial write failure | Silent — some backends may miss a write |
+| Failover | Best-effort on reads only; not HA |
+| Production use | Not recommended without external orchestration |
 
 ### Example
 
 ```bash
-# Proxy with two replicas, listening on port 2113
+# Proxy with two backends, listening on port 2113
 yarproxy --replica=http://localhost:2112 --replica=http://localhost:2114 2113
 
-# Proxy with three replicas, console logging
+# Three backends, console logging (e.g. tests/yar.sh demo)
 yarproxy --clog --replica=http://db1:2112 --replica=http://db2:2112 --replica=http://db3:2112 8080
 ```
 
 ### Use Cases
 
-- **High Availability**: Route requests to multiple database servers
-- **Read Scaling**: Distribute read load across multiple replicas
-- **Data Replication**: Ensure writes are propagated to all replicas
-- **Failover**: If one replica fails, others continue serving requests
+- **Local testing**: Single client port in front of multiple `yardb` instances (`tests/yar.sh`)
+- **Read experiments**: Observe round-robin across independent datasets
+- **Write fan-out demos**: Broadcast creates/updates to several empty databases started together
+
+Not suitable for: production HA, guaranteed replication, or strongly consistent reads after writes.
 
 ### Smoke tests
 
 ```bash
 ./tests/yarproxy/smoke.sh
+./tests/yarproxy/smoke.sh --replicas=5
 ./tests/yarproxy/smoke.sh --jsonl
 ./tests/yarproxy/smoke.sh --case write_fanout
 ```
 
-Cases: `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`.
+Cases: `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`. Default: 2 backends; override with `--replicas=N` or `REPLICA_COUNT=N`.
 
 ## yarexport - Data Export Utility
 

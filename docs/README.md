@@ -25,7 +25,7 @@ This directory contains comprehensive project documentation organized by topic a
 
 ## 🎯 Current Development Focus
 
-**Recommended next (API):** Index-backed `$filter` string functions. See **[rest_api_evaluation.md](rest_api_evaluation.md)**.
+**Recommended next (API):** Relationship / navigation model for `$expand` and `$apply`. See **[rest_api_evaluation.md](rest_api_evaluation.md)**.
 
 Broader roadmap priorities (see **[development.md](development.md)**):
 
@@ -36,6 +36,9 @@ Broader roadmap priorities (see **[development.md](development.md)**):
 
 ## ✅ Recently Completed
 
+- **OData `$filter` `ne` operator** (July 2026) - `$filter=status ne 'deleted'` via xson `$ne` selectors and `document.match`.
+- **Index-backed `$filter` `startswith`** (July 2026) - `startswith(name,'A')` lowered to prefix range on secondary-indexed top-level fields; `contains`/`endswith` remain post-filter.
+- **Multivalue secondary indexes** (July 2026) - duplicate indexed values store multiple file positions; `m_index` and per-collection indexes use `std::flat_map`.
 - **OData `$filter` nested paths** (July 2026) - `$filter=Customer/Country eq 'USA'` via nested selectors and deep-merge for `and`.
 - **OData `$filter` `or` operator** (July 2026) - `$filter=age gt 25 or status eq 'active'` via OR-first parse and multi-branch `engine.read` merged by `_id`.
 - **OData `$filter` `in` operator** (July 2026) - `$filter=status in ('active','pending')` and numeric lists via `parse_filter` → xson `$in` selectors. Tests in `yar-odata.test.c++` and `yar-httpd.test.c++`.

@@ -248,15 +248,15 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 
 ### 🚧 Active Development Projects
 
-#### 0. 📊 OData `$filter` enhancements (API — recommended next)
-- **Priority**: HIGH (near-term, no schema change)
-- **Current State**: `$filter` supports `eq`, `ne`, comparisons, `and`, `or`, `in`, nested property paths, and string functions via post-processing
-- **Planned Implementation**:
-  - ✅ `in` operator (`$filter=status in ('active','pending')`)
-  - ✅ `or` operator (`$filter=age gt 25 or status eq 'active'` — multi-query merge)
-  - ✅ Nested property paths (`$filter=Customer/Country eq 'USA'`)
-  - Index-backed string filters where practical
-- **Reference**: [rest_api_evaluation.md](rest_api_evaluation.md) — Recommended Next Improvement
+#### 0. 📊 OData `$filter` enhancements — ✅ largely complete
+- **Priority**: DONE (near-term API work)
+- **Current State**: `$filter` supports `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `in`, nested property paths, and string functions
+  - **Index-backed**: `startswith(field,'prefix')` on top-level secondary-indexed fields (prefix range via `$gte`/`$lt`)
+  - **Post-filter only**: `contains`, `endswith` (by design — no lexicographic index shortcut)
+- **Completed**:
+  - ✅ `in`, `or`, nested paths, `ne`, index-backed `startswith`
+  - ✅ Multivalue secondary indexes and `std::flat_map` collection map (engine/index layer)
+- **Recommended next (API)**: Relationship / navigation model for `$expand` and `$apply` — see [rest_api_evaluation.md](rest_api_evaluation.md)
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

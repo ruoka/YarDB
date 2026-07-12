@@ -78,6 +78,10 @@ Once running, `yardb` provides the following REST endpoints:
 - `DELETE /{collection}/{id}` - Delete document by ID
 - `HEAD /{collection}` - Get collection headers (same as GET but no body)
 - `HEAD /{collection}/{id}` - Get document headers (same as GET but no body)
+- `GET /$metadata` - OData 4.01 JSON CSDL service metadata
+- `GET /_reindex` - Rebuild all collection indexes
+- `PUT /_db/{collection}` - Configure secondary index keys for a collection
+- `PATCH /_db/{collection}` - Add secondary index keys incrementally
 
 ### HTTP Methods and Status Codes
 
@@ -148,6 +152,12 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$select=field1,field2`** - Project specific fields
   - Example: `GET /users?$select=name,email`
   - Note: `_id` field is always included
+
+- **`$count=true`** - Return count of matching documents instead of items
+  - Returns a JSON number in the response body (e.g. `42`)
+  - Works with `$filter` (including `or`, `ne`, and string functions)
+  - Uses index-only counting when the filter is a single indexed constraint with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`; otherwise scans candidates and applies `document.match`
+  - Example: `GET /users?$count=true`, `GET /users?$count=true&$filter=age%20gt%2025`
 
 - **`$expand=relatedEntity`** - Expand related entities (parsed only; returns documents unchanged until a relationship model exists)
 
@@ -288,41 +298,41 @@ yarsh [--help] [URL]
 
 ### Commands
 
-Once connected, the following commands are available:
+Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PATCH`, provide JSON on the following line(s). Type `HELP` or `EXIT` at the method prompt.
 
 #### Data Operations
 
-- `POST /collection` - Create a new document
-  - Prompts for JSON document content
-  - Example: `POST /users` followed by JSON input
-
-- `PUT /collection/id` - Replace document by ID
-  - Completely replaces existing document
-  - Example: `PUT /users/123` followed by JSON input
-
-- `PATCH /collection/id` - Update/Upsert document by ID
-  - Updates existing fields or creates document if it doesn't exist
-  - Example: `PATCH /users/123` followed by JSON input
-
+- `POST /collection` - Create a new document (JSON body follows)
+- `PUT /collection/id` - Replace document by ID (JSON body follows)
+- `PATCH /collection/id` - Update/Upsert document by ID (JSON body follows)
 - `GET /collection/{id}` - Read document by ID
-  - Example: `GET /users/123`
-
-- `GET /collection` - Read all documents in collection
-  - Example: `GET /users`
-
+- `GET /collection?...` - Read collection with OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count=true`)
+- `HEAD /collection/{id}` - Read headers only (no response body)
 - `DELETE /collection/id` - Delete document by ID
-  - Example: `DELETE /users/123`
 
 #### Administrative Commands
 
-- `GET /` - List all collections in the database
-
+- `GET /` - List all collections
+- `GET /$metadata` - OData JSON CSDL metadata
 - `GET /_reindex` - Reindex all collections
-  - Rebuilds indexes for all collections
-  - Useful after manual database modifications
+- `PUT /_db/collection` - Configure secondary indexes (JSON body: `{"keys":["field"]}`)
+- `PATCH /_db/collection` - Add secondary indexes incrementally
+
+#### Optional Request Headers
+
+Before the JSON body (or before the next request for `GET`/`HEAD`/`DELETE`), you may send optional headers — one per line, prefixed with `@`:
+
+```
+@Accept: application/json;odata=minimalmetadata
+@If-Match: "etag-value"
+@If-None-Match: "etag-value"
+```
+
+`@Accept` overrides the default `application/json`. Other `@` lines are sent as HTTP headers (names are lowercased).
+
+#### Shell Commands
 
 - `HELP` - Display help text with available commands
-
 - `EXIT` - Exit the shell and close connection
 
 ### Example Session
@@ -330,16 +340,23 @@ Once connected, the following commands are available:
 ```bash
 $ yarsh http://localhost:2112
 
-Currently supported shell commands are:
-POST /collection         aka Create
-...
-
 Enter restful request: GET /
 Enter restful request: POST /users
 {"name":"John","email":"john@example.com"}
 
 Enter restful request: GET /users/1
+Enter restful request: GET /users?$count=true&$filter=status%20ne%20'deleted'
+Enter restful request: @If-None-Match: "abc123"
+GET /users/1
 Enter restful request: EXIT
+```
+
+### Manual Smoke Test
+
+With a running `yardb` server:
+
+```bash
+./tools/cli_test.sh http://localhost:2112
 ```
 
 ## yarproxy - Replication Proxy

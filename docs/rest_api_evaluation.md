@@ -4,7 +4,7 @@
 
 **Relationship / navigation model** (see TODO #2 below) — prerequisite for full `$expand` and `$apply`.
 
-Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested paths, and index-backed `startswith` on secondary keys are implemented. `contains` and `endswith` remain post-filter by design (no lexicographic index shortcut). `$expand` and `$apply` still depend on an explicit relationship model (`apply_expand` in `yar-odata.c++m` is a documented placeholder).
+Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested paths, index-backed `startswith` on secondary keys, and index-only `$count` are implemented. `contains` and `endswith` remain post-filter by design (no lexicographic index shortcut). `$expand` and `$apply` still depend on an explicit relationship model (`apply_expand` in `yar-odata.c++m` is a documented placeholder).
 
 ## TODO: Missing Features (Prioritized)
 
@@ -68,7 +68,8 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 5. **✅ `$count` query option** - ✅ **COMPLETED** - Return count of items
    - ✅ Support `$count=true` to return count instead of items
    - ✅ Returns count as JSON number (OData compliant)
-   - ✅ Works with `$filter` to return filtered count
+   - ✅ Works with `$filter` to return filtered count (including `or`, `ne`, `startswith` via read/scan paths)
+   - ✅ Index-only fast path when the parsed filter allows it (single indexed constraint; no string post-filters)
    - ✅ Example: `GET /Products?$count=true` returns `42`
    - ✅ **Impact**: Efficient counting without fetching all data
 
@@ -146,7 +147,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 
 ## Overall Assessment
 
-**Rating: 9.1/10** - Excellent REST API with proper HTTP semantics, comprehensive error handling, content negotiation, ETag support, full conditional request support, and `$count` query option. Ready for production use with advanced caching and optimistic locking capabilities.
+**Rating: 9.2/10** - Excellent REST API with proper HTTP semantics, comprehensive error handling, content negotiation, ETag support, full conditional request support, index-backed `$filter`/`$count` where applicable, and broad `[yardb]` test coverage. Ready for production use with advanced caching and optimistic locking capabilities; relationship model remains the main gap for `$expand`/`$apply`.
 
 ## Strengths ✅
 

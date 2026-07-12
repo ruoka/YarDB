@@ -17,7 +17,10 @@ YarDB/
 │   ├── yar.c++m                 # Main yar module
 │   ├── yar-engine.c++m         # Database engine module
 │   ├── yar-engine.impl.c++      # Engine implementation
-│   ├── yar-engine.test.c++      # Unit test (co-located)
+│   ├── yar-engine.test.c++      # Engine unit tests (co-located)
+│   ├── yar-index.test.c++       # Index unit tests (co-located)
+│   ├── yar-odata.test.c++       # OData parser/metadata tests (co-located)
+│   ├── yar-httpd.test.c++       # HTTP integration tests (co-located)
 │   ├── yar-httpd.c++m           # HTTP server module
 │   ├── yar-index.c++m           # Indexing module
 │   ├── yar-index.impl.c++       # Index implementation

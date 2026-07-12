@@ -36,6 +36,9 @@ Broader roadmap priorities (see **[development.md](development.md)**):
 
 ## ✅ Recently Completed
 
+- **Index-only `count`** (July 2026) - `engine::count(selector)` and `$count=true` use index view sizes for empty selectors, single `_id`/indexed-field constraints with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`; fall back to seek-and-match for `$ne`, multi-field AND, string post-filters, and OR branches.
+- **Expanded `[yardb]` test coverage** (July 2026) - `yar-index.test.c++`, engine range/`$in`/replace/reindex tests, `count_with_parsed_filter` OData scenarios, HTTP `$ne` and `$count` variants (288 tests).
+- **`yarsh` REPL improvements** (July 2026) - full body display (including single-digit `$count`), resilient JSON parse errors, refreshed help, optional `@Accept` / `@If-Match` / `@If-None-Match` request lines.
 - **OData `$filter` `ne` operator** (July 2026) - `$filter=status ne 'deleted'` via xson `$ne` selectors and `document.match`.
 - **Index-backed `$filter` `startswith`** (July 2026) - `startswith(name,'A')` lowered to prefix range on secondary-indexed top-level fields; `contains`/`endswith` remain post-filter.
 - **Multivalue secondary indexes** (July 2026) - duplicate indexed values store multiple file positions; `m_index` and per-collection indexes use `std::flat_map`.

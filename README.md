@@ -11,7 +11,7 @@ A document-oriented database with a fully-featured RESTful Web API, implemented 
 YarDB is a production-ready C++23 application that implements:
 
 - **Production-Grade REST API**: HTTP/1.1 compliant with proper status codes, error handling, and standard response formats
-- **OData Compliance**: Full support for OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$expand`) and metadata formats
+- **OData Compliance**: Full support for OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count`, `$expand`) and metadata formats
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
 - **Last-Modified Support**: Timestamp-based conditional requests for cache validation
@@ -33,7 +33,7 @@ YarDB is a production-ready C++23 application that implements:
 - **Native C++ Build System**: Uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects
 - C++23 modules support (`.c++m` extension)
 - Cross-platform (Linux, macOS)
-- Comprehensive test suite with extensive coverage
+- Comprehensive test suite (`[yardb]` — 288 tests across engine, index, OData, and HTTP integration)
 - Modular architecture with clean separation of concerns
 - P1204R0-compliant project structure
 - RESTful API following OData principles
@@ -139,22 +139,17 @@ An interactive command-line client for connecting to and interacting with a yard
 yarsh [--help] [URL]
 ```
 
-**Commands:**
-- `POST /collection` - Create a new document in collection
-- `PUT /collection/id` - Replace document by ID
-- `PATCH /collection/id` - Update/Upsert document by ID
-- `GET /collection/{id}` - Read document by ID
-- `GET /collection` - Read all documents in collection
-- `DELETE /collection/id` - Delete document by ID
-- `GET /` - List all collections
-- `GET /_reindex` - Reindex all collections
-- `HELP` - Show help text
-- `EXIT` - Exit the shell
+**Commands:** HTTP methods with paths (e.g. `GET /users?$count=true`), plus `HELP` and `EXIT`. Supports OData query parameters, `GET /$metadata`, `PUT`/`PATCH /_db/{collection}` for indexes, and optional `@Header: value` lines for `Accept`, `If-Match`, and `If-None-Match`.
 
 **Example:**
 ```bash
 yarsh http://localhost:2112
+# GET /users?$filter=status%20ne%20'deleted'
+# @If-None-Match: "etag"
+# GET /users/1
 ```
+
+See [Programs Documentation](docs/programs.md#yarsh---interactive-shell) for details.
 
 ### yarproxy - Replication Proxy
 
@@ -233,7 +228,10 @@ The RESTful API follows OData principles and supports:
 
 ### Advanced Features
 
-- **OData Query Parameters**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$expand`
+- **OData Query Parameters**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count`, `$expand` (placeholder)
+- **`$filter` operators**: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `in`, `startswith`, `contains`, `endswith`; nested paths (e.g. `Customer/Country eq 'USA'`); index-backed `startswith` on top-level secondary keys
+- **`$count=true`**: Index-only count when possible; scan fallback for `$ne`, OR, and string post-filters
+- **Secondary indexes**: `PUT`/`PATCH /_db/{collection}` with `{"keys":["field",...]}`
 - **OData Metadata Endpoint**: `GET /$metadata` returns OData 4.01 JSON CSDL metadata with inferred schemas
 - **Conditional Requests**: `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
 - **ETag Support**: Resource versioning for caching and optimistic locking

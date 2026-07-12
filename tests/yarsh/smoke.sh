@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: crud, put, patch, count, filter_ne, head, if_none_match, bad_json"
+      echo "cases: crud, put, patch, count, top_skip, orderby, select, filter_eq_gt, filter_ne, head, if_none_match, bad_json"
       exit 0
       ;;
     *)
@@ -139,6 +139,132 @@ EOF
   TESTS_RUN=$((TESTS_RUN + 1))
   jsonl_emit '{"type":"smoke_assert_passed","matcher":"count_value_three"}'
   end_case count
+}
+
+test_top_skip() {
+  should_run top_skip || return 0
+  begin_case top_skip
+  local coll
+  coll="$(collection topskip)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"item1","value":1}
+POST /${coll}
+{"name":"item2","value":2}
+POST /${coll}
+{"name":"item3","value":3}
+POST /${coll}
+{"name":"item4","value":4}
+POST /${coll}
+{"name":"item5","value":5}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$top=2
+EXIT
+EOF
+)"
+  assert_contains " 200 " "top_status_ok"
+  assert_last_json_array_length le 2 "top_limits_results"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$skip=2&\$top=2
+EXIT
+EOF
+)"
+  assert_contains " 200 " "skip_top_status_ok"
+  assert_last_json_array_length eq 2 "skip_top_page_size"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$skip=2
+EXIT
+EOF
+)"
+  assert_contains " 200 " "skip_status_ok"
+  assert_last_json_array_length eq 3 "skip_offset"
+  end_case top_skip
+}
+
+test_orderby() {
+  should_run orderby || return 0
+  begin_case orderby
+  local coll
+  coll="$(collection orderby)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"low","value":10}
+POST /${coll}
+{"name":"mid","value":20}
+POST /${coll}
+{"name":"high","value":30}
+GET /${coll}?\$orderby=value%20desc
+EXIT
+EOF
+)"
+  assert_contains " 200 " "status_ok"
+  assert_last_json_array_first_field value 30 "orderby_desc_first"
+  end_case orderby
+}
+
+test_select() {
+  should_run select || return 0
+  begin_case select
+  local coll
+  coll="$(collection select)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"TestUser","email":"test@example.com","age":30,"status":"active"}
+GET /${coll}?\$select=name,email
+EXIT
+EOF
+)"
+  assert_contains " 200 " "status_ok"
+  assert_last_json_projection "name,email" "age,status" "select_name_email"
+  end_case select
+}
+
+test_filter_eq_gt() {
+  should_run filter_eq_gt || return 0
+  begin_case filter_eq_gt
+  local coll
+  coll="$(collection feqgt)"
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"low","value":10,"status":"active"}
+POST /${coll}
+{"name":"high","value":40,"status":"active"}
+POST /${coll}
+{"name":"gone","value":50,"status":"deleted"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=status%20eq%20'active'
+EXIT
+EOF
+)"
+  assert_contains " 200 " "filter_eq_ok"
+  assert_last_json_array_length eq 2 "filter_eq_count"
+  assert_last_json_array_excludes_field_value name gone "filter_eq_excludes_deleted"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=value%20gt%2025%20and%20status%20eq%20'active'
+EXIT
+EOF
+)"
+  assert_contains " 200 " "filter_gt_ok"
+  assert_last_json_array_length eq 1 "filter_gt_count"
+  assert_last_json_array_first_field value 40 "filter_gt_value"
+  end_case filter_eq_gt
 }
 
 test_filter_ne() {
@@ -259,6 +385,10 @@ main() {
   test_put
   test_patch
   test_count
+  test_top_skip
+  test_orderby
+  test_select
+  test_filter_eq_gt
   test_filter_ne
   test_head
   test_if_none_match

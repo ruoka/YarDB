@@ -12,7 +12,7 @@ const auto usage = R"(usage: yarsh [--help] [URL])";
 
 const auto help = R"(
 Currently supported shell commands are:
-POST /collection         aka Create (JSON body follows)
+POST /collection         aka Create (one-line JSON body follows)
 PUT /collection/id       aka Replace (JSON body follows)
 PATCH /collection/id     aka Update/Upsert (JSON body follows)
 GET /collection/{id}     aka Read one document
@@ -204,7 +204,9 @@ try
         {
             try
             {
-                content = json::stringify(json::parse(cin), 0);
+                auto body_line = ""s;
+                getline(cin, body_line);
+                content = json::stringify(json::parse(body_line), 0);
             }
             catch(const std::exception& e)
             {

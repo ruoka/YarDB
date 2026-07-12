@@ -38,8 +38,9 @@ sudo apt-get install clang-21 libc++-21-dev libc++abi-21-dev lld-21
 
 ### Common Tasks
 - Add new module: Create `.c++m` file in `YarDB/` directory
-- Add new test: Create `.test.c++` file next to source
+- Add new unit test: Create `.test.c++` file next to source (tag `[yardb]`)
 - Add new program: Create `.c++` file in `YarDB/` directory (C++ Builder will automatically detect it)
+- Run piped `yarsh` smoke tests: `./tests/yarsh/smoke.sh` (see `tests/yarsh/smoke.sh --help`)
 
 ## Logging Standards
 

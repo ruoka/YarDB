@@ -31,9 +31,11 @@ YarDB/
 │   └── yarexport.c++            # Data export utility executable
 │
 ├── tests/                       # Functional/Integration tests (P1204R0)
-│   ├── db/                      # Database tests
+│   ├── yarsh/                   # Piped yarsh smoke tests (CI + local)
+│   │   ├── lib.sh               # yardb lifecycle + assertions
+│   │   └── smoke.sh             # smoke entry point
 │   ├── example.html             # Example/test HTML
-│   └── yar.sh                   # Test script
+│   └── yar.sh                   # Manual multi-server demo script
 │
 ├── build-{os}-{config}/         # Build artifacts (gitignored, e.g., build-darwin-debug/, build-linux-release/)
 │   ├── obj/                     # Object files
@@ -142,8 +144,9 @@ Dependencies are managed as git submodules in `deps/`:
 - **Unit Tests**: Co-located with source files (`.test.c++` extension)
   - Example: `yar-engine.test.c++` tests `yar-engine.c++m`
 - **Functional Tests**: In `tests/` directory
-  - Integration tests and end-to-end scenarios
-- **Test Runner**: Built automatically by C++ Builder, run with `./tools/CB.sh debug test`
+  - `tests/yarsh/smoke.sh` — black-box CLI smoke tests (piped `yarsh` + ephemeral `yardb`)
+  - `tests/yar.sh` — manual multi-server demo
+- **Test Runner**: Unit tests via `./tools/CB.sh debug test --tags='\[yardb\]'`; smoke via `./tests/yarsh/smoke.sh`
 
 ## References
 

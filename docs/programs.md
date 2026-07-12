@@ -351,13 +351,19 @@ GET /users/1
 Enter restful request: EXIT
 ```
 
-### Manual Smoke Test
+### Smoke tests (piped stdin)
 
-With a running `yardb` server:
+Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines, headers, and bodies:
 
 ```bash
-./tools/cli_test.sh http://localhost:2112
+./tests/yarsh/smoke.sh
+./tests/yarsh/smoke.sh --case count
+./tests/yarsh/smoke.sh --jsonl   # machine-readable output for CI
 ```
+
+`tools/cli_test.sh` is a thin wrapper around the same harness. Piped scripts use **one JSON line** per `POST`/`PUT`/`PATCH` body so multiple commands can run in one session.
+
+Cases: `crud`, `count`, `filter_ne`, `head`, `if_none_match`, `bad_json`.
 
 ## yarproxy - Replication Proxy
 

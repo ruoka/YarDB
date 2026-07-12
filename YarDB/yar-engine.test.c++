@@ -310,6 +310,26 @@ auto test_set()
             require_true(documents[0].match(document4));
         };
 
+        section("ReadByIndexedDuplicateKey") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"status"s, "active"s}, {"name"s, "alpha"s}},
+                document2 = object{{"status"s, "active"s}, {"name"s, "beta"s}},
+                document3 = object{{"status"s, "pending"s}, {"name"s, "gamma"s}},
+                selector = object{{"status"s, "active"s}},
+                documents = object{};
+            engine.collection("ReadByIndexedDuplicateKey"s);
+            engine.index({"status"s});
+            require_true(engine.create(document1));
+            require_true(engine.create(document2));
+            require_true(engine.create(document3));
+            require_true(engine.read(selector, documents));
+            require_eq(2u, documents.size());
+            require_true(documents[0].match(document1) || documents[0].match(document2));
+            require_true(documents[1].match(document1) || documents[1].match(document2));
+            require_false(documents[0].match(documents[1]));
+        };
+
         section("Create2Keys") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

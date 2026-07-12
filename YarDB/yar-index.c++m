@@ -18,130 +18,215 @@ using secondary_key_type = std::string;
 
 using position_type = std::streamoff;
 
-using primary_index_type = std::map<primary_key_type,
-                                    position_type>;
+using positions_type = std::vector<position_type>;
 
-using secondary_index_type = std::map<secondary_key_type,
-                                      position_type>;
+using primary_index_type = std::flat_map<primary_key_type, position_type>;
 
-using secondary_index_map = std::map<secondary_index_name,
-                                     secondary_index_type>;
+using secondary_index_type = std::flat_map<secondary_key_type, positions_type>;
+
+using secondary_index_map = std::flat_map<secondary_index_name, secondary_index_type>;
+
+// Walks every stored position for keys in [key_begin, key_end).
+class secondary_position_iterator
+{
+public:
+
+    secondary_position_iterator() = default;
+
+    secondary_position_iterator(
+        secondary_index_type::const_iterator key_begin,
+        secondary_index_type::const_iterator key_end) :
+        m_key_it{key_begin},
+        m_key_end{key_end}
+    {
+        skip_empty();
+    }
+
+    auto operator*() const -> position_type
+    {
+        return m_key_it->second[m_pos_idx];
+    }
+
+    auto& operator++()
+    {
+        ++m_pos_idx;
+        skip_empty();
+        return *this;
+    }
+
+    friend auto operator==(const secondary_position_iterator&, const secondary_position_iterator&) -> bool = default;
+
+private:
+
+    void skip_empty()
+    {
+        while(m_key_it != m_key_end && m_pos_idx >= m_key_it->second.size())
+        {
+            m_pos_idx = 0;
+            ++m_key_it;
+        }
+    }
+
+    secondary_index_type::const_iterator m_key_it{};
+    secondary_index_type::const_iterator m_key_end{};
+    std::size_t m_pos_idx = 0;
+};
+
+class reverse_secondary_position_iterator
+{
+public:
+
+    reverse_secondary_position_iterator() = default;
+
+    reverse_secondary_position_iterator(
+        secondary_index_type::const_reverse_iterator key_begin,
+        secondary_index_type::const_reverse_iterator key_end) :
+        m_key_it{key_begin},
+        m_key_end{key_end}
+    {
+        if(m_key_it != m_key_end)
+            m_pos_idx = m_key_it->second.size() - 1;
+        skip_empty();
+    }
+
+    auto operator*() const -> position_type
+    {
+        return m_key_it->second[m_pos_idx];
+    }
+
+    auto& operator++()
+    {
+        if(m_pos_idx > 0)
+            --m_pos_idx;
+        else
+        {
+            ++m_key_it;
+            if(m_key_it != m_key_end)
+                m_pos_idx = m_key_it->second.size() - 1;
+        }
+        skip_empty();
+        return *this;
+    }
+
+    friend auto operator==(const reverse_secondary_position_iterator&, const reverse_secondary_position_iterator&) -> bool = default;
+
+private:
+
+    void skip_empty()
+    {
+        while(m_key_it != m_key_end && m_key_it->second.empty())
+        {
+            ++m_key_it;
+            if(m_key_it != m_key_end)
+                m_pos_idx = m_key_it->second.size() - 1;
+        }
+    }
+
+    secondary_index_type::const_reverse_iterator m_key_it{};
+    secondary_index_type::const_reverse_iterator m_key_end{};
+    std::size_t m_pos_idx = 0;
+};
 
 class index_iterator
 {
 public:
 
-    enum index_type {primary, secondary, reverse_primary, reverse_secondary};
+    enum class kind {primary, secondary, reverse_primary, reverse_secondary};
 
     using primary_iterator = primary_index_type::const_iterator;
 
-    using secondary_iterator = secondary_index_type::const_iterator;
-
     using reverse_primary_iterator = std::reverse_iterator<primary_iterator>;
-
-    using reverse_secondary_iterator = std::reverse_iterator<secondary_iterator>;
 
     index_iterator() = delete;
 
     index_iterator(const index_iterator&) = default;
 
-    index_iterator& operator = (const index_iterator&) = delete;
+    index_iterator& operator=(const index_iterator&) = delete;
 
     index_iterator(primary_iterator current) :
-        m_primary_current{current},
-        m_secondary_current{},
-        m_reverse_primary_current{},
-        m_reverse_secondary_current{},
-        c_index_type{primary}
+        m_state{current},
+        m_kind{kind::primary}
     {}
 
-    index_iterator(secondary_iterator current) :
-        m_primary_current{},
-        m_secondary_current{current},
-        m_reverse_primary_current{},
-        m_reverse_secondary_current{},
-        c_index_type{secondary}
+    index_iterator(secondary_position_iterator current) :
+        m_state{current},
+        m_kind{kind::secondary}
     {}
 
     index_iterator(reverse_primary_iterator current) :
-        m_primary_current{},
-        m_secondary_current{},
-        m_reverse_primary_current{current},
-        m_reverse_secondary_current{},
-        c_index_type{reverse_primary}
+        m_state{current},
+        m_kind{kind::reverse_primary}
     {}
 
-    index_iterator(reverse_secondary_iterator current) :
-        m_primary_current{},
-        m_secondary_current{},
-        m_reverse_primary_current{},
-        m_reverse_secondary_current{current},
-        c_index_type{reverse_secondary}
+    index_iterator(reverse_secondary_position_iterator current) :
+        m_state{current},
+        m_kind{kind::reverse_secondary}
     {}
 
-    auto operator * ()
+    auto operator*() -> position_type
     {
-        switch(c_index_type)
+        switch(m_kind)
         {
-        case primary:
-            return std::get<position_type>(*m_primary_current);
-        case secondary:
-            return std::get<position_type>(*m_secondary_current);
-        case reverse_primary:
-            return std::get<position_type>(*m_reverse_primary_current);
-        case reverse_secondary:
-            return std::get<position_type>(*m_reverse_secondary_current);
+        case kind::primary:
+            return std::get<primary_iterator>(m_state)->second;
+        case kind::secondary:
+            return *std::get<secondary_position_iterator>(m_state);
+        case kind::reverse_primary:
+            return std::get<reverse_primary_iterator>(m_state)->second;
+        case kind::reverse_secondary:
+            return *std::get<reverse_secondary_position_iterator>(m_state);
         }
         std::unreachable();
     }
 
-    auto& operator ++ ()
+    auto& operator++()
     {
-        switch(c_index_type)
+        switch(m_kind)
         {
-        case primary:
-            ++m_primary_current;
+        case kind::primary:
+            ++std::get<primary_iterator>(m_state);
             break;
-        case secondary:
-            ++m_secondary_current;
+        case kind::secondary:
+            ++std::get<secondary_position_iterator>(m_state);
             break;
-        case reverse_primary:
-            ++m_reverse_primary_current;
+        case kind::reverse_primary:
+            ++std::get<reverse_primary_iterator>(m_state);
             break;
-        case reverse_secondary:
-            ++m_reverse_secondary_current;
+        case kind::reverse_secondary:
+            ++std::get<reverse_secondary_position_iterator>(m_state);
             break;
         }
         return *this;
     }
 
-    auto operator != (const index_iterator& itr) const
+    auto operator!=(const index_iterator& itr) const -> bool
     {
-        switch(c_index_type)
+        if(m_kind != itr.m_kind)
+            return true;
+
+        switch(m_kind)
         {
-        case primary:
-            return m_primary_current != itr.m_primary_current;
-        case secondary:
-            return m_secondary_current != itr.m_secondary_current;
-        case reverse_primary:
-            return m_reverse_primary_current != itr.m_reverse_primary_current;
-        case reverse_secondary:
-            return m_reverse_secondary_current != itr.m_reverse_secondary_current;
+        case kind::primary:
+            return std::get<primary_iterator>(m_state) != std::get<primary_iterator>(itr.m_state);
+        case kind::secondary:
+            return std::get<secondary_position_iterator>(m_state) != std::get<secondary_position_iterator>(itr.m_state);
+        case kind::reverse_primary:
+            return std::get<reverse_primary_iterator>(m_state) != std::get<reverse_primary_iterator>(itr.m_state);
+        case kind::reverse_secondary:
+            return std::get<reverse_secondary_position_iterator>(m_state) != std::get<reverse_secondary_position_iterator>(itr.m_state);
         }
         std::unreachable();
     }
 
 private:
 
-    primary_iterator m_primary_current;
+    std::variant<
+        primary_iterator,
+        secondary_position_iterator,
+        reverse_primary_iterator,
+        reverse_secondary_position_iterator> m_state;
 
-    secondary_iterator m_secondary_current;
-
-    reverse_primary_iterator m_reverse_primary_current;
-
-    reverse_secondary_iterator m_reverse_secondary_current;
-
-    const index_type c_index_type;
+    kind m_kind;
 };
 
 class index_view : public std::ranges::view_interface<index_view>
@@ -212,21 +297,21 @@ public:
 
     // Insert document into index with storage position
     // Updates primary key index and all matching secondary key indexes
-    // Overwrites existing entries if document with same key already exists
+    // Appends position for duplicate secondary key values
     // @param document Document to index
     // @param position Storage file position where document is stored
     void insert(xson::object& document, position_type position);
 
     // Erase document from all indexes
-    // Removes from primary key index and all secondary key indexes
+    // Removes from primary key index and matching positions in secondary indexes
     // @param document Document to remove from index
     void erase(const xson::object& document);
 
 private:
 
-    xson::integer_type  m_sequence;
+    xson::integer_type m_sequence = 0;
 
-    std::map<xson::integer_type, position_type> m_primary_keys;
+    primary_index_type m_primary_keys;
 
     secondary_index_map m_secondary_keys;
 };

@@ -160,8 +160,8 @@ public:
     auto collections() const
     {
         auto documents = std::vector<std::string>{};
-        for(const auto& idx : m_index)
-            documents.push_back(std::get<0>(idx));
+        for(const auto& entry : m_index)
+            documents.push_back(entry.first);
         return documents;
     };
 
@@ -178,7 +178,7 @@ private:
 
     std::string m_collection;
 
-    std::map<std::string, yar::db::index> m_index;
+    std::flat_map<std::string, yar::db::index> m_index;
 
     mutable std::fstream m_storage;
 };

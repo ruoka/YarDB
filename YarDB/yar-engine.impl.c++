@@ -112,21 +112,19 @@ void yar::db::engine::setup_index_structure()
         if(m_storage.fail())
             break;
 
-        auto& index = m_index[metadata.collection];
-
         // Update sequence counter for all documents
-        index.update(document);
+        m_index[metadata.collection].update(document);
 
         // Process _db collection documents to set up secondary keys for other collections
         if(metadata.collection == "_db"s)
         {
-            auto collection = document["collection"s];
+            const auto collection_name = static_cast<std::string>(document["collection"s]);
             auto keys = document["keys"s];
             auto temp = std::vector<std::string>{};
             for(const auto& k : keys.get<yar::db::object::array>())
                 temp.push_back(k);
 
-            m_index[collection].add(temp);
+            m_index[collection_name].add(temp);
         }
     }
 }
@@ -279,9 +277,10 @@ bool yar::db::engine::update(const yar::db::object& selector, const yar::db::obj
             m_storage.seekp(position, m_storage.beg);
             m_storage << yar::db::updated;
 
+            index.erase(old_document);
+
             auto new_document = std::move(old_document);
             new_document += updates;
-
             m_storage.clear();
             m_storage.seekp(0, m_storage.end);
             index.update(new_document);

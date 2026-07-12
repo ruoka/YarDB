@@ -2,7 +2,7 @@
 # yarproxy smoke tests: multi-replica yardb cluster behind the proxy.
 #
 # Usage:
-#   ./tests/yarproxy/smoke.sh [--jsonl] [--case NAME]
+#   ./tests/yarproxy/smoke.sh [--jsonl] [--case NAME] [--replicas=N]
 #
 # Requires: ./tools/CB.sh debug build
 
@@ -14,6 +14,9 @@ source "${SCRIPT_DIR}/lib.sh"
 
 SELECTED_CASE=""
 CLUSTER_STARTED=0
+REPLICA_COUNT="${REPLICA_COUNT:-2}"
+ROUND_ROBIN_MARKERS=()
+ROUND_ROBIN_OUTPUTS=()
 START_MS=$(python3 - <<'PY'
 import time
 print(int(time.time() * 1000))
@@ -24,9 +27,17 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --jsonl) JSONL_MODE=1 ;;
     --case) shift; SELECTED_CASE="${1:-}" ;;
+    --replicas)
+      shift
+      REPLICA_COUNT="${1:-}"
+      ;;
+    --replicas=*)
+      REPLICA_COUNT="${1#--replicas=}"
+      ;;
     --help|-h)
-      echo "usage: smoke.sh [--jsonl] [--case NAME]"
+      echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
       echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin"
+      echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
     *)
@@ -37,6 +48,11 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+if ! [[ "${REPLICA_COUNT}" =~ ^[0-9]+$ ]] || [[ "${REPLICA_COUNT}" -lt 2 ]]; then
+  echo "replicas must be an integer >= 2 (got: ${REPLICA_COUNT})" >&2
+  exit 2
+fi
+
 should_run() {
   [[ -z "${SELECTED_CASE}" || "${SELECTED_CASE}" == "$1" ]]
 }
@@ -46,11 +62,13 @@ collection() {
 }
 
 ensure_cluster() {
+  local i
   if [[ "${CLUSTER_STARTED}" -eq 1 ]]; then
     return 0
   fi
-  start_replica
-  start_replica
+  for i in $(seq 1 "${REPLICA_COUNT}"); do
+    start_replica
+  done
   start_yarproxy
   CLUSTER_STARTED=1
 }
@@ -132,41 +150,34 @@ test_read_round_robin() {
   should_run read_round_robin || return 0
   begin_case read_round_robin
   ensure_cluster
-  local coll out_a out_b
+  local coll i marker
   coll="$(collection rr)"
+  ROUND_ROBIN_MARKERS=()
+  ROUND_ROBIN_OUTPUTS=()
 
-  run_yarsh_at "${REPLICA_URLS[0]}" "$(cat <<EOF
+  for i in "${!REPLICA_URLS[@]}"; do
+    marker="replica${i}"
+    ROUND_ROBIN_MARKERS+=("${marker}")
+    run_yarsh_at "${REPLICA_URLS[$i]}" "$(cat <<EOF
 POST /${coll}
-{"marker":"replica0"}
+{"marker":"${marker}"}
 EXIT
 EOF
 )"
-  assert_contains " 201 " "seed_replica0"
+    assert_contains " 201 " "seed_${marker}"
+  done
 
-  run_yarsh_at "${REPLICA_URLS[1]}" "$(cat <<EOF
-POST /${coll}
-{"marker":"replica1"}
-EXIT
-EOF
-)"
-  assert_contains " 201 " "seed_replica1"
-
-  run_yarsh_proxy "$(cat <<EOF
+  for i in "${!REPLICA_URLS[@]}"; do
+    run_yarsh_proxy "$(cat <<EOF
 GET /${coll}
 EXIT
 EOF
 )"
-  out_a="${LAST_OUTPUT}"
-  assert_contains " 200 " "proxy_get_ok_a"
+    assert_contains " 200 " "proxy_get_ok_${i}"
+    ROUND_ROBIN_OUTPUTS+=("${LAST_OUTPUT}")
+  done
 
-  run_yarsh_proxy "$(cat <<EOF
-GET /${coll}
-EXIT
-EOF
-)"
-  out_b="${LAST_OUTPUT}"
-  assert_contains " 200 " "proxy_get_ok_b"
-  assert_round_robin_markers "replica0" "replica1" "${out_a}" "${out_b}"
+  assert_round_robin_all_markers "read_round_robin_cycle"
   end_case read_round_robin
 }
 
@@ -177,7 +188,7 @@ main() {
   RUN_ID="smoke$(date +%s)${RANDOM}"
 
   jsonl_emit "{\"type\":\"smoke_start\",\"schema\":\"yarproxy-smoke\",\"version\":1}"
-  log "yarproxy smoke tests (build=${BUILD_DIR})"
+  log "yarproxy smoke tests (build=${BUILD_DIR}, replicas=${REPLICA_COUNT})"
 
   test_no_replicas
   test_help

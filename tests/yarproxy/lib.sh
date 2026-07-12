@@ -126,40 +126,51 @@ assert_exit_status() {
   return 0
 }
 
-assert_round_robin_markers() {
-  local marker_a=$1
-  local marker_b=$2
-  local out_a=$3
-  local out_b=$4
-  local label=${5:-read_round_robin}
+assert_round_robin_all_markers() {
+  local label=${1:-read_round_robin}
+  local markers_json outputs_json
   TESTS_RUN=$((TESTS_RUN + 1))
 
-  if python3 - "${marker_a}" "${marker_b}" "${out_a}" "${out_b}" <<'PY'
-import sys
+  markers_json="$(python3 - "${ROUND_ROBIN_MARKERS[@]}" <<'PY'
+import json, sys
+print(json.dumps(sys.argv[1:]))
+PY
+)"
+  outputs_json="$(python3 - "${ROUND_ROBIN_OUTPUTS[@]}" <<'PY'
+import json, sys
+print(json.dumps(sys.argv[1:]))
+PY
+)"
 
-marker_a, marker_b, out_a, out_b = sys.argv[1:5]
-needle_a = f'"marker" : "{marker_a}"'
-needle_b = f'"marker" : "{marker_b}"'
+  if python3 - "${markers_json}" "${outputs_json}" <<'PY'
+import json, sys
 
-has_a = lambda text: needle_a in text
-has_b = lambda text: needle_b in text
+markers = json.loads(sys.argv[1])
+outputs = json.loads(sys.argv[2])
 
-if has_a(out_a) and has_b(out_b):
-    raise SystemExit(0)
-if has_a(out_b) and has_b(out_a):
-    raise SystemExit(0)
+if len(outputs) != len(markers):
+    print(f"expected {len(markers)} GET responses, got {len(outputs)}", file=sys.stderr)
+    raise SystemExit(1)
 
-print("responses did not alternate replica markers", file=sys.stderr)
-print(f"out_a has_a={has_a(out_a)} has_b={has_b(out_a)}", file=sys.stderr)
-print(f"out_b has_a={has_a(out_b)} has_b={has_b(out_b)}", file=sys.stderr)
-raise SystemExit(1)
+seen = set()
+for i, out in enumerate(outputs):
+    found = [m for m in markers if f'"marker" : "{m}"' in out]
+    if len(found) != 1:
+        print(f"response {i}: expected exactly one marker, found {found}", file=sys.stderr)
+        raise SystemExit(1)
+    seen.add(found[0])
+
+if seen != set(markers):
+    missing = set(markers) - seen
+    print(f"round-robin missed markers: {sorted(missing)}", file=sys.stderr)
+    raise SystemExit(1)
 PY
   then
     jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"${label}\"}"
     return 0
   fi
 
-  fail "expected alternating GET responses with markers ${marker_a} and ${marker_b}"
+  fail "expected ${#ROUND_ROBIN_MARKERS[@]} round-robin GET responses covering all replica markers"
   return 0
 }
 

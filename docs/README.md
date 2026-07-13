@@ -41,6 +41,7 @@ See **[changelog.md](changelog.md)** for the full list. Most recent:
 
 - **Hashed PAT storage** + public **`GET /health`** liveness probe
 - **`correlation_id` tracing** — `X-Correlation-ID` on all HTTP handler logs
+- **yarproxy header forwarding** — `Authorization` and `X-Correlation-ID` to backends; `header_forward_auth` / `header_forward_correlation` smokes
 - **yarsh smokes** — auth CRUD, `$filter` `or` / `startswith`, OData query cases
 - **`yarexport` `export_empty`** smoke — export fresh DB with no documents
 

@@ -143,7 +143,7 @@ An interactive command-line client for connecting to and interacting with a yard
 yarsh [--help] [URL]
 ```
 
-**Commands:** HTTP methods with paths (e.g. `GET /users?$count=true`), plus `HELP` and `EXIT`. Supports OData query parameters, `GET /$metadata`, `GET /health`, `PUT`/`PATCH /_db/{collection}` for indexes, and optional `@Header: value` lines for `Accept`, `Authorization`, `If-Match`, and `If-None-Match`.
+**Commands:** HTTP methods with paths (e.g. `GET /users?$count=true`), plus `HELP` and `EXIT`. Supports OData query parameters, `GET /$metadata`, `GET /health`, `GET /ready`, `PUT`/`PATCH /_db/{collection}` for indexes, and optional `@Header: value` lines for `Accept`, `Authorization`, `If-Match`, and `If-None-Match`.
 
 **Piped mode:** Pipe a script on stdin for automation and CI. Use **one JSON line** per `POST`/`PUT`/`PATCH` body so multiple commands run in one session. Invalid JSON on a body prints an error and the shell continues.
 

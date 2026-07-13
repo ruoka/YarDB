@@ -47,7 +47,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 6. **✅ `GET /health` liveness probe** — `{}`; public when PAT auth is enabled
 7. **✅ `GET /ready` readiness probe** — `{}`; public when PAT auth is enabled (503 when not ready: not yet implemented)
 
-**Remaining:** scoped tokens, JWT/OAuth2, RBAC, readiness `503` semantics, Prometheus `/metrics`. See [changelog.md](changelog.md) and [development.md](development.md#development-roadmap).
+**Remaining:** scoped tokens, JWT/OAuth2, RBAC, engine-backed `/ready` `503` semantics, Prometheus `/metrics`. See [changelog.md](changelog.md) and [development.md](development.md#development-roadmap).
 
 #### REST Features (completed)
 

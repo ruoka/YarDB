@@ -21,13 +21,13 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 |------|---------|
 | **Bearer PAT authentication** | `yardb --pat` / `--pat-file`; all routes protected via `net` `authentication_middleware` (`5236cab`) |
 | **Hashed PAT storage** | Tokens stored as SHA-256 of full `Authorization` header; `--pat-file` accepts `sha256:<hex>` lines (`48a4ac0`) |
-| **`GET /health` liveness probe** | Returns `{}`; public even when PAT is enabled; reserved collection name (`48a4ac0`) |
-| **`GET /ready` readiness probe** | Returns `{}`; public even when PAT is enabled; reserved collection name; engine not-ready `503` deferred |
 
 ### Observability
 
 | Item | Summary |
 |------|---------|
+| **`GET /health` liveness probe** | Public when PAT is enabled; reserved collection name; initial `{"status":"ok"}` (`48a4ac0`); body changed to `{}` (`d1bab4b`) |
+| **`GET /ready` readiness probe** | Returns `{}`; public when PAT is enabled; reserved collection name; engine not-ready `503` deferred (`d1bab4b`) |
 | **`correlation_id` request tracing** | `X-Correlation-ID` middleware; logged on handler entry (`POST_DOCUMENT`, etc.), `HTTP_RESPONSE`, and error paths in `yar-httpd.c++m` |
 | **Transport `request_id`** | `net::http::server` per-connection counter on `HTTP_REQUEST` / net `HTTP_RESPONSE` (complements `correlation_id`) |
 
@@ -35,11 +35,11 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 
 | Harness | Cases / coverage |
 |---------|------------------|
-| **`tests/yarsh/smoke.sh`** | `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `filter_or`, `filter_startswith`, `head`, `if_none_match`, `bad_json`, `auth_required`, `auth_crud` |
+| **`tests/yarsh/smoke.sh`** | `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `filter_or`, `filter_startswith`, `head`, `if_none_match`, `bad_json`, `auth_required` (health + ready PAT-exempt, `{}` body), `auth_crud` |
 | **`tests/yarexport/smoke.sh`** | `export_empty`, `export_seeded`, `missing_file`, `help` |
 | **`tests/yarproxy/smoke.sh`** | `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`, `header_forward_auth`, `header_forward_correlation`; `--replicas=N` |
 
-Earlier July commits: piped yarsh harness (`031d52f`), yarexport JSONL fix + smokes (`7066ee1`), yarproxy smokes (`7ebe299`, `22b8400`).
+Earlier July commits: piped yarsh harness (`031d52f`), yarexport JSONL fix + smokes (`7066ee1`), yarproxy smokes (`7ebe299`, `22b8400`), health/ready probes (`d1bab4b`).
 
 ### OData `$filter` & query
 

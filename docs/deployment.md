@@ -6,11 +6,12 @@
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ❌ **Missing**: Security, monitoring, high availability
+- ⚠️ **Partial**: Bearer PAT MVP, liveness/readiness probes (`GET /health`, `GET /ready`), `correlation_id` tracing
+- ❌ **Missing**: Scoped auth, TLS, Prometheus metrics, high availability
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
-- 🔐 **Security & Authentication** (JWT, RBAC, TLS)
-- 📊 **Monitoring & Observability** (metrics, health checks)
+- 🔐 **Security & Authentication** (scoped PATs, JWT, RBAC, TLS)
+- 📊 **Monitoring & Observability** (Prometheus `/metrics`; probes shipped — engine-backed `/ready` 503 deferred)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
 
 ## 🏗️ Building for Production
@@ -89,9 +90,14 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # Health check endpoint
+    # Probe endpoints (PAT-exempt on yardb)
     location /health {
         proxy_pass http://localhost:2112/health;
+        access_log off;
+    }
+
+    location /ready {
+        proxy_pass http://localhost:2112/ready;
         access_log off;
     }
 }
@@ -127,7 +133,7 @@ yardb --pat-file=/etc/yardb/pat.txt 2112
 
 ### Current Capabilities
 - **Liveness probe** — `GET /health` returns `{}` (public when PAT auth is enabled)
-- **Readiness probe** — `GET /ready` returns `{}` (public when PAT auth is enabled)
+- **Readiness probe** — `GET /ready` returns `{}` (public when PAT auth is enabled; `503` when not ready not yet implemented)
 - **Request tracing** — `X-Correlation-ID` on inbound requests; `correlation_id` on application log lines (`POST_DOCUMENT`, `HTTP_RESPONSE`, errors). Transport layer also logs `request_id` per connection.
 - **JSONL structured logging** — Default format; use `--clog` for console output during development
 - **Syslog Integration** - Structured logging to system logs (`--slog_level`)

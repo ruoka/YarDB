@@ -31,7 +31,7 @@ This directory contains comprehensive project documentation organized by topic a
 Broader roadmap priorities (see **[development.md](development.md)**):
 
 1. **🔐 Security & Authentication** — scoped PATs, JWT/RBAC (Bearer PAT MVP shipped; see [changelog.md](changelog.md))
-2. **📊 Observability & Monitoring** — `/ready`, Prometheus `/metrics` (`GET /health` and `correlation_id` tracing shipped)
+2. **📊 Observability & Monitoring** — Prometheus `/metrics`, `/ready` 503 semantics (`GET /health`, `GET /ready`, and `correlation_id` tracing shipped)
 3. **🔒 TLS Proxy Implementation** — Cloud-native TLS termination
 4. **🔗 Relationship model** — Prerequisite for full `$expand` / `$apply`
 

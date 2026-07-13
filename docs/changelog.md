@@ -16,6 +16,13 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 | **Hashed PAT storage** | Tokens stored as SHA-256 of full `Authorization` header; `--pat-file` accepts `sha256:<hex>` lines (`48a4ac0`) |
 | **`GET /health` liveness probe** | Returns `{"status":"ok"}`; public even when PAT is enabled; reserved collection name (`48a4ac0`) |
 
+### Observability
+
+| Item | Summary |
+|------|---------|
+| **`correlation_id` request tracing** | `X-Correlation-ID` middleware; logged on handler entry (`POST_DOCUMENT`, etc.), `HTTP_RESPONSE`, and error paths in `yar-httpd.c++m` |
+| **Transport `request_id`** | `net::http::server` per-connection counter on `HTTP_REQUEST` / net `HTTP_RESPONSE` (complements `correlation_id`) |
+
 ### CLI smoke tests (CI)
 
 | Harness | Cases / coverage |

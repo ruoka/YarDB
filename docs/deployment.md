@@ -127,8 +127,9 @@ yardb --pat-file=/etc/yardb/pat.txt 2112
 
 ### Current Capabilities
 - **Liveness probe** — `GET /health` returns `{"status":"ok"}` (public when PAT auth is enabled)
-- **Syslog Integration** - Structured logging to system logs
-- **Console Logging** - For development/debugging
+- **Request tracing** — `X-Correlation-ID` on inbound requests; `correlation_id` on application log lines (`POST_DOCUMENT`, `HTTP_RESPONSE`, errors). Transport layer also logs `request_id` per connection.
+- **JSONL structured logging** — Default format; use `--clog` for console output during development
+- **Syslog Integration** - Structured logging to system logs (`--slog_level`)
 - **Basic Error Handling** - HTTP status codes and error responses
 
 ### Future Monitoring (Roadmap)
@@ -143,11 +144,14 @@ curl http://localhost:2112/ready    # Readiness probe
 
 ### Log Aggregation
 ```bash
-# Current: syslog
-yardb --slog_level=6
+# Console JSONL (development)
+yardb --clog --slog_level=7 2112
 
-# Future: JSON structured logging
-# Will support correlation IDs and structured data
+# Syslog (production)
+yardb --slog_level=6 2112
+
+# Filter application logs by trace ID
+yardb --clog 2112 2>&1 | grep '"correlation_id":"your-trace-id"'
 ```
 
 ## 💾 Data Management

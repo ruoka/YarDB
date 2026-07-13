@@ -114,7 +114,8 @@ slog << error("CREATE_ERROR") << "Error creating document: " << e.what()
 Structured fields provide machine-readable context for log analysis:
 
 - **Network Fields**: `ip`, `port`, `client_ip`, `client_port`
-- **HTTP Fields**: `method`, `uri`, `version`, `status`, `content_length`, `request_id`, `duration_ms`
+- **HTTP Fields (transport layer)**: `method`, `uri`, `version`, `status`, `content_length`, `request_id`, `duration_ms` — logged by `net::http::server`
+- **HTTP Fields (application layer)**: `method`, `uri`, `status`, `content_length`, `correlation_id` — logged by `yar::http::rest_api_server` middleware (`POST_DOCUMENT`, `GET_DOCUMENT`, `HTTP_RESPONSE`, `CREATE_ERROR`, etc.)
 - **Application Fields**: `collection`, `id`, `body_size`
 - **Error Fields**: `errno`, `error_message`, `error_code`
 
@@ -124,10 +125,18 @@ Structured fields provide machine-readable context for log analysis:
 - Use appropriate types (integers for status codes, strings for IDs)
 - Keep field names consistent across similar log entries
 
-**⚠️ Known Gap: Request ID Correlation**
-- **Current State**: The HTTP layer (`net::http::server`) generates and logs `request_id` for all HTTP requests/responses, but application-level logs (e.g., `DOCUMENT_CREATED`, `CREATE_ERROR`) in `yar::http::rest_api_server` do not include `request_id`.
-- **Impact**: Cannot directly correlate database operations with HTTP requests in logs (requires manual correlation by timestamp/URI).
-- **Future Enhancement**: Pass `request_id` from HTTP layer to application handlers (via headers or request context) to enable end-to-end request tracing.
+**Request tracing (shipped)**
+
+YarDB uses two complementary trace identifiers:
+
+| Field | Layer | Source | Use |
+|-------|-------|--------|-----|
+| `request_id` | `net::http::server` | Per-process counter on each HTTP connection | Transport logs (`HTTP_REQUEST`, net `HTTP_RESPONSE`) |
+| `correlation_id` | `yar::http::rest_api_server` | `X-Correlation-ID` header (UUID generated if missing) | Application handler logs and error paths |
+
+Filter application logs on `correlation_id` to follow a request end-to-end (`POST_DOCUMENT` → `HTTP_RESPONSE`). Clients may send `X-Correlation-ID` for cross-service tracing. The engine layer does not emit separate logs.
+
+**Optional future polish:** copy `request_id` into application log lines so both IDs appear on every event (not required for tracing today).
 
 ### Log Format
 
@@ -274,13 +283,13 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 #### 2. 📊 Observability & Monitoring
 - **Priority**: HIGH
 - **Current State**: ✅ Structured logging with JSONL (default) and syslog (RFC 5424) formats, structured fields support, RFC 5424 message IDs
-- **Shipped** (see [changelog.md](changelog.md)): `GET /health` liveness probe (public with PAT auth)
+- **Shipped** (see [changelog.md](changelog.md)):
+  - `GET /health` liveness probe (public with PAT auth)
+  - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
 - **Planned Implementation**:
   - **Prometheus Metrics**: `/metrics` endpoint with request latency, throughput, errors
   - **Readiness**: `GET /ready` endpoint (DB/engine ready)
-  - **Distributed Tracing**: OpenTelemetry integration
-  - **Correlation IDs**: Request tracing across components
-  - **⚠️ Request ID Correlation**: Pass `request_id` from HTTP layer to application handlers to enable end-to-end request tracing (currently HTTP layer has `request_id`, but application logs don't)
+  - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)
 - **Timeline**: 1-2 months
 - **Impact**: Essential for production operations and debugging
 

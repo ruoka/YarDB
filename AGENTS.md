@@ -39,7 +39,11 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 ./tools/CB.sh debug test --list --jsonl
 ```
 
-**Tag syntax:** YarDB tests use `[yardb]`. Escape brackets in shell: `--tags='\[yardb\]'`.
+**Tag syntax:** YarDB tests use `[yardb]`. Escape brackets in shell: `--tags='\[yardb\]'`. Substring/regex filters also work: `--tags='ETag'`.
+
+**Hidden tags:** bracket tags starting with `.` (Catch2-style, e.g. `[.jsonl-probe]`) are **skipped on unfiltered runs**. In YarDB, unfiltered runs also pull in `deps/tester` `[jsonl-probe]` intentional failures — always scope with `--tags='\[yardb\]'`.
+
+**Scoped runs:** Prefer `--tags='\[yardb\]'` while fixing. An unfiltered run includes `deps/tester/examples/` (excluded from YarDB builds) and tester probe fixtures; do not expect `summary.passed: true` without a tag filter.
 
 **Flags:**
 - `--jsonl` — machine-readable stdout for CB and `test_runner`
@@ -71,40 +75,22 @@ NET_DISABLE_NETWORK_TESTS=0 ./tools/CB.sh debug test "yar-httpd" --jsonl
 2. Check the result:
    - If `passed` (or `run_end.passed`) is `true` → this scoped run succeeded. You're done.
    - If `false`:
-     - Read `first_failure` — it contains `file`, `line`, `message`, and usually the failing `matcher` plus `actual`/`expected` values. Open the source file at that location.
-     - Read `failed_test_ids` to see the full set of failures.
+     - Read `first_failure` — `file`, `line`, `message`, and usually the failing `matcher` with `actual` / `expected`. Open the source at that location.
+     - Read `failed_test_ids` for the full failure set.
 
-3. For detailed diagnosis, grep stdout for `assertion_failed` events (use `assertion_passed` as well if you passed `--jsonl-output=always`):
-   - Note the specific `matcher` (e.g. `require_eq`, `check_contains` — not the generic `require` / `check`).
-   - Compare `actual` vs `expected` and note `file` / `line` / `column`.
+3. For detailed diagnosis, grep stdout for `assertion_failed` (use `assertion_passed` as well when you passed `--jsonl-output=always`):
+   - `matcher` — e.g. `require_eq`, `check_contains` (not generic `require` / `check`)
+   - `actual`, `expected`, `file`, `line`, `column`
 
-4. Fix the source, then **re-run the exact same scoped command** you just used.
+4. Fix the source, then **re-run the exact same scoped command**.
 
-**Special case — template matchers**
-
-If the failing `matcher` is the generic `"require"` or `"check"` on a `require_eq` / `check_eq` line, the test objects are probably stale. Template matchers are instantiated inside the `*.test.c++` translation units, so you must rebuild them:
-
-```bash
-./tools/CB.sh debug build --jsonl
-```
-
-Then re-run the test command. See also [deps/tester/AGENTS.md](deps/tester/AGENTS.md) and [deps/tester/docs/tester-improvements.md](deps/tester/docs/tester-improvements.md) §2.4.
+If `matcher` is `"require"` or `"check"` on a `require_eq` / `check_eq` line, stale test objects are likely — rebuild test TUs (`./tools/CB.sh debug build --jsonl`), not only `tester_assertions.pcm`. Then re-run the test command. See [deps/tester/docs/tester-improvements.md](deps/tester/docs/tester-improvements.md) §2.4.
 
 ## Triage workflow (build failure)
 
-1. Find the last `command_end` event with `"ok": false`. Use the `argv` array to re-execute the exact command without shell interpretation.
-
-2. Examine nearby `compile_end` events:
-   - `cache_hit: false` + `rebuild_reason` → the translation unit was actually recompiled.
-   - `cache_hit: true` → it was correctly skipped (incremental).
-
-3. Rebuild with:
-
-```bash
-./tools/CB.sh debug build --jsonl
-```
-
-Then re-run your test command.
+1. Find `command_end` with `"ok": false` — use the `argv` array to rerun without shell parsing.
+2. Check `compile_end` events: `cache_hit: false` means that translation unit recompiled; `cache_hit: true` means incremental skip. When `rebuild_reason` is `flag_change`, read the single `profile_changed` event for `profile_diff` (not repeated on each `compile_end`).
+3. Rebuild: `./tools/CB.sh debug build --jsonl`, then re-run tests.
 
 ## Event reference (stdout)
 
@@ -132,7 +118,7 @@ Filter `run_id=<cb>` or `parent_run_id=<cb>` to correlate `list` → `build` →
 
 | Event | Use |
 |-------|-----|
-| `run_start` / `run_end` | Run boundaries; `run_start` has `cwd`, `argv`, `config`, `env` (e.g. `NET_DISABLE_NETWORK_TESTS`, `CURSOR_SANDBOX`), `passed`, `duration_ms` on `run_end` |
+| `run_start` / `run_end` | Run boundaries; `run_start` has `cwd`, `argv`, `config` (from `TESTER_CONFIG` when CB spawns the child), `env` (curated test-relevant vars when set, e.g. `NET_DISABLE_NETWORK_TESTS`, `CURSOR_SANDBOX`), `passed`, `duration_ms` on `run_end` |
 | `assertion_failed` | Always on failed assertions (`matcher`, `actual`, `expected`, optional `message`) |
 | `assertion_passed` | With `--jsonl-output=always` |
 | `test` | Per-test rollup (`success`, `output`, assertion counts) |
@@ -149,10 +135,15 @@ Filter `run_id=<cb>` or `parent_run_id=<cb>` to correlate `list` → `build` →
 | `list_summary` | Inventory totals (`units_total`, `main_count`, `test_count`, `max_level`) |
 | `build_start` / `build_end` | Whole build |
 | `command_start` / `command_end` | Subprocesses (`cmd` + `argv`) |
-| `compile_end` | Per TU (`source_path`, `cache_hit`, `rebuild_reason` when `cache_hit:false`) |
+| `profile_changed` | Once per build when object-cache profile mismatches (`reason`, `profile_diff`) |
+| `cache_status` | `cache status` subcommand (`object_cache_path`, `profile_match`, `legacy_header`, entry counts, `current_profile`) |
+| `cache_invalidate_end` | `cache invalidate` subcommand (`object_cache_removed`, `executable_cache_removed`, `compiler_stamp_removed`) |
+| `compile_start` | Per TU before compile or cache skip (`source_path`, optional `rebuild_reason`) |
+| `compile_end` | Per TU (`source_path`, `cache_hit`, `rebuild_reason` when `cache_hit:false`, `duration_ms`, paths) |
+| `link_end` | Per executable (`executable_path`, `cache_hit`, `ok`, `duration_ms`) |
 | `cb_error` | CB fatal/diagnostic |
 
-**`unit.is_test`:** `true` for `*.test.c++` / `*.test.c++m`, or when a path segment is exactly `test/` or `tests/`. `false` for sources under a `tester/` framework tree — including nested paths like `deps/xson/deps/tester/`. Does not match the substring `test` inside names such as `tester`.
+**`unit.is_test`:** `true` for `*.test.c++` / `*.test.c++m`, or when a path segment is exactly `test/` or `tests/`. `false` for sources under a `tester/` framework tree (library modules, not project tests) — including nested paths like `deps/xson/deps/tester/`. Does not match the substring `test` inside names such as `tester` or `test_exception_bug`.
 
 ## YarDB test layout
 
@@ -181,7 +172,8 @@ HTTP integration tests use a `fixture` that starts `rest_api_server` on port `21
 
 - Infer pass/fail from exit code alone — read `summary.passed` or `run_end.passed`
 - Parse stderr as structured JSONL
-- Run an unfiltered full suite — always scope with `--tags='\[yardb\]'` (unfiltered runs include deps/tester `[jsonl-probe]` intentional failures)
+- Use an unfiltered full-suite run as the default fix loop — scope with `--tags='\[yardb\]'` (unfiltered runs include `deps/tester` `[jsonl-probe]` intentional failures)
+- Run `[.tag]` probe fixtures unless explicitly selected (they are hidden by default)
 - Run release-only verification until debug tests pass
 
 ## Tester JSONL reference

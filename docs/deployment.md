@@ -99,19 +99,25 @@ server {
 
 ## 🔒 Security Considerations
 
+### Current Capabilities
+- **Optional Bearer PAT** — `yardb --pat` / `--pat-file` (SHA-256 hashed in memory; `sha256:` lines in pat-file). When configured, all routes require `Authorization: Bearer <token>` except **`GET /health`**.
+- **Public liveness probe** — `GET /health` returns `{"status":"ok"}` even when PAT auth is enabled.
+
 ### Current Limitations
-- **No Authentication** - All endpoints are public
-- **No TLS/HTTPS** - All traffic is plaintext
-- **Basic Access Control** - Only simple credential checking
+- **No TLS/HTTPS** — All traffic is plaintext unless terminated at a reverse proxy
+- **Single shared token** — No scoped PATs, JWT/OAuth2, or RBAC yet
 
 ### Recommended Security Setup
 ```bash
+# Enable PAT on yardb (or terminate TLS + auth at nginx/Envoy)
+yardb --pat-file=/etc/yardb/pat.txt 2112
+
 # Use reverse proxy for TLS termination
-# Implement authentication at proxy level
 # Use network security groups/firewalls
 ```
 
 ### Future Security (Roadmap)
+- **Scoped PATs** and token rotation
 - **JWT Authentication** with refresh tokens
 - **Role-Based Access Control** (RBAC)
 - **TLS Proxy Integration** for HTTPS
@@ -120,6 +126,7 @@ server {
 ## 📊 Monitoring & Observability
 
 ### Current Capabilities
+- **Liveness probe** — `GET /health` returns `{"status":"ok"}` (public when PAT auth is enabled)
 - **Syslog Integration** - Structured logging to system logs
 - **Console Logging** - For development/debugging
 - **Basic Error Handling** - HTTP status codes and error responses
@@ -235,7 +242,7 @@ sar -n DEV 1
 
 ## 📋 Deployment Checklist
 
-- [ ] **Security**: Implement authentication and TLS
+- [ ] **Security**: Enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
 - [ ] **Monitoring**: Set up metrics collection and alerting
 - [ ] **Backup**: Configure regular backup procedures
 - [ ] **High Availability**: Plan for redundancy and failover

@@ -8,6 +8,8 @@ Following [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/s
 YarDB/
 ├── README.md                    # Main project documentation
 ├── LICENSE                      # Project license
+├── CONTRIBUTING.md              # Contribution guidelines
+├── AGENTS.md                    # AI/CI JSONL build and test triage
 ├── tools/                       # Build tools
 │   └── CB.sh                    # C++ Builder bootstrap script
 ├── .gitignore                   # Git ignore rules
@@ -34,6 +36,12 @@ YarDB/
 │   ├── yarsh/                   # Piped yarsh smoke tests (CI + local)
 │   │   ├── lib.sh               # yardb lifecycle + assertions
 │   │   └── smoke.sh             # smoke entry point
+│   ├── yarexport/               # yarexport smoke tests
+│   │   ├── lib.sh
+│   │   └── smoke.sh
+│   ├── yarproxy/                # yarproxy smoke tests
+│   │   ├── lib.sh
+│   │   └── smoke.sh
 │   ├── example.html             # Example/test HTML
 │   └── yar.sh                   # Manual multi-server demo script
 │
@@ -52,10 +60,14 @@ YarDB/
 │   Note: std module is built from libc++ source (Clang 21+), not from a submodule
 │
 └── docs/                        # Documentation
-    ├── README.md               # Documentation index
-    ├── development.md           # Development guide
-    ├── deployment.md           # Deployment guide
-    └── archive/                # Historical documentation
+    ├── README.md                # Documentation index
+    ├── changelog.md             # Shipped features and smoke coverage
+    ├── development.md           # Development guide and roadmap
+    ├── deployment.md            # Deployment guide
+    ├── programs.md              # Executable reference
+    ├── project_organization.md  # This file
+    ├── rest_api_evaluation.md   # API status and prioritized TODO
+    └── archive/                 # Completed proposals and plans
 ```
 
 ## P1204R0 Compliance

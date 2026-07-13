@@ -41,8 +41,16 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - **Blocked by:** clear grouping semantics and likely TODO #2
    - **Impact**: Enables analytics and reporting queries
 
-#### REST Features (completed — were high priority)
-5. **✅ Content Negotiation** - ✅ **COMPLETED** - Support `Accept` header for response format
+#### Security & operations (completed — July 2026)
+
+5. **✅ Bearer PAT authentication** — `yardb --pat` / `--pat-file`; SHA-256 hashed in memory; `sha256:` lines in pat-file
+6. **✅ `GET /health` liveness probe** — `{"status":"ok"}`; public when PAT auth is enabled
+
+**Remaining:** scoped tokens, JWT/OAuth2, RBAC, `GET /ready`, Prometheus `/metrics`. See [changelog.md](changelog.md) and [development.md](development.md#development-roadmap).
+
+#### REST Features (completed)
+
+7. **✅ Content Negotiation** - ✅ **COMPLETED** - Support `Accept` header for response format
    - ✅ Support `application/json` (current default)
    - ✅ Accept `application/json;odata=minimalmetadata` and `application/json;odata=fullmetadata` header formats
    - ✅ **OData Metadata Format** (fully implemented):
@@ -53,7 +61,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Return appropriate `Content-Type` header
    - ✅ **Impact**: Full OData metadata support enables better client-server negotiation and OData compliance
 
-6. **✅ ETag Support** - ✅ **COMPLETED** - For caching and optimistic locking
+8. **✅ ETag Support** - ✅ **COMPLETED** - For caching and optimistic locking
    - ✅ Generate ETags for resources (using unique document position from metadata)
    - ✅ Support `If-Match` and `If-None-Match` headers for conditional requests
    - ✅ Return `ETag` header in all GET, HEAD, PUT, PATCH responses
@@ -65,7 +73,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 ### 🟡 Medium Priority
 
 #### OData Features
-5. **✅ `$count` query option** - ✅ **COMPLETED** - Return count of items
+9. **✅ `$count` query option** - ✅ **COMPLETED** - Return count of items
    - ✅ Support `$count=true` to return count instead of items
    - ✅ Returns count as JSON number (OData compliant)
    - ✅ Works with `$filter` to return filtered count (including `or`, `ne`, `startswith` via read/scan paths)
@@ -73,13 +81,13 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Example: `GET /Products?$count=true` returns `42`
    - ✅ **Impact**: Efficient counting without fetching all data
 
-7. **`$search` query option** - Full-text search support
+10. **`$search` query option** - Full-text search support
    - Implement basic full-text search across fields
    - Example: `$search=keyword`
    - **Impact**: Enables search functionality
 
 #### REST Features
-8. **✅ Last-Modified Header** - ✅ **COMPLETED** - For conditional requests
+11. **✅ Last-Modified Header** - ✅ **COMPLETED** - For conditional requests
    - ✅ Track modification timestamps for resources (from document metadata)
    - ✅ Return `Last-Modified` header in GET, HEAD, PUT, PATCH responses
    - ✅ Support `If-Modified-Since` and `If-Unmodified-Since` headers
@@ -87,14 +95,14 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Return `412 Precondition Failed` for PUT/PATCH with `If-Unmodified-Since` when document was modified
    - ✅ **Impact**: Enables conditional GET requests and caching
 
-9. **✅ Conditional Requests** - ✅ **COMPLETED** - Full support for conditional headers
+12. **✅ Conditional Requests** - ✅ **COMPLETED** - Full support for conditional headers
    - ✅ `If-Match` / `If-None-Match` (with ETags) - implemented and tested
    - ✅ `If-Modified-Since` / `If-Unmodified-Since` (with Last-Modified) - implemented and tested
    - ✅ Return `412 Precondition Failed` when conditions not met
    - ✅ Return `304 Not Modified` for conditional GET/HEAD requests
    - ✅ **Impact**: Prevents lost updates and enables efficient caching
 
-10. **API Versioning** - Version management strategy
+13. **API Versioning** - Version management strategy
     - Support version in URL (`/v1/collection`) or header (`API-Version: 1.0`)
     - Document versioning strategy
     - **Impact**: Enables API evolution without breaking clients
@@ -102,7 +110,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 ### 🟢 Low Priority
 
 #### OData Features
-11. **`$metadata` endpoint** - OData service metadata ✅ **IMPLEMENTED**
+14. **`$metadata` endpoint** - OData service metadata ✅ **IMPLEMENTED**
     - ✅ Implemented `GET /$metadata` endpoint
     - ✅ Returns OData 4.01 JSON CSDL (Common Schema Definition Language) metadata
     - ✅ Includes entity types, properties, and relationships
@@ -112,34 +120,34 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
     - ✅ `_id` field is always included as non-nullable Edm.Int64 key
     - **Impact**: Enables service discovery and code generation
 
-12. **`$batch` request support** - Batch operations
+15. **`$batch` request support** - Batch operations
     - Support OData batch requests for multiple operations
     - Parse batch request body
     - Execute operations and return batch response
     - **Impact**: Reduces round trips for multiple operations
 
-13. **`$format` query option** - Response format selection
+16. **`$format` query option** - Response format selection
     - Support `$format=json` (default)
     - Support `$format=xml` if needed
     - **Impact**: Format flexibility (though JSON is standard)
 
 #### REST Features
-14. **Bulk Operations** - Batch create/update/delete
+17. **Bulk Operations** - Batch create/update/delete
     - Support bulk POST/PUT/PATCH/DELETE operations
     - Return individual results for each operation
     - **Impact**: Efficient bulk data operations
 
-15. **Full-Text Search** - Advanced search capabilities
+18. **Full-Text Search** - Advanced search capabilities
     - Implement indexing for full-text search
     - Support complex search queries
     - **Impact**: Enhanced search functionality
 
-16. **Relationships/Nested Resources** - Relationship support
+19. **Relationships/Nested Resources** - Relationship support
     - Support nested resource access: `GET /Customers/123/Orders`
     - Implement relationship navigation
     - **Impact**: RESTful relationship traversal
 
-17. **CORS Support** - Cross-Origin Resource Sharing ⚠️ **PARTIAL** - Configuration available
+20. **CORS Support** - Cross-Origin Resource Sharing ⚠️ **PARTIAL** - Configuration available
     - ✅ CORS configuration API implemented (`configure_cors()`, `disable_cors()`)
     - ✅ Support for allowed origins, methods, headers, credentials, max-age
     - ⚠️ OPTIONS preflight handling - Configuration exists but needs verification
@@ -270,10 +278,10 @@ All previously identified critical issues have been addressed:
 | `$expand` | `$expand=relatedEntity` | ⚠️ Parsed but placeholder (returns as-is) | ⚠️ **PARTIAL** - parsed but expansion not yet implemented |
 | `$apply` | `$apply=groupby((field),aggregate(Price with sum))` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #4 |
 | `$count` | `$count=true` or inline count | ✅ `$count=true` returns count as JSON number | ✅ **FULLY COMPATIBLE** |
-| `$search` | `$search=keyword` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #7 |
+| `$search` | `$search=keyword` | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #10 |
 | `$format` | `$format=json` or `$format=xml` | ⚠️ JSON only (default) | ⚠️ **PARTIAL** - JSON only, no format selection |
 | `$metadata` | `GET /$metadata` endpoint | ✅ Implemented | ✅ **IMPLEMENTED** - Returns OData 4.01 JSON CSDL metadata |
-| `$batch` | Batch request support | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #12 |
+| `$batch` | Batch request support | ❌ Not implemented | ❌ **NOT IMPLEMENTED** - See TODO #15 |
 
 **Recommendations:**
 - ✅ **DONE**: Query parameter parsing from `uri.query` - **COMPLETED**
@@ -307,6 +315,10 @@ All previously identified critical issues have been addressed:
 **Note**: See the [TODO: Missing Features](#todo-missing-features-prioritized) section at the top of this document for the complete prioritized list of missing REST and OData features.
 
 ### ✅ Completed Features
+
+**Security & operations:**
+- ✅ Bearer PAT authentication (`yardb --pat` / `--pat-file`; SHA-256 hashed in memory)
+- ✅ `GET /health` liveness probe (public when PAT auth is enabled)
 
 **REST Features:**
 - ✅ Proper HTTP status codes (200, 201, 204, 304, 400, 404, 406, 412)
@@ -375,6 +387,7 @@ The API now follows REST best practices and provides a production-ready foundati
 See [TODO: Missing Features](#todo-missing-features-prioritized) for the full list.
 
 **Recently Completed:**
+- ✅ Bearer PAT authentication and hashed storage; public `GET /health` liveness probe (July 2026)
 - ✅ `$filter` `ne` operator, index-backed `startswith` on secondary keys (July 2026)
 - ✅ Multivalue secondary indexes and `std::flat_map` engine indexes (July 2026)
 - ✅ `$filter` `in`, `or`, and nested property paths (July 2026)

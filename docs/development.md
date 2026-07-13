@@ -261,21 +261,23 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL
-- **Current State**: Basic HTTP Basic auth exists in `net::http` module (minimal credential map)
+- **Current State**: Bearer PAT on `yardb` (`--pat` / `--pat-file`, SHA-256 hashed in memory, public `GET /health`). `net::http` also has optional Basic auth middleware for custom servers.
+- **Shipped** (see [changelog.md](changelog.md)): PAT MVP, hashed storage, auth smokes
 - **Planned Implementation**:
+  - Scoped tokens (read-only vs write)
   - JWT/OAuth2 token authentication
   - Role-based access control (RBAC)
   - Security audit logging
-  - Input validation and sanitization
 - **Timeline**: 2-3 months
 - **Impact**: Required for production deployment
 
 #### 2. 📊 Observability & Monitoring
 - **Priority**: HIGH
 - **Current State**: ✅ Structured logging with JSONL (default) and syslog (RFC 5424) formats, structured fields support, RFC 5424 message IDs
+- **Shipped** (see [changelog.md](changelog.md)): `GET /health` liveness probe (public with PAT auth)
 - **Planned Implementation**:
   - **Prometheus Metrics**: `/metrics` endpoint with request latency, throughput, errors
-  - **Health Checks**: `/health`, `/ready` endpoints
+  - **Readiness**: `GET /ready` endpoint (DB/engine ready)
   - **Distributed Tracing**: OpenTelemetry integration
   - **Correlation IDs**: Request tracing across components
   - **⚠️ Request ID Correlation**: Pass `request_id` from HTTP layer to application handlers to enable end-to-end request tracing (currently HTTP layer has `request_id`, but application logs don't)

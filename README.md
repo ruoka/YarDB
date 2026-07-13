@@ -33,7 +33,7 @@ YarDB is a production-ready C++23 application that implements:
 - **Native C++ Build System**: Uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects
 - C++23 modules support (`.c++m` extension)
 - Cross-platform (Linux, macOS)
-- Comprehensive test suite (`[yardb]` — 288 tests across engine, index, OData, and HTTP integration)
+- Comprehensive test suite (`[yardb]` — 295 tests, 1042 assertions across engine, index, OData, and HTTP integration) plus CLI smoke harnesses under `tests/`
 - Modular architecture with clean separation of concerns
 - P1204R0-compliant project structure
 - RESTful API following OData principles
@@ -116,14 +116,18 @@ The main database server that provides a RESTful HTTP API for document storage a
 
 **Usage:**
 ```bash
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
 ```
 
 **Options:**
 - `--file=<name>` - Database file path (default: `yar.db`)
+- `--pat=<token>` - Bearer personal access token (repeatable)
+- `--pat-file=<path>` - PAT file (plaintext or `sha256:<hex>` lines)
 - `--clog` - Redirect logging to console instead of syslog
 - `--slog_level=<level>` - Set syslog severity level (numeric mask)
 - `service_or_port` - Port number or service name (default: `2112`)
+
+When PAT is configured, all routes require `Authorization: Bearer <token>` except **`GET /health`** (liveness probe). See [Programs Documentation](docs/programs.md#yardb---database-server) for details.
 
 **Example:**
 ```bash
@@ -139,7 +143,7 @@ An interactive command-line client for connecting to and interacting with a yard
 yarsh [--help] [URL]
 ```
 
-**Commands:** HTTP methods with paths (e.g. `GET /users?$count=true`), plus `HELP` and `EXIT`. Supports OData query parameters, `GET /$metadata`, `PUT`/`PATCH /_db/{collection}` for indexes, and optional `@Header: value` lines for `Accept`, `If-Match`, and `If-None-Match`.
+**Commands:** HTTP methods with paths (e.g. `GET /users?$count=true`), plus `HELP` and `EXIT`. Supports OData query parameters, `GET /$metadata`, `GET /health`, `PUT`/`PATCH /_db/{collection}` for indexes, and optional `@Header: value` lines for `Accept`, `Authorization`, `If-Match`, and `If-None-Match`.
 
 **Piped mode:** Pipe a script on stdin for automation and CI. Use **one JSON line** per `POST`/`PUT`/`PATCH` body so multiple commands run in one session. Invalid JSON on a body prints an error and the shell continues.
 
@@ -264,8 +268,12 @@ This project follows [P1204R0: Canonical Project Structure](https://www.open-std
 
 ## Documentation
 
-See [docs/](docs/) for detailed documentation:
-- [Project Organization](docs/project_organization.md) - Project structure and P1204R0 compliance
-- [Development Guide](docs/development.md) - Development workflows and quick reference
-- [Deployment Guide](docs/deployment.md) - Deployment procedures
-- [Programs Documentation](docs/programs.md) - Detailed guide for all programs
+Start at [docs/README.md](docs/README.md) for the full documentation index. Key guides:
+
+- [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, `yarproxy`, `yarexport`
+- [Development Guide](docs/development.md) - Build, test, roadmap
+- [Deployment Guide](docs/deployment.md) - Production deployment
+- [Changelog](docs/changelog.md) - Shipped features and smoke coverage
+- [REST API evaluation](docs/rest_api_evaluation.md) - API status and prioritized TODO
+- [Contributing](CONTRIBUTING.md) - Setup, style, and PR workflow
+- [Agent / CI guide](AGENTS.md) - JSONL build and test triage

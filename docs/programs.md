@@ -45,7 +45,7 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [
 - `--pat=<token>` - Accept a personal access token (repeatable). Clients send `Authorization: Bearer <token>`.
 - `--pat-file=<path>` - Load PATs from a file (one token per line; `#` comments allowed). Lines may be plaintext tokens or `sha256:<hex>` pre-hashed values.
 
-When any PAT is configured, API routes require a valid Bearer token (via `net` `authentication_middleware`) except **`GET /health`**, which stays public for load-balancer probes. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
+When any PAT is configured, API routes require a valid Bearer token (via `net` `authentication_middleware`) except **`GET /health`** and **`GET /ready`**, which stay public for load-balancer probes. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
 
 ### Security Note
 
@@ -74,7 +74,8 @@ yardb --clog --file=test.db 2112
 
 Once running, `yardb` provides the following REST endpoints:
 
-- `GET /health` - Liveness probe (`{"status":"ok"}`); public even when PAT auth is enabled
+- `GET /health` - Liveness probe (`{}`); public even when PAT auth is enabled
+- `GET /ready` - Readiness probe (`{}`); public even when PAT auth is enabled (engine readiness checks not yet distinguished)
 - `GET /` - List all collections
 - `POST /{collection}` - Create a new document
 - `GET /{collection}` - Read all documents in collection
@@ -318,7 +319,8 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 
 #### Administrative Commands
 
-- `GET /health` - Liveness probe (`{"status":"ok"}`); public even when PAT auth is enabled
+- `GET /health` - Liveness probe (`{}`); public even when PAT auth is enabled
+- `GET /ready` - Readiness probe (`{}`); public even when PAT auth is enabled (engine readiness checks not yet distinguished)
 - `GET /` - List all collections
 - `GET /$metadata` - OData JSON CSDL metadata
 - `GET /_reindex` - Reindex all collections

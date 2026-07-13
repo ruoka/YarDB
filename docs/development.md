@@ -270,7 +270,7 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL
-- **Current State**: Bearer PAT on `yardb` (`--pat` / `--pat-file`, SHA-256 hashed in memory, public `GET /health`). `net::http` also has optional Basic auth middleware for custom servers.
+- **Current State**: Bearer PAT on `yardb` (`--pat` / `--pat-file`, SHA-256 hashed in memory, public `GET /health` and `GET /ready`). `net::http` also has optional Basic auth middleware for custom servers.
 - **Shipped** (see [changelog.md](changelog.md)): PAT MVP, hashed storage, auth smokes
 - **Planned Implementation**:
   - Scoped tokens (read-only vs write)
@@ -284,11 +284,12 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 - **Priority**: HIGH
 - **Current State**: ✅ Structured logging with JSONL (default) and syslog (RFC 5424) formats, structured fields support, RFC 5424 message IDs
 - **Shipped** (see [changelog.md](changelog.md)):
-  - `GET /health` liveness probe (public with PAT auth)
+  - `GET /health` liveness probe (`{}`; public with PAT auth)
+  - `GET /ready` readiness probe (`{}`; public with PAT auth; engine not-ready detection not yet implemented)
   - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
 - **Planned Implementation**:
   - **Prometheus Metrics**: `/metrics` endpoint with request latency, throughput, errors
-  - **Readiness**: `GET /ready` endpoint (DB/engine ready)
+  - **Readiness semantics**: return `503` from `GET /ready` when engine/DB is starting, locked, or shutting down
   - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)
 - **Timeline**: 1-2 months
 - **Impact**: Essential for production operations and debugging

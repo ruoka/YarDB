@@ -14,7 +14,7 @@ Optional PAT authentication (Bearer token):
   --pat=<token>       Accept a personal access token (repeatable)
   --pat-file=<path>   Load tokens from a file (one per line; # comments allowed)
                       Lines may be plaintext tokens or sha256:<hex> pre-hashed values.
-When any PAT is configured, API routes require Authorization: Bearer <token>, except GET /health.
+When any PAT is configured, API routes require Authorization: Bearer <token>, except GET /health and GET /ready.
 )";
 
 // Global atomic flag for shutdown request (async-signal-safe)

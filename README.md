@@ -127,7 +127,7 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [
 - `--slog_level=<level>` - Set syslog severity level (numeric mask)
 - `service_or_port` - Port number or service name (default: `2112`)
 
-When PAT is configured, all routes require `Authorization: Bearer <token>` except **`GET /health`** (liveness probe). See [Programs Documentation](docs/programs.md#yardb---database-server) for details.
+When PAT is configured, all routes require `Authorization: Bearer <token>` except **`GET /health`** and **`GET /ready`** (liveness/readiness probes). See [Programs Documentation](docs/programs.md#yardb---database-server) for details.
 
 **Example:**
 ```bash

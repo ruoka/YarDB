@@ -100,8 +100,8 @@ server {
 ## 🔒 Security Considerations
 
 ### Current Capabilities
-- **Optional Bearer PAT** — `yardb --pat` / `--pat-file` (SHA-256 hashed in memory; `sha256:` lines in pat-file). When configured, all routes require `Authorization: Bearer <token>` except **`GET /health`**.
-- **Public liveness probe** — `GET /health` returns `{"status":"ok"}` even when PAT auth is enabled.
+- **Optional Bearer PAT** — `yardb --pat` / `--pat-file` (SHA-256 hashed in memory; `sha256:` lines in pat-file). When configured, all routes require `Authorization: Bearer <token>` except **`GET /health`** and **`GET /ready`**.
+- **Public probes** — `GET /health` and `GET /ready` return `{}` even when PAT auth is enabled.
 
 ### Current Limitations
 - **No TLS/HTTPS** — All traffic is plaintext unless terminated at a reverse proxy
@@ -126,7 +126,8 @@ yardb --pat-file=/etc/yardb/pat.txt 2112
 ## 📊 Monitoring & Observability
 
 ### Current Capabilities
-- **Liveness probe** — `GET /health` returns `{"status":"ok"}` (public when PAT auth is enabled)
+- **Liveness probe** — `GET /health` returns `{}` (public when PAT auth is enabled)
+- **Readiness probe** — `GET /ready` returns `{}` (public when PAT auth is enabled)
 - **Request tracing** — `X-Correlation-ID` on inbound requests; `correlation_id` on application log lines (`POST_DOCUMENT`, `HTTP_RESPONSE`, errors). Transport layer also logs `request_id` per connection.
 - **JSONL structured logging** — Default format; use `--clog` for console output during development
 - **Syslog Integration** - Structured logging to system logs (`--slog_level`)
@@ -136,10 +137,10 @@ yardb --pat-file=/etc/yardb/pat.txt 2112
 ```bash
 # Available now:
 curl http://localhost:2112/health   # Liveness probe (public with PAT auth)
+curl http://localhost:2112/ready    # Readiness probe (public with PAT auth)
 
 # Planned endpoints:
 curl http://localhost:2112/metrics  # Prometheus metrics
-curl http://localhost:2112/ready    # Readiness probe
 ```
 
 ### Log Aggregation

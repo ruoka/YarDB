@@ -21,7 +21,8 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 |------|---------|
 | **Bearer PAT authentication** | `yardb --pat` / `--pat-file`; all routes protected via `net` `authentication_middleware` (`5236cab`) |
 | **Hashed PAT storage** | Tokens stored as SHA-256 of full `Authorization` header; `--pat-file` accepts `sha256:<hex>` lines (`48a4ac0`) |
-| **`GET /health` liveness probe** | Returns `{"status":"ok"}`; public even when PAT is enabled; reserved collection name (`48a4ac0`) |
+| **`GET /health` liveness probe** | Returns `{}`; public even when PAT is enabled; reserved collection name (`48a4ac0`) |
+| **`GET /ready` readiness probe** | Returns `{}`; public even when PAT is enabled; reserved collection name; engine not-ready `503` deferred |
 
 ### Observability
 

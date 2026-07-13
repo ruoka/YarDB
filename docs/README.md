@@ -39,7 +39,7 @@ Broader roadmap priorities (see **[development.md](development.md)**):
 
 See **[changelog.md](changelog.md)** for the full list. Most recent:
 
-- **Hashed PAT storage** + public **`GET /health`** liveness probe
+- **Public probes** — **`GET /health`** and **`GET /ready`** return `{}` (PAT-exempt)
 - **`correlation_id` tracing** — `X-Correlation-ID` on all HTTP handler logs
 - **yarproxy header forwarding** — `Authorization` and `X-Correlation-ID` to backends; `header_forward_auth` / `header_forward_correlation` smokes
 - **yarsh smokes** — auth CRUD, `$filter` `or` / `startswith`, OData query cases

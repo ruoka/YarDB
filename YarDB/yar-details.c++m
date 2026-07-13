@@ -19,7 +19,8 @@ using namespace ::http;  // HTTP constants and types from net::http
 inline auto is_public_api_path(std::string_view uri) -> bool
 {
     const ::http::uri parsed{uri};
-    return parsed.path[1] == "health"sv && parsed.path[2].empty();
+    const auto segment = parsed.path[1];
+    return (segment == "health"sv || segment == "ready"sv) && parsed.path[2].empty();
 }
 
 // Collection name validation
@@ -28,7 +29,8 @@ inline auto validate_collection_name(std::string_view collection_name)
     if(collection_name.empty())
         throw std::invalid_argument{"Collection name cannot be empty"};
 
-    if(collection_name == yar::db::reserved_collection_health)
+    if(collection_name == yar::db::reserved_collection_health
+        || collection_name == yar::db::reserved_collection_ready)
         throw std::invalid_argument{"Collection name is reserved"};
     
     if(collection_name.size() > yar::db::max_collection_name_length)

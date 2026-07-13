@@ -44,13 +44,14 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 #### Security & operations (completed — July 2026)
 
 5. **✅ Bearer PAT authentication** — `yardb --pat` / `--pat-file`; SHA-256 hashed in memory; `sha256:` lines in pat-file
-6. **✅ `GET /health` liveness probe** — `{"status":"ok"}`; public when PAT auth is enabled
+6. **✅ `GET /health` liveness probe** — `{}`; public when PAT auth is enabled
+7. **✅ `GET /ready` readiness probe** — `{}`; public when PAT auth is enabled (503 when not ready: not yet implemented)
 
-**Remaining:** scoped tokens, JWT/OAuth2, RBAC, `GET /ready`, Prometheus `/metrics`. See [changelog.md](changelog.md) and [development.md](development.md#development-roadmap).
+**Remaining:** scoped tokens, JWT/OAuth2, RBAC, readiness `503` semantics, Prometheus `/metrics`. See [changelog.md](changelog.md) and [development.md](development.md#development-roadmap).
 
 #### REST Features (completed)
 
-7. **✅ Content Negotiation** - ✅ **COMPLETED** - Support `Accept` header for response format
+8. **✅ Content Negotiation** - ✅ **COMPLETED** - Support `Accept` header for response format
    - ✅ Support `application/json` (current default)
    - ✅ Accept `application/json;odata=minimalmetadata` and `application/json;odata=fullmetadata` header formats
    - ✅ **OData Metadata Format** (fully implemented):
@@ -61,7 +62,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Return appropriate `Content-Type` header
    - ✅ **Impact**: Full OData metadata support enables better client-server negotiation and OData compliance
 
-8. **✅ ETag Support** - ✅ **COMPLETED** - For caching and optimistic locking
+9. **✅ ETag Support** - ✅ **COMPLETED** - For caching and optimistic locking
    - ✅ Generate ETags for resources (using unique document position from metadata)
    - ✅ Support `If-Match` and `If-None-Match` headers for conditional requests
    - ✅ Return `ETag` header in all GET, HEAD, PUT, PATCH responses
@@ -73,7 +74,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 ### 🟡 Medium Priority
 
 #### OData Features
-9. **✅ `$count` query option** - ✅ **COMPLETED** - Return count of items
+10. **✅ `$count` query option** - ✅ **COMPLETED** - Return count of items
    - ✅ Support `$count=true` to return count instead of items
    - ✅ Returns count as JSON number (OData compliant)
    - ✅ Works with `$filter` to return filtered count (including `or`, `ne`, `startswith` via read/scan paths)
@@ -81,13 +82,13 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Example: `GET /Products?$count=true` returns `42`
    - ✅ **Impact**: Efficient counting without fetching all data
 
-10. **`$search` query option** - Full-text search support
+11. **`$search` query option** - Full-text search support
    - Implement basic full-text search across fields
    - Example: `$search=keyword`
    - **Impact**: Enables search functionality
 
 #### REST Features
-11. **✅ Last-Modified Header** - ✅ **COMPLETED** - For conditional requests
+12. **✅ Last-Modified Header** - ✅ **COMPLETED** - For conditional requests
    - ✅ Track modification timestamps for resources (from document metadata)
    - ✅ Return `Last-Modified` header in GET, HEAD, PUT, PATCH responses
    - ✅ Support `If-Modified-Since` and `If-Unmodified-Since` headers
@@ -95,14 +96,14 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Return `412 Precondition Failed` for PUT/PATCH with `If-Unmodified-Since` when document was modified
    - ✅ **Impact**: Enables conditional GET requests and caching
 
-12. **✅ Conditional Requests** - ✅ **COMPLETED** - Full support for conditional headers
+13. **✅ Conditional Requests** - ✅ **COMPLETED** - Full support for conditional headers
    - ✅ `If-Match` / `If-None-Match` (with ETags) - implemented and tested
    - ✅ `If-Modified-Since` / `If-Unmodified-Since` (with Last-Modified) - implemented and tested
    - ✅ Return `412 Precondition Failed` when conditions not met
    - ✅ Return `304 Not Modified` for conditional GET/HEAD requests
    - ✅ **Impact**: Prevents lost updates and enables efficient caching
 
-13. **API Versioning** - Version management strategy
+14. **API Versioning** - Version management strategy
     - Support version in URL (`/v1/collection`) or header (`API-Version: 1.0`)
     - Document versioning strategy
     - **Impact**: Enables API evolution without breaking clients
@@ -318,7 +319,7 @@ All previously identified critical issues have been addressed:
 
 **Security & operations:**
 - ✅ Bearer PAT authentication (`yardb --pat` / `--pat-file`; SHA-256 hashed in memory)
-- ✅ `GET /health` liveness probe (public when PAT auth is enabled)
+- ✅ `GET /health` and `GET /ready` probes (`{}`; public when PAT auth is enabled)
 
 **REST Features:**
 - ✅ Proper HTTP status codes (200, 201, 204, 304, 400, 404, 406, 412)
@@ -387,7 +388,7 @@ The API now follows REST best practices and provides a production-ready foundati
 See [TODO: Missing Features](#todo-missing-features-prioritized) for the full list.
 
 **Recently Completed:**
-- ✅ Bearer PAT authentication and hashed storage; public `GET /health` liveness probe (July 2026)
+- ✅ Bearer PAT authentication and hashed storage; public `GET /health` and `GET /ready` probes (`{}`) (July 2026)
 - ✅ `$filter` `ne` operator, index-backed `startswith` on secondary keys (July 2026)
 - ✅ Multivalue secondary indexes and `std::flat_map` engine indexes (July 2026)
 - ✅ `$filter` `in`, `or`, and nested property paths (July 2026)

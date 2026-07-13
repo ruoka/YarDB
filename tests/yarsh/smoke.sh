@@ -482,7 +482,15 @@ EXIT
 EOF
 )"
   assert_contains " 200 " "health_public_without_pat"
-  assert_contains '"status" : "ok"' "health_status_ok"
+  assert_contains "{}" "health_empty_body"
+
+  run_yarsh "$(cat <<EOF
+GET /ready
+EXIT
+EOF
+)"
+  assert_contains " 200 " "ready_public_without_pat"
+  assert_contains "{}" "ready_empty_body"
 
   run_yarsh "$(cat <<EOF
 GET /

@@ -25,10 +25,10 @@ constexpr auto correlation_id_header = "x-correlation-id"sv;
 // Cached correlation ID header string (headers API requires std::string)
 const auto correlation_id_header_str = std::string{correlation_id_header};
 
-// Collection routes exclude reserved path segments (e.g. /health liveness probe).
-inline const auto collection_route = "/(?!health$)[a-z][a-z0-9]*"s;
-inline const auto collection_route_with_query = "/(?!health$)[a-z][a-z0-9]*(\\?.*)?"s;
-inline const auto collection_route_with_id = "/(?!health$)[a-z][a-z0-9]*/[0-9]+"s;
+// Collection routes exclude reserved path segments (e.g. /health, /ready probes).
+inline const auto collection_route = "/(?!health$|ready$)[a-z][a-z0-9]*"s;
+inline const auto collection_route_with_query = "/(?!health$|ready$)[a-z][a-z0-9]*(\\?.*)?"s;
+inline const auto collection_route_with_id = "/(?!health$|ready$)[a-z][a-z0-9]*/[0-9]+"s;
 
 // Handler type aliases for middleware composition
 using handler = ::http::callback_with_headers;
@@ -491,13 +491,13 @@ private:
             "application/json"sv,
             ::http::middleware::wrap(list_collections_handler, list_middlewares));
 
-        auto health_handler = []([[maybe_unused]] ::http::request_view request,
-                                 [[maybe_unused]] ::http::body_view body,
-                                 [[maybe_unused]] ::http::headers& headers)
+        auto probe_handler = []([[maybe_unused]] ::http::request_view request,
+                                [[maybe_unused]] ::http::body_view body,
+                                [[maybe_unused]] ::http::headers& headers)
         {
             return response_with_headers{
                 status_ok,
-                R"({"status":"ok"})"s,
+                "{}"s,
                 std::optional<::http::headers>{}
             };
         };
@@ -505,7 +505,12 @@ private:
         auto health_middlewares = build_middleware_chain(method_get, "HEALTH_CHECK"sv, "HEALTH_CHECK_ERROR"sv, false);
         m_server.get("/health"s).response_with_headers(
             "application/json"sv,
-            ::http::middleware::wrap(health_handler, health_middlewares));
+            ::http::middleware::wrap(probe_handler, health_middlewares));
+
+        auto ready_middlewares = build_middleware_chain(method_get, "READY_CHECK"sv, "READY_CHECK_ERROR"sv, false);
+        m_server.get("/ready"s).response_with_headers(
+            "application/json"sv,
+            ::http::middleware::wrap(probe_handler, ready_middlewares));
 
         // GET /$metadata - OData 4.01 JSON CSDL metadata endpoint
         auto metadata_handler = [this]([[maybe_unused]] ::http::request_view request, 

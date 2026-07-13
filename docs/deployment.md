@@ -91,7 +91,7 @@ server {
 
     # Health check endpoint
     location /health {
-        proxy_pass http://localhost:2112/_health;
+        proxy_pass http://localhost:2112/health;
         access_log off;
     }
 }
@@ -126,9 +126,11 @@ server {
 
 ### Future Monitoring (Roadmap)
 ```bash
-# Planned endpoints when implemented:
+# Available now:
+curl http://localhost:2112/health   # Liveness probe (public with PAT auth)
+
+# Planned endpoints:
 curl http://localhost:2112/metrics  # Prometheus metrics
-curl http://localhost:2112/health   # Health check
 curl http://localhost:2112/ready    # Readiness probe
 ```
 

@@ -43,9 +43,9 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [
 - `--help` - Display usage information
 
 - `--pat=<token>` - Accept a personal access token (repeatable). Clients send `Authorization: Bearer <token>`.
-- `--pat-file=<path>` - Load PATs from a file (one token per line; `#` comments allowed)
+- `--pat-file=<path>` - Load PATs from a file (one token per line; `#` comments allowed). Lines may be plaintext tokens or `sha256:<hex>` pre-hashed values.
 
-When any PAT is configured, **all API routes** require a valid Bearer token (via `net` `authentication_middleware`).
+When any PAT is configured, API routes require a valid Bearer token (via `net` `authentication_middleware`) except **`GET /health`**, which stays public for load-balancer probes. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
 
 ### Security Note
 
@@ -53,7 +53,7 @@ When any PAT is configured, **all API routes** require a valid Bearer token (via
 
 **With `--pat` / `--pat-file`:** Bearer PAT required on every route. Suitable for simple deployments; use TLS in production.
 
-**Future:** JWT/OAuth2, RBAC, scoped tokens, token hashing at rest.
+**Future:** JWT/OAuth2, RBAC, scoped tokens.
 
 **`yarsh`:** send `@Authorization: Bearer <token>` before the request line.
 
@@ -74,6 +74,7 @@ yardb --clog --file=test.db 2112
 
 Once running, `yardb` provides the following REST endpoints:
 
+- `GET /health` - Liveness probe (`{"status":"ok"}`); public even when PAT auth is enabled
 - `GET /` - List all collections
 - `POST /{collection}` - Create a new document
 - `GET /{collection}` - Read all documents in collection
@@ -317,6 +318,7 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 
 #### Administrative Commands
 
+- `GET /health` - Liveness probe (`{"status":"ok"}`); public even when PAT auth is enabled
 - `GET /` - List all collections
 - `GET /$metadata` - OData JSON CSDL metadata
 - `GET /_reindex` - Reindex all collections
@@ -506,10 +508,11 @@ yarexport --file=mydb.db | jq 'select(.collection=="users")'
 ```bash
 ./tests/yarexport/smoke.sh
 ./tests/yarexport/smoke.sh --jsonl
+./tests/yarexport/smoke.sh --case export_empty
 ./tests/yarexport/smoke.sh --case export_seeded
 ```
 
-Cases: `export_seeded`, `missing_file`, `help`. Seeds data via `yarsh`, stops `yardb`, exports the DB file, and validates JSONL syntax plus record shape.
+Cases: `export_empty`, `export_seeded`, `missing_file`, `help`. `export_empty` exports a freshly started database with no documents. `export_seeded` seeds data via `yarsh`, stops `yardb`, exports the DB file, and validates JSONL syntax plus record shape.
 
 ### Use Cases
 

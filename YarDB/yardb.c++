@@ -1,6 +1,7 @@
 #include <csignal>
 import yar;
 import net;
+import cryptic;
 import std;
 
 using namespace std;
@@ -12,7 +13,8 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [
 Optional PAT authentication (Bearer token):
   --pat=<token>       Accept a personal access token (repeatable)
   --pat-file=<path>   Load tokens from a file (one per line; # comments allowed)
-When any PAT is configured, all API routes require Authorization: Bearer <token>.
+                      Lines may be plaintext tokens or sha256:<hex> pre-hashed values.
+When any PAT is configured, API routes require Authorization: Bearer <token>, except GET /health.
 )";
 
 // Global atomic flag for shutdown request (async-signal-safe)
@@ -25,6 +27,8 @@ extern "C" void signal_handler(int)
 }
 
 namespace {
+
+using pat_hash = string;
 
 auto trim(string_view text) -> string
 {
@@ -58,14 +62,78 @@ auto normalize_bearer_auth(string_view token) -> string
     return "Bearer "s + string{token};
 }
 
-void append_normalized_pats(vector<string>& raw_tokens, set<string>& bearer_values)
+auto is_hex_digit(char ch) -> bool
+{
+    return (ch >= '0' && ch <= '9')
+        || (ch >= 'a' && ch <= 'f')
+        || (ch >= 'A' && ch <= 'F');
+}
+
+auto is_sha256_hex(string_view text) -> bool
+{
+    if(text.size() != 64)
+        return false;
+    return ranges::all_of(text, is_hex_digit);
+}
+
+auto to_lower_hex(string_view text) -> string
+{
+    auto result = string{text};
+    for(auto& ch : result)
+    {
+        if(ch >= 'A' && ch <= 'F')
+            ch = static_cast<char>(ch - 'A' + 'a');
+    }
+    return result;
+}
+
+auto hash_pat_bearer(string_view bearer_auth) -> pat_hash
+{
+    return cryptic::sha256::hexadecimal(bearer_auth);
+}
+
+auto parse_pat_hash(string_view raw) -> pat_hash
+{
+    if(raw.empty())
+        throw runtime_error{"PAT token must not be empty"};
+
+    if(raw.starts_with("sha256:"))
+    {
+        const auto digest = trim(raw.substr(string_view{"sha256:"}.size()));
+        if(!is_sha256_hex(digest))
+            throw runtime_error{"PAT sha256 digest must be 64 hexadecimal characters"};
+        return to_lower_hex(digest);
+    }
+
+    return hash_pat_bearer(normalize_bearer_auth(raw));
+}
+
+void append_hashed_pats(vector<string>& raw_tokens, set<pat_hash>& hashed_values)
 {
     for(const auto& raw : raw_tokens)
+        hashed_values.insert(parse_pat_hash(raw));
+}
+
+auto secure_equals(string_view left, string_view right) -> bool
+{
+    if(left.size() != right.size())
+        return false;
+
+    auto diff = 0u;
+    for(auto i = 0uz; i < left.size(); ++i)
+        diff |= static_cast<unsigned>(left[i] ^ right[i]);
+    return diff == 0u;
+}
+
+auto validate_hashed_pat(const set<pat_hash>& hashed_values, string_view authorization) -> bool
+{
+    const auto candidate = hash_pat_bearer(authorization);
+    for(const auto& stored : hashed_values)
     {
-        if(raw.empty())
-            throw runtime_error{"PAT token must not be empty"};
-        bearer_values.insert(normalize_bearer_auth(raw));
+        if(secure_equals(candidate, stored))
+            return true;
     }
+    return false;
 }
 
 } // namespace
@@ -143,23 +211,23 @@ try
     for(const auto& pat_file : pat_files)
         load_pat_file(pat_file, raw_pats);
 
-    auto bearer_pats = set<string>{};
-    append_normalized_pats(raw_pats, bearer_pats);
+    auto hashed_pats = set<pat_hash>{};
+    append_hashed_pats(raw_pats, hashed_pats);
 
     slog << notice << "Starting up server" << flush;
     auto server = yar::http::rest_api_server{file, service_or_port};
 
-    if(!bearer_pats.empty())
+    if(!hashed_pats.empty())
     {
-        auto valid_tokens = make_shared<set<string>>(std::move(bearer_pats));
+        auto valid_hashes = make_shared<set<pat_hash>>(std::move(hashed_pats));
         server.configure_authentication(
-            [](string_view) { return false; },
-            [valid_tokens](string_view authorization) {
-                return valid_tokens->contains(string{authorization});
+            yar::http::details::is_public_api_path,
+            [valid_hashes](string_view authorization) {
+                return validate_hashed_pat(*valid_hashes, authorization);
             },
             "YarDB API"sv
         );
-        slog << notice << "PAT authentication enabled (" << valid_tokens->size() << " token(s))" << flush;
+        slog << notice << "PAT authentication enabled (" << valid_hashes->size() << " hashed token(s))" << flush;
     }
 
     std::signal(SIGTERM, signal_handler);

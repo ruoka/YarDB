@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_seeded, missing_file, help"
+      echo "cases: export_empty, export_seeded, missing_file, help"
       exit 0
       ;;
     *)
@@ -44,11 +44,30 @@ collection() {
   printf '%s%s' "${RUN_ID}" "$1"
 }
 
+test_export_empty() {
+  should_run export_empty || return 0
+  begin_case export_empty
+
+  stop_yardb
+  start_yardb
+  stop_yardb_keep_db
+
+  run_yarexport "${YARDB_DB}"
+  assert_export_status 0 "export_ok"
+  assert_export_empty "no_records"
+
+  cleanup_yardb_files
+  end_case export_empty
+}
+
 test_export_seeded() {
   should_run export_seeded || return 0
   begin_case export_seeded
   local coll
   coll="$(collection export)"
+
+  stop_yardb
+  start_yardb
 
   run_yarsh "$(cat <<EOF
 POST /${coll}
@@ -106,8 +125,7 @@ main() {
   jsonl_emit "{\"type\":\"smoke_start\",\"schema\":\"yarexport-smoke\",\"version\":1}"
   log "yarexport smoke tests (build=${BUILD_DIR})"
 
-  start_yardb
-
+  test_export_empty
   test_export_seeded
   test_missing_file
   test_help

@@ -3278,6 +3278,23 @@ auto test_set()
         };
     };
 
+    test_case("GET /health liveness probe, [yardb]") = []
+    {
+        const auto test_file = "./httpd_health_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET /health returns 200 OK with status payload") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/health"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_contains(body, R"("status")"s);
+            require_contains(body, R"("ok")"s);
+        };
+    };
+
     test_case("PAT authentication middleware, [yardb]") = []
     {
         const auto test_file = "./httpd_pat_auth_test.db";
@@ -3285,12 +3302,23 @@ auto test_set()
 
         const auto valid_pat = "Bearer smoke-test-pat"s;
         setup->get_server().configure_authentication(
-            [](string_view) -> bool { return false; },
+            yar::http::details::is_public_api_path,
             [valid_pat](string_view authorization) -> bool {
                 return authorization == valid_pat;
             },
             "YarDB API"sv
         );
+
+        section("GET /health without Authorization returns 200 when PAT enabled") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/health"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_contains(body, R"("status")"s);
+            require_contains(body, R"("ok")"s);
+        };
 
         section("Protected route without Authorization returns 401") = [setup]
         {

@@ -477,6 +477,14 @@ test_auth_required() {
   start_yardb
 
   run_yarsh "$(cat <<EOF
+GET /health
+EXIT
+EOF
+)"
+  assert_contains " 200 " "health_public_without_pat"
+  assert_contains '"status" : "ok"' "health_status_ok"
+
+  run_yarsh "$(cat <<EOF
 GET /
 EXIT
 EOF

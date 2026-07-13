@@ -25,6 +25,11 @@ constexpr auto correlation_id_header = "x-correlation-id"sv;
 // Cached correlation ID header string (headers API requires std::string)
 const auto correlation_id_header_str = std::string{correlation_id_header};
 
+// Collection routes exclude reserved path segments (e.g. /health liveness probe).
+inline const auto collection_route = "/(?!health$)[a-z][a-z0-9]*"s;
+inline const auto collection_route_with_query = "/(?!health$)[a-z][a-z0-9]*(\\?.*)?"s;
+inline const auto collection_route_with_id = "/(?!health$)[a-z][a-z0-9]*/[0-9]+"s;
+
 // Handler type aliases for middleware composition
 using handler = ::http::callback_with_headers;
 using middleware_factory = ::http::middleware_factory;
@@ -459,7 +464,7 @@ private:
         };
 
         auto create_middlewares = build_middleware_chain(method_post, "POST_DOCUMENT"sv, "CREATE_ERROR"sv, true);
-        m_server.post("/[a-z][a-z0-9]*"s).response_with_headers(
+        m_server.post(collection_route).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(create_handler, create_middlewares));
 
@@ -485,6 +490,22 @@ private:
         m_server.get("/"s).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(list_collections_handler, list_middlewares));
+
+        auto health_handler = []([[maybe_unused]] ::http::request_view request,
+                                 [[maybe_unused]] ::http::body_view body,
+                                 [[maybe_unused]] ::http::headers& headers)
+        {
+            return response_with_headers{
+                status_ok,
+                R"({"status":"ok"})"s,
+                std::optional<::http::headers>{}
+            };
+        };
+
+        auto health_middlewares = build_middleware_chain(method_get, "HEALTH_CHECK"sv, "HEALTH_CHECK_ERROR"sv, false);
+        m_server.get("/health"s).response_with_headers(
+            "application/json"sv,
+            ::http::middleware::wrap(health_handler, health_middlewares));
 
         // GET /$metadata - OData 4.01 JSON CSDL metadata endpoint
         auto metadata_handler = [this]([[maybe_unused]] ::http::request_view request, 
@@ -588,7 +609,7 @@ private:
         };
 
         auto get_document_middlewares = build_middleware_chain(method_get, "GET_DOCUMENT"sv, "GET_DOCUMENT_ERROR"sv, true);
-        m_server.get("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
+        m_server.get(collection_route_with_id).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(get_document_handler, get_document_middlewares));
 
@@ -737,7 +758,7 @@ private:
         };
 
         auto get_collection_middlewares = build_middleware_chain(method_get, "GET_COLLECTION"sv, "GET_COLLECTION_ERROR"sv, false);
-        m_server.get("/[a-z][a-z0-9]*(\\?.*)?"s).response_with_headers(
+        m_server.get(collection_route_with_query).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(get_collection_handler, get_collection_middlewares));
 
@@ -1194,7 +1215,7 @@ private:
         };
 
         auto put_document_middlewares = build_middleware_chain(method_put, "PUT_DOCUMENT"sv, "PUT_DOCUMENT_ERROR"sv, true);
-        m_server.put("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
+        m_server.put(collection_route_with_id).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(put_document_handler, put_document_middlewares));
 
@@ -1303,7 +1324,7 @@ private:
         };
 
         auto patch_document_middlewares = build_middleware_chain(method_patch, "PATCH_DOCUMENT"sv, "PATCH_DOCUMENT_ERROR"sv, true);
-        m_server.patch("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
+        m_server.patch(collection_route_with_id).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(patch_document_handler, patch_document_middlewares));
 
@@ -1333,7 +1354,7 @@ private:
         };
 
         auto delete_document_middlewares = build_middleware_chain(method_delete, "DELETE_DOCUMENT"sv, "DELETE_DOCUMENT_ERROR"sv, false);
-        m_server.destroy("/[a-z][a-z0-9]*/[0-9]+"s).response_with_headers(
+        m_server.destroy(collection_route_with_id).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(delete_document_handler, delete_document_middlewares));
 

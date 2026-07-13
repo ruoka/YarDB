@@ -125,6 +125,17 @@ PY
   return 0
 }
 
+assert_export_empty() {
+  local label=${1:-export_empty}
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ -z "$(printf '%s' "${LAST_EXPORT_OUTPUT}" | tr -d '[:space:]')" ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"${label}\"}"
+    return 0
+  fi
+  fail "expected empty export output"
+  return 0
+}
+
 assert_jsonl_line_count_at_least() {
   local min=$1
   local label=${2:-jsonl_line_count}

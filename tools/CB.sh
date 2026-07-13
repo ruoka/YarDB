@@ -20,7 +20,7 @@ CB_SANDBOX_DISABLE_NETWORK_TESTS=1
 CB_RESPECT_CXX_ENV=0
 CB_INCLUDE_EXAMPLES_MODE=never
 
-CB_INCLUDE_DIRS=("$PROJECT_ROOT/deps/net/net")
+CB_INCLUDE_DIRS=("$PROJECT_ROOT/deps/net/net" "$PROJECT_ROOT/deps/cryptic/cryptic")
 [[ -n "$TESTER_ROOT" && -d "$TESTER_ROOT/tester" ]] && CB_INCLUDE_DIRS+=("$TESTER_ROOT/tester")
 if [[ "$(uname -s)" == "Darwin" && -d "/opt/homebrew/include" ]]; then
   CB_INCLUDE_DIRS+=("/opt/homebrew/include")

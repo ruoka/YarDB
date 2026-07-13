@@ -10,6 +10,7 @@ inline constexpr auto reserved_field_keys = "keys";     // Secondary keys field 
 
 // Reserved collection names
 inline constexpr auto reserved_collection_db = "_db";  // System collection containing metadata for all collections
+inline constexpr auto reserved_collection_health = "health";  // GET /health liveness probe (not a data collection)
 
 // Query parameter limits
 inline constexpr long long max_query_top = 10000;           // Maximum value for $top query parameter

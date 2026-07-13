@@ -14,30 +14,80 @@ HTTP fan-out proxy for local testing (not built-in replication or HA).
 GET/HEAD: round-robin to one yardb backend per request.
 POST/PUT/PATCH/DELETE: best-effort fan-out to every --replica backend;
 client sees one response (from the last backend). Backends use separate DB files.
+
+Forwards end-to-end headers (Authorization, X-Correlation-ID, etc.) to backends.
+Rewrites Host per backend and strips hop-by-hop headers (Connection, etc.).
 )";
 
-using replica = endpointstream;
-
-using replica_set = lockable<list<replica>>;
-
-inline auto& operator >> (istream& is, ostream& os)
+struct replica_backend
 {
-    auto request_line = ""s;
-    auto headers = http::headers{};
+    endpointstream connection;
+    string host_header;
+};
 
-    getline(is,request_line,'\r') >> ws >> headers >> crlf;
-    os << request_line << crlf << headers << crlf;
+using replica_set = lockable<list<replica_backend>>;
 
-    auto content_length = headers.contains("content-length") ? std::stoll(headers["content-length"]) : 0ull;
+inline auto host_header_from_url(string_view replica_url) -> string
+{
+    using namespace std::string_view_literals;
 
-    while(content_length and is and os)
+    const auto url = uri{replica_url};
+    auto host = string{url.host};
+    const auto port = url.port == ""sv ? string{url.scheme} : string{url.port};
+    if(!port.empty())
+        host += ':' + port;
+    return host;
+}
+
+inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs)
+{
+    auto content_length = hdrs.contains("content-length"s) ? stoll(hdrs["content-length"s]) : 0ll;
+
+    while(content_length > 0 && is && os)
     {
         os.put(is.get());
         --content_length;
     }
 
     os << flush;
-    return is;
+}
+
+inline void read_http_message(istream& is, ostream& os)
+{
+    auto request_line = ""s;
+    auto headers = http::headers{};
+
+    getline(is, request_line, '\r') >> ws >> headers >> crlf;
+    os << request_line << crlf << headers << crlf;
+    copy_http_body(is, os, headers);
+}
+
+inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
+{
+    static constexpr array hop_by_hop = {
+        "connection"s, "proxy-connection"s, "keep-alive"s,
+        "proxy-authenticate"s, "proxy-authorization"s, "te"s,
+        "trailers"s, "transfer-encoding"s, "upgrade"s
+    };
+
+    const auto strip_names = flat_set<string>{hop_by_hop.begin(), hop_by_hop.end()};
+    auto out = http::headers{};
+    for(const auto& [name, value] : hdrs)
+        if(!strip_names.contains(name))
+            out.set(name, value);
+    return out;
+}
+
+inline void forward_request(istream& is, ostream& os, string_view backend_host)
+{
+    auto request_line = ""s;
+    auto headers = http::headers{};
+
+    getline(is, request_line, '\r') >> ws >> headers >> crlf;
+    headers = strip_hop_by_hop(std::move(headers));
+    headers.set("host"s, string{backend_host});
+    os << request_line << crlf << headers << crlf;
+    copy_http_body(is, os, headers);
 }
 
 inline void handle(auto& client, auto& replicas)
@@ -48,28 +98,34 @@ inline void handle(auto& client, auto& replicas)
 
     auto buffer = stringstream{};
 
-    auto request_and_response = [&buffer](replica& connection) {
-        buffer.seekg(0) >> connection;
-        connection >> buffer.seekp(0);
-        return connection.good();
+    auto request_and_response = [&buffer](replica_backend& replica) {
+        buffer.seekg(0);
+        forward_request(buffer, replica.connection, replica.host_header);
+        read_http_message(replica.connection, buffer.seekp(0));
+        return replica.connection.good();
     };
 
-    auto request = [&buffer](replica& connection) {
-        buffer.seekg(0) >> connection;
-        return connection.good();
+    auto request = [&buffer](replica_backend& replica) {
+        buffer.seekg(0);
+        forward_request(buffer, replica.connection, replica.host_header);
+        return replica.connection.good();
     };
 
-    auto response = [&buffer](replica& connection) {
-        connection >> buffer.seekp(0);
-        return connection.good();
+    auto response = [&buffer](replica_backend& replica) {
+        read_http_message(replica.connection, buffer.seekp(0));
+        return replica.connection.good();
     };
 
-    auto disconnected = [](const replica& connection) {
-        return not connection.good();
+    auto disconnected = [](const replica_backend& replica) {
+        return not replica.connection.good();
     };
 
-    while(stream >> buffer)
+    while(stream.good() && stream.peek() != char_traits<char>::eof())
     {
+        buffer.str(""s);
+        buffer.clear();
+        read_http_message(stream, buffer);
+
         auto method = ""s;
         buffer.seekg(0) >> method;
 
@@ -86,7 +142,8 @@ inline void handle(auto& client, auto& replicas)
             [[maybe_unused]] auto r2 = ranges::all_of(replicas, response);
         }
 
-        buffer.seekg(0) >> stream;
+        buffer.seekg(0);
+        read_http_message(buffer, stream);
         buffer.seekp(0);
     }
 
@@ -135,7 +192,10 @@ try
         if(option.starts_with("--replica="))
         {
             auto replica_url = option.substr(string_view{"--replica="}.size());
-            replicas.emplace_back(connect(replica_url));
+            replicas.emplace_back(replica_backend{
+                connect(replica_url),
+                host_header_from_url(replica_url)
+            });
             continue;
         }
 

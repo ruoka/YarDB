@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -146,6 +146,77 @@ EOF
   end_case write_fanout
 }
 
+test_header_forward_auth() {
+  should_run header_forward_auth || return 0
+  begin_case header_forward_auth
+  local pat coll saved_pat
+  pat="smoke-proxy-pat-${RANDOM}"
+  coll="$(collection hauth)"
+  saved_pat="${REPLICA_PAT}"
+  REPLICA_PAT="${pat}"
+
+  stop_cluster
+  CLUSTER_STARTED=0
+  ensure_cluster
+
+  run_yarsh_proxy "$(cat <<EOF
+GET /
+EXIT
+EOF
+)"
+  assert_contains " 401 " "proxy_unauthorized_without_pat"
+
+  run_yarsh_proxy "$(cat <<EOF
+GET /
+@Authorization: Bearer ${pat}
+EXIT
+EOF
+)"
+  assert_contains " 200 " "proxy_authorized_list"
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+@Authorization: Bearer ${pat}
+{"name":"proxied"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "proxy_post_authorized"
+  assert_contains '"name" : "proxied"' "proxy_post_body"
+
+  REPLICA_PAT="${saved_pat}"
+  end_case header_forward_auth
+}
+
+test_header_forward_correlation() {
+  should_run header_forward_correlation || return 0
+  begin_case header_forward_correlation
+  local pat coll trace_id saved_pat
+  pat="smoke-proxy-pat-${RANDOM}"
+  trace_id="smoke-trace-${RANDOM}"
+  coll="$(collection hcorr)"
+  saved_pat="${REPLICA_PAT}"
+  REPLICA_PAT="${pat}"
+
+  stop_cluster
+  CLUSTER_STARTED=0
+  ensure_cluster
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+@Authorization: Bearer ${pat}
+@X-Correlation-ID: ${trace_id}
+{"marker":"corr"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "proxy_post_created"
+  assert_all_replica_logs_contain "${trace_id}" "correlation_id_in_replica_logs"
+
+  REPLICA_PAT="${saved_pat}"
+  end_case header_forward_correlation
+}
+
 test_read_round_robin() {
   should_run read_round_robin || return 0
   begin_case read_round_robin
@@ -195,6 +266,8 @@ main() {
   test_proxy_crud
   test_write_fanout
   test_read_round_robin
+  test_header_forward_auth
+  test_header_forward_correlation
 
   local end_ms duration_ms passed
   end_ms=$(python3 - <<'PY'

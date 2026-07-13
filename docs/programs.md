@@ -417,6 +417,11 @@ yarproxy [--help] [--clog] [--slog_level=<level>] --replica=<URL> [service_or_po
 - Failures on individual backends are not surfaced to the client today
 - `_id` values and timestamps may **diverge** across backends
 
+#### Header forwarding
+- Forwards end-to-end headers to backends, including **`Authorization`** and **`X-Correlation-ID`**
+- Rewrites **`Host`** to each backend's `--replica` host:port
+- Strips hop-by-hop headers (`Connection`, `Keep-Alive`, etc.) before forwarding
+
 ### Limitations
 
 | Topic | Reality |
@@ -453,7 +458,7 @@ Not suitable for: production HA, guaranteed replication, or strongly consistent 
 ./tests/yarproxy/smoke.sh --case write_fanout
 ```
 
-Cases: `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`. Default: 2 backends; override with `--replicas=N` or `REPLICA_COUNT=N`.
+Cases: `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`, `header_forward_auth`, `header_forward_correlation`. Default: 2 backends; override with `--replicas=N` or `REPLICA_COUNT=N`.
 
 ## yarexport - Data Export Utility
 

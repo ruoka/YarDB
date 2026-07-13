@@ -7,6 +7,7 @@ YARPROXY_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${YARPROXY_LIB_DIR}/../yarsh/lib.sh"
 
 YARPROXY_BIN="${YARPROXY_BIN:-${YARSH_ROOT_DIR}/${BUILD_DIR}/bin/yarproxy}"
+REPLICA_PAT="${REPLICA_PAT:-}"
 
 REPLICA_PIDS=()
 REPLICA_DBS=()
@@ -22,9 +23,14 @@ wait_for_url() {
   local pid=$2
   local label=$3
   local attempt
+  local curl_args=(-sf)
+
+  if [[ -n "${REPLICA_PAT}" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${REPLICA_PAT}")
+  fi
 
   for attempt in $(seq 1 60); do
-    if curl -sf "${url}/" >/dev/null 2>&1; then
+    if curl "${curl_args[@]}" "${url}/" >/dev/null 2>&1; then
       log "${label} ready (pid=${pid})"
       return 0
     fi
@@ -46,7 +52,11 @@ start_replica() {
   url="http://127.0.0.1:${port}"
 
   log "Starting replica on ${url} (db=${db})"
-  "${YARDB_BIN}" --clog --file="${db}" "${port}" >"${db}.log" 2>&1 &
+  local yardb_args=(--clog --file="${db}")
+  if [[ -n "${REPLICA_PAT}" ]]; then
+    yardb_args+=(--pat="${REPLICA_PAT}")
+  fi
+  "${YARDB_BIN}" "${yardb_args[@]}" "${port}" >"${db}.log" 2>&1 &
   pid=$!
   wait_for_url "${url}" "${pid}" "replica"
 
@@ -123,6 +133,28 @@ assert_exit_status() {
     return 0
   fi
   fail "expected exit status ${expected}, got ${actual}"
+  return 0
+}
+
+assert_all_replica_logs_contain() {
+  local needle=$1
+  local label=${2:-replica_logs}
+  local db missing=0
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  for db in "${REPLICA_DBS[@]}"; do
+    if [[ ! -f "${db}.log" ]] || ! grep -qF "${needle}" "${db}.log"; then
+      missing=$((missing + 1))
+      log "log miss: ${db}.log does not contain ${needle}"
+    fi
+  done
+
+  if [[ "${missing}" -eq 0 ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"${label}\"}"
+    return 0
+  fi
+
+  fail "expected all replica logs to contain: ${needle}"
   return 0
 }
 

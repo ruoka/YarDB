@@ -8,6 +8,13 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 
 ## July 2026
 
+### yarproxy
+
+| Item | Summary |
+|------|---------|
+| **Header forwarding** | `Authorization`, `X-Correlation-ID`, and other end-to-end headers forwarded to backends; `Host` rewritten per replica; hop-by-hop headers stripped |
+| **Smoke tests** | `header_forward_auth` (PAT through proxy), `header_forward_correlation` (trace ID in replica logs) |
+
 ### Auth & security
 
 | Item | Summary |
@@ -29,7 +36,7 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 |---------|------------------|
 | **`tests/yarsh/smoke.sh`** | `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `filter_or`, `filter_startswith`, `head`, `if_none_match`, `bad_json`, `auth_required`, `auth_crud` |
 | **`tests/yarexport/smoke.sh`** | `export_empty`, `export_seeded`, `missing_file`, `help` |
-| **`tests/yarproxy/smoke.sh`** | `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`; `--replicas=N` |
+| **`tests/yarproxy/smoke.sh`** | `no_replicas`, `help`, `proxy_crud`, `write_fanout`, `read_round_robin`, `header_forward_auth`, `header_forward_correlation`; `--replicas=N` |
 
 Earlier July commits: piped yarsh harness (`031d52f`), yarexport JSONL fix + smokes (`7066ee1`), yarproxy smokes (`7ebe299`, `22b8400`).
 

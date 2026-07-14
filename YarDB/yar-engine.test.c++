@@ -403,7 +403,7 @@ auto test_set()
 
             require_true(engine.read(selector, documents));
             require_eq(documents.get<object::array>().size(), 1u);
-            require_eq(documents[0]["value"s], 1ll);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
         };
 
         section("IndexOnlyCount") = [test_file]

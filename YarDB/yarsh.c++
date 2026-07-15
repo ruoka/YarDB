@@ -14,7 +14,7 @@ const auto help = R"(
 Currently supported shell commands are:
 POST /collection         aka Create (one-line JSON body follows)
 PUT /collection/id       aka Replace (JSON body follows)
-PATCH /collection/id     aka Update/Upsert (JSON body follows)
+PATCH /collection/id     aka Update existing (404 if missing; JSON body follows)
 GET /collection/{id}     aka Read one document
 GET /collection?...      aka Read with OData query parameters
 HEAD /collection/{id}    aka Read headers only

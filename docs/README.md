@@ -39,6 +39,9 @@ Broader roadmap priorities (see **[development.md](development.md)**):
 
 See **[changelog.md](changelog.md)** for the full list. Most recent:
 
+- **Storage integrity** — transactional write errors, atomic engine locking, strict startup validation, and truncated-tail recovery
+- **HTTP hardening** — PATCH missing IDs return 404; 1 MiB request limit returns 413
+- **Typed secondary indexes** — primitive types remain distinct and numeric ranges use native ordering
 - **Public probes** — **`GET /health`** and **`GET /ready`** return `{}` (PAT-exempt)
 - **`correlation_id` tracing** — `X-Correlation-ID` on all HTTP handler logs
 - **yarproxy header forwarding** — `Authorization` and `X-Correlation-ID` to backends; `header_forward_auth` / `header_forward_correlation` smokes

@@ -177,8 +177,11 @@ All previously identified critical issues have been addressed:
    - `POST /collection` → `201 Created` (with `Location` header)
    - `PUT /collection/{id}` → `201 Created` (new resource, with `Location` header) or `200 OK` (updated existing resource)
    - `GET /collection/{id}` → `200 OK` (found) or `404 Not Found` (missing)
+   - `PATCH /collection/{id}` → `200 OK` (updated) or `404 Not Found` (missing; never creates)
    - `DELETE /collection/{id}` → `204 No Content` (successful deletion)
    - Invalid input → `400 Bad Request` with structured error response
+   - Body over 1 MiB → `413 Payload Too Large`
+   - Database write failure → `500 Internal Server Error` after rollback
 
 2. **✅ Error Handling** - Comprehensive error handling implemented:
    - Invalid JSON parsing → `400 Bad Request` with error details
@@ -248,6 +251,12 @@ All previously identified critical issues have been addressed:
 - Updates document if it exists → Returns `200 OK` with `Content-Location` header
 - Fully idempotent and follows HTTP/REST best practices
 - Properly documented and tested
+
+### PATCH Semantics
+✅ **RESOLVED**: PATCH is update-only:
+- Updates an existing document → `200 OK`
+- Missing resource → `404 Not Found`
+- Does not create a document; clients use PUT for upsert
 
 ### Content-Location Header
 ✅ **RESOLVED**: `Content-Location` header is now included in PUT and PATCH responses:
@@ -388,6 +397,7 @@ The API now follows REST best practices and provides a production-ready foundati
 See [TODO: Missing Features](#todo-missing-features-prioritized) for the full list.
 
 **Recently Completed:**
+- ✅ Transactional write errors, typed secondary indexes, PATCH 404 semantics, 1 MiB request limit, and strict database locking/recovery (July 2026)
 - ✅ Bearer PAT authentication and hashed storage; public `GET /health` and `GET /ready` probes (`{}`) (July 2026)
 - ✅ `$filter` `ne` operator, index-backed `startswith` on secondary keys (July 2026)
 - ✅ Multivalue secondary indexes and `std::flat_map` engine indexes (July 2026)

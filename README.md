@@ -22,7 +22,7 @@ YarDB is a production-ready C++23 application that implements:
 ## Features
 
 ### Production-Ready REST API
-- ✅ Proper HTTP status codes (200, 201, 204, 304, 400, 404, 409, 412, 415, 422, 500)
+- ✅ Proper HTTP status codes (200, 201, 204, 304, 400, 404, 409, 412, 413, 415, 422, 500)
 - ✅ Comprehensive error handling with standard error response formats
 - ✅ Conditional requests (ETag and Last-Modified based)
 - ✅ OData query parameters and metadata support
@@ -33,7 +33,7 @@ YarDB is a production-ready C++23 application that implements:
 - **Native C++ Build System**: Uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects
 - C++23 modules support (`.c++m` extension)
 - Cross-platform (Linux, macOS)
-- Comprehensive test suite (`[yardb]` — 295 tests, 1042 assertions across engine, index, OData, and HTTP integration) plus CLI smoke harnesses under `tests/`
+- Comprehensive test suite (`[yardb]` — 318 tests, 1157 assertions across engine, index, OData, and HTTP integration) plus CLI smoke harnesses under `tests/`
 - Modular architecture with clean separation of concerns
 - P1204R0-compliant project structure
 - RESTful API following OData principles
@@ -215,7 +215,9 @@ See [Programs Documentation](docs/programs.md#yarexport---data-export-utility) f
 
 ## Notes
 
-- **Binary DB format**: YarDB stores documents in a binary format (FSON + metadata). If the database file is corrupted or you point YarDB at the wrong file, you may see errors like “Invalid FSON type encountered during decoding”.
+- **Binary DB format**: YarDB stores documents in a binary format (FSON + metadata). Startup validates record status, positions, and history links; an incomplete tail is truncated to the last complete record, while structural corruption fails closed.
+- **Database lock**: Opening a database atomically creates `{file}.pid`. Only one engine may own a file; after a crash, verify no process uses the database before manually removing a stale lock.
+- **HTTP request bodies**: `POST`, `PUT`, and `PATCH` bodies are limited to 1 MiB; oversized requests return `413 Payload Too Large`.
 - **HTTP request bodies**: Some HTTP stacks may pass request bodies with trailing `'\0'` bytes. YarDB trims trailing NUL bytes before parsing JSON request bodies to avoid spurious “trailing garbage” parse failures.
 
 ## Dependencies
@@ -239,7 +241,7 @@ The RESTful API follows OData principles and supports:
 - `GET /{collection}` - Read all documents (supports OData query parameters)
 - `GET /{collection}/{id}` - Read document by ID
 - `PUT /{collection}/{id}` - Replace document (upsert)
-- `PATCH /{collection}/{id}` - Update document
+- `PATCH /{collection}/{id}` - Update an existing document (`404` if missing; does not create)
 - `DELETE /{collection}/{id}` - Delete document
 - `HEAD /{collection}` or `/{collection}/{id}` - Get headers only
 - `GET /$metadata` - Get OData 4.01 JSON CSDL service metadata
@@ -249,7 +251,7 @@ The RESTful API follows OData principles and supports:
 - **OData Query Parameters**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count`, `$expand` (placeholder)
 - **`$filter` operators**: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `in`, `startswith`, `contains`, `endswith`; nested paths (e.g. `Customer/Country eq 'USA'`); index-backed `startswith` on top-level secondary keys
 - **`$count=true`**: Index-only count when possible; scan fallback for `$ne`, OR, and string post-filters
-- **Secondary indexes**: `PUT`/`PATCH /_db/{collection}` with `{"keys":["field",...]}`
+- **Secondary indexes**: `PUT`/`PATCH /_db/{collection}` with `{"keys":["field",...]}`; primitive types remain distinct and numeric ranges use numeric ordering
 - **OData Metadata Endpoint**: `GET /$metadata` returns OData 4.01 JSON CSDL metadata with inferred schemas
 - **Conditional Requests**: `If-Match`, `If-None-Match`, `If-Modified-Since`, `If-Unmodified-Since`
 - **ETag Support**: Resource versioning for caching and optimistic locking

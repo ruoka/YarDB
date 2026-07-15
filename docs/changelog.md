@@ -8,6 +8,17 @@ For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [devel
 
 ## July 2026
 
+### Storage, engine & HTTP hardening
+
+| Item | Summary |
+|------|---------|
+| **Transactional write errors** | Engine writes return `std::expected`; failed writes restore metadata and file size before HTTP reports a structured `500 Internal Server Error` (`d3d9c9d`) |
+| **Typed secondary indexes** | Secondary keys preserve `xson::primitive` types, preventing stringification collisions and giving numbers native range ordering (`7ab64d2`) |
+| **PATCH semantics** | `PATCH /{collection}/{id}` is update-only and returns `404 Not Found` when missing; `PUT` remains upsert (`ec911f6`) |
+| **Request body limit** | Shared `net::http` middleware rejects bodies over 1 MiB with `413 Payload Too Large` (`fc336fc`) |
+| **Database locking & recovery** | Engine-owned atomic `.pid` lock; strict startup validation; incomplete tails recover to the last complete record; structural corruption fails closed (`707abd2`) |
+| **Tests** | `[yardb]` suite expanded to **318 tests and 1157 assertions** |
+
 ### yarproxy
 
 | Item | Summary |
@@ -57,7 +68,7 @@ Earlier July commits: piped yarsh harness (`031d52f`), yarexport JSONL fix + smo
 ### Engine, indexes & tests
 
 - Multivalue secondary indexes; `std::flat_map` collection map
-- Expanded `[yardb]` unit tests: index, engine, OData count, HTTP gaps (`838d033` — 288+ tests at time of commit)
+- Expanded `[yardb]` unit tests: index, engine, OData count, HTTP gaps (`838d033`; now 318 tests and 1157 assertions)
 - **`yarsh` REPL**: full body display, resilient bad JSON, `@Authorization` / conditional headers (`ac824c5`)
 
 ### Documentation

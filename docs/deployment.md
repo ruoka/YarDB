@@ -6,7 +6,7 @@
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ⚠️ **Partial**: Bearer PAT MVP, liveness/readiness probes (`GET /health`, `GET /ready`), `correlation_id` tracing
+- ⚠️ **Partial**: Bearer PAT MVP, liveness/readiness probes, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
 - ❌ **Missing**: Scoped auth, TLS, Prometheus metrics, high availability
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
@@ -172,6 +172,12 @@ yardb --file=yar.db
 yardb --file=/var/lib/yardb/production.db
 ```
 
+### Database Lock and Recovery
+
+Opening a database atomically creates `{database}.pid`; only one engine can own a database file. The lock is removed on clean shutdown. If startup reports an existing lock after a crash, first verify that no `yardb` process is using the database, then remove the stale `.pid` file manually.
+
+On startup, YarDB validates record status, positions, and history links. An incomplete final record is safely removed by truncating to the last complete record. Structural corruption fails closed and leaves the file unchanged; restore from a verified backup rather than truncating mid-file data.
+
 ### Backup Strategy
 ```bash
 # Stop yardb before exporting the file it has open
@@ -183,7 +189,7 @@ yarexport --file=production.db | jq -e . >/dev/null
 # Smoke test locally: ./tests/yarexport/smoke.sh
 ```
 
-Automated backup/restore and point-in-time recovery are not implemented yet.
+Automated backup/restore and point-in-time recovery are not implemented yet. Stop `yardb` before copying or exporting its open database.
 
 ### Storage Requirements
 - **Database Files**: FSON-encoded binary format
@@ -229,6 +235,10 @@ export SYSLOG_LEVEL=6  # Debug level
 # Check database file corruption
 file yar.db  # Should be regular file
 
+# Remove a stale lock only after confirming yardb is not running
+pgrep yardb
+rm yar.db.pid
+
 # Verify network connectivity
 netstat -tlnp | grep :2112
 
@@ -256,6 +266,8 @@ sar -n DEV 1
 - [ ] **Security**: Enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
 - [ ] **Monitoring**: Set up metrics collection and alerting
 - [ ] **Backup**: Configure regular backup procedures
+- [ ] **Single writer**: Ensure one process owns each database and document the stale-lock runbook
+- [ ] **Client limits**: Ensure clients keep request bodies within the 1 MiB limit
 - [ ] **High Availability**: Plan for redundancy and failover
 - [ ] **Performance**: Load test and tune resource limits
 - [ ] **Documentation**: Update runbooks and procedures

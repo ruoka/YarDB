@@ -27,6 +27,8 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [
   - The database file stores all collections and documents
   - If the file doesn't exist, it will be created
   - Multiple instances can use different files for separate databases
+  - Opening creates an exclusive `{file}.pid` lock; verify no live owner before manually removing a stale lock
+  - Startup recovers incomplete tails automatically and refuses structurally corrupt files
 
 - `--clog` - Redirect logging to console (stdout/stderr) instead of syslog
   - Useful for development and debugging
@@ -81,7 +83,7 @@ Once running, `yardb` provides the following REST endpoints:
 - `GET /{collection}` - Read all documents in collection
 - `GET /{collection}/{id}` - Read document by ID
 - `PUT /{collection}/{id}` - Replace document by ID (upsert: creates if not exists, updates if exists)
-- `PATCH /{collection}/{id}` - Update/Upsert document by ID
+- `PATCH /{collection}/{id}` - Partially update an existing document (`404` if missing; does not create)
 - `DELETE /{collection}/{id}` - Delete document by ID
 - `HEAD /{collection}` - Get collection headers (same as GET but no body)
 - `HEAD /{collection}/{id}` - Get document headers (same as GET but no body)
@@ -95,9 +97,13 @@ Once running, `yardb` provides the following REST endpoints:
 - **POST**: Creates new document → `201 Created` (with `Location` header)
 - **GET**: Retrieves document(s) → `200 OK` (or `404 Not Found` if not found)
 - **PUT**: Creates or replaces document → `201 Created` (new) or `200 OK` (updated, with `Content-Location` header)
-- **PATCH**: Updates document → `200 OK` (with `Content-Location` header)
+- **PATCH**: Updates an existing document → `200 OK` (with `Content-Location` header) or `404 Not Found`
 - **DELETE**: Deletes document → `204 No Content`
 - **HEAD**: Returns headers only → `200 OK` (no body)
+
+`PUT /{collection}/{id}` is an upsert. `PATCH /{collection}/{id}` is update-only and never creates a missing resource.
+
+Additional failures include `413 Payload Too Large` for request bodies over 1 MiB and structured `500 Internal Server Error` responses when a database write fails after rollback.
 
 ### Response Headers
 
@@ -155,6 +161,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
     - `startswith(field, 'prefix')` — index-backed when `field` is a top-level secondary index key; otherwise post-filter
     - `contains(field, 'substring')`, `endswith(field, 'suffix')` — post-filter only
   - Example: `GET /users?$filter=status ne 'deleted'`, `GET /users?$filter=startswith(name,'A')` (requires `name` indexed)
+  - Indexed primitive types remain distinct (`1`, `1.0`, `"1"`, and `true` are separate keys); numeric ranges use numeric ordering
 
 - **`$select=field1,field2`** - Project specific fields
   - Example: `GET /users?$select=name,email`
@@ -311,7 +318,7 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 
 - `POST /collection` - Create a new document (JSON body follows)
 - `PUT /collection/id` - Replace document by ID (JSON body follows)
-- `PATCH /collection/id` - Update/Upsert document by ID (JSON body follows)
+- `PATCH /collection/id` - Update an existing document (`404` if missing; JSON body follows)
 - `GET /collection/{id}` - Read document by ID
 - `GET /collection?...` - Read collection with OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count=true`)
 - `HEAD /collection/{id}` - Read headers only (no response body)

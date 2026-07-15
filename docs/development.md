@@ -168,11 +168,11 @@ When running tests, logs appear in the test output. Use appropriate log levels f
 - Clean and rebuild if module dependencies are incorrect: `./tools/CB.sh debug clean && ./tools/CB.sh debug build`
 
 ### Test DB Artifacts
-- Some tests create `*.db` files (and occasionally `*.pid` lock files) in the repo root. If a test fails in a way that suggests stale/corrupt storage state, delete them and re-run tests:
+- Engine tests create `*.db` files and atomic `*.pid` lock files in the repo root. A stale lock fails closed; after confirming no test or server owns the database, delete matching artifacts and re-run:
 
 ```bash
 find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
-./tools/CB.sh debug test
+./tools/CB.sh debug test --tags='\[yardb\]'
 ```
 
 ### Build System
@@ -184,6 +184,16 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 ## Development Roadmap
 
 ### ✅ Completed Improvements
+
+#### Storage Integrity and HTTP Limits
+- **Status**: ✅ **COMPLETED** (Jul 2026)
+- **Implementation**:
+  - Explicit `std::expected` write errors with process-level rollback and structured HTTP 500 responses
+  - Typed secondary index keys with native numeric ordering
+  - PATCH updates existing documents only; missing IDs return 404 while PUT remains upsert
+  - Shared `net::http` middleware enforces a 1 MiB request-body limit with HTTP 413
+  - Engine-owned atomic lock, strict startup validation, truncated-tail recovery, and fail-closed corruption handling
+- **Verification**: 318/318 `[yardb]` tests and 1157/1157 assertions pass in debug and release
 
 #### Namespace Architecture Refactoring
 - **Status**: ✅ **COMPLETED** (Dec 2025)
@@ -235,7 +245,7 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
 - **Files Refactored**:
   - `net-http_server.test.c++` - 9 scenarios refactored to proper BDD structure
   - `net-http_headers.test.c++` - Converted to `test_case` with `section` subtests
-- **Verification**: All tests pass (226/226 tests, 702/702 assertions)
+- **Verification**: All tests passed at the time (226 tests, 702 assertions; current `[yardb]`: 318/1157)
 - **Impact**: Project now serves as a proper example of tester framework usage, improved test readability and maintainability
 
 #### C++ Convention Compliance
@@ -252,7 +262,7 @@ find . -maxdepth 2 -type f \( -name "*.db" -o -name "*.pid" \) -delete
   - `yar-engine.impl.c++` - Internal helper rename (1 function)
   - `yar-httpd.c++m` - Updated 9 call sites
   - `yar-httpd.test.c++` - Test fixture accessor rename (~175 call sites)
-- **Verification**: All tests pass (226/226 tests, 702/702 assertions)
+- **Verification**: All tests passed at the time (226 tests, 702 assertions; current `[yardb]`: 318/1157)
 - **Impact**: Codebase now fully compliant with project coding conventions, improved consistency and maintainability
 - **Reference**: See project history and git commits for detailed analysis
 

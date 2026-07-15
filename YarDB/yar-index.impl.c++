@@ -6,7 +6,7 @@ namespace {
 
 auto make_primary_key = [](const xson::primitive& v){return std::get<xson::integer_type>(v);};
 
-auto make_secondary_key = [](const xson::primitive& v){return xson::to_string(v);};
+auto make_secondary_key = [](const xson::primitive& v){return v;};
 
 template<typename T, typename F>
 yar::db::index_view query_analysis_primary(const yar::db::object& selector, const T& keys, F make_key)

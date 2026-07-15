@@ -14,7 +14,7 @@ using primary_key_type = sequence_type;
 
 using secondary_index_name = std::string;
 
-using secondary_key_type = std::string;
+using secondary_key_type = xson::primitive;
 
 using position_type = std::streamoff;
 

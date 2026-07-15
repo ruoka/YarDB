@@ -349,6 +349,30 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 2u);
         };
 
+        section("TypedNumericIndexSurvivesRestart") = []
+        {
+            const auto test_file = "./engine_typed_index_restart_test.db";
+            const auto setup = fixture{test_file};
+            {
+                auto engine = yar::db::engine{test_file};
+                engine.collection("TypedIndexRestart"s);
+                require_true(engine.index({"value"s}).has_value());
+                for(const auto value : {2ll, 9ll, 10ll, 100ll})
+                {
+                    auto document = object{{"value"s, value}};
+                    require_true(engine.create(document).has_value());
+                }
+            }
+
+            auto engine = yar::db::engine{test_file};
+            engine.collection("TypedIndexRestart"s);
+            const auto over_9 = object{{"value"s, object{{"$gt"s, 9ll}}}};
+            auto documents = object{};
+            require_eq(engine.count(over_9), 2u);
+            require_true(engine.read(over_9, documents));
+            require_eq(documents.size(), 2u);
+        };
+
         section("ReadCountInSelector") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

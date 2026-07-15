@@ -111,6 +111,52 @@ auto test_set()
             require_eq(fixture.view_count(over_25), 2u);
         };
 
+        section("IntegerRangesUseNumericOrdering") = []
+        {
+            index_fixture fixture{"./index_integer_order.db"s};
+            fixture.add_keys({"value"s});
+            fixture.insert(object{{"value"s, 2ll}});
+            fixture.insert(object{{"value"s, 9ll}});
+            fixture.insert(object{{"value"s, 10ll}});
+            fixture.insert(object{{"value"s, 100ll}});
+
+            const auto over_9 = object{{"value"s, object{{"$gt"s, 9ll}}}},
+                under_10 = object{{"value"s, object{{"$lt"s, 10ll}}}};
+            require_eq(fixture.count(over_9), 2u);
+            require_eq(fixture.view_count(over_9), 2u);
+            require_eq(fixture.count(under_10), 2u);
+            require_eq(fixture.view_count(under_10), 2u);
+        };
+
+        section("FloatingPointRangesUseNumericOrdering") = []
+        {
+            index_fixture fixture{"./index_number_order.db"s};
+            fixture.add_keys({"value"s});
+            fixture.insert(object{{"value"s, 2.0}});
+            fixture.insert(object{{"value"s, 9.0}});
+            fixture.insert(object{{"value"s, 10.0}});
+            fixture.insert(object{{"value"s, 100.0}});
+
+            const auto over_9 = object{{"value"s, object{{"$gt"s, 9.0}}}};
+            require_eq(fixture.count(over_9), 2u);
+            require_eq(fixture.view_count(over_9), 2u);
+        };
+
+        section("SecondaryKeysPreservePrimitiveTypes") = []
+        {
+            index_fixture fixture{"./index_typed_keys.db"s};
+            fixture.add_keys({"value"s});
+            fixture.insert(object{{"value"s, 1ll}});
+            fixture.insert(object{{"value"s, 1.0}});
+            fixture.insert(object{{"value"s, "1"s}});
+            fixture.insert(object{{"value"s, true}});
+
+            require_eq(fixture.count(object{{"value"s, 1ll}}), 1u);
+            require_eq(fixture.count(object{{"value"s, 1.0}}), 1u);
+            require_eq(fixture.count(object{{"value"s, "1"s}}), 1u);
+            require_eq(fixture.count(object{{"value"s, true}}), 1u);
+        };
+
         section("CountPrimaryKeyRangeIsIndexOnly") = []
         {
             index_fixture fixture{"./index_count_id_range.db"s};

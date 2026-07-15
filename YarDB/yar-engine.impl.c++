@@ -1,46 +1,11 @@
 module yar;
 import :metadata;
 import std;
-import net;
 import xson;
 
 namespace {
 
 using namespace std::string_literals;
-
-auto locks = std::set<std::string>{};
-
-inline void unlock()
-{
-    for(const auto& lock : locks)
-        std::remove(lock.c_str());
-    locks.clear();
-}
-
-inline void unlock(std::string_view db)
-{
-    const auto lock = std::string{db} + ".pid"s;
-    std::remove(lock.c_str());
-    locks.erase(lock);
-}
-
-inline void lock(std::string_view db)
-{
-    const auto lock = std::string{db} + ".pid"s;
-    auto file = std::fstream{lock, std::ios::in};
-    if(file.is_open())
-    {
-        auto pid = ""s;
-        file >> pid;
-        throw std::runtime_error{"DB "s + lock + " is already in use by PID "s + pid};
-    }
-    file.open(lock, std::ios::out | std::ios::trunc);
-    if(!file.is_open())
-        throw std::runtime_error{"Failed to create DB lock "s + lock};
-    file << net::posix::getpid() << std::endl;
-    locks.emplace(lock);
-    std::atexit(unlock);
-}
 
 bool reopen(std::fstream& storage, const std::string& db)
 {
@@ -74,6 +39,77 @@ bool rollback(
     return statuses_restored && not resize_error && reopened;
 }
 
+void validate_and_recover_storage(std::fstream& storage, const std::string& db)
+{
+    using xson::fson::operator >>;
+
+    auto size_error = std::error_code{};
+    const auto file_size = std::filesystem::file_size(db, size_error);
+    if(size_error)
+        throw std::runtime_error{"Failed to determine database size: "s + size_error.message()};
+
+    auto last_complete = std::streamoff{0};
+    storage.clear();
+    storage.seekg(0, storage.beg);
+
+    while(static_cast<std::uintmax_t>(last_complete) < file_size)
+    {
+        const auto record_start = last_complete;
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        try
+        {
+            storage >> metadata >> document;
+        }
+        catch(const std::runtime_error&)
+        {
+            if(not storage.eof())
+                throw std::runtime_error{
+                    "Corrupt database record at offset "s + std::to_string(record_start)};
+        }
+
+        if(storage.fail())
+        {
+            if(not storage.eof())
+                throw std::runtime_error{
+                    "Failed to read database record at offset "s + std::to_string(record_start)};
+            break;
+        }
+
+        if(metadata.status != yar::db::metadata::created
+            && metadata.status != yar::db::metadata::updated
+            && metadata.status != yar::db::metadata::deleted)
+            throw std::runtime_error{
+                "Invalid database record status at offset "s + std::to_string(record_start)};
+
+        if(metadata.position != record_start)
+            throw std::runtime_error{
+                "Invalid database record position at offset "s + std::to_string(record_start)};
+
+        if(metadata.previous >= metadata.position || metadata.previous < -1)
+            throw std::runtime_error{
+                "Invalid database history link at offset "s + std::to_string(record_start)};
+
+        last_complete = storage.tellg();
+        if(last_complete <= record_start)
+            throw std::runtime_error{
+                "Database scan made no progress at offset "s + std::to_string(record_start)};
+    }
+
+    if(static_cast<std::uintmax_t>(last_complete) == file_size)
+    {
+        storage.clear();
+        return;
+    }
+
+    storage.close();
+    auto resize_error = std::error_code{};
+    std::filesystem::resize_file(db, static_cast<std::uintmax_t>(last_complete), resize_error);
+    if(resize_error || not reopen(storage, db))
+        throw std::runtime_error{
+            "Failed to recover truncated database tail at offset "s + std::to_string(last_complete)};
+}
+
 // Helper template to extract metadata value from first matching document
 template<typename T, typename Extractor>
 auto metadata_value(std::fstream& storage, const yar::db::index_view& view, const yar::db::object& selector, Extractor extractor) -> std::optional<T>
@@ -100,22 +136,24 @@ auto metadata_value(std::fstream& storage, const yar::db::index_view& view, cons
 
 yar::db::engine::engine(std::string_view db) :
     m_db{db},
+    m_lock{m_db},
     m_collection{"_db"s},
     m_index{},
     m_storage{}
 {
-    ::lock(m_db);
     m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary);
     if(!m_storage.is_open())
         m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
     if(!m_storage.is_open())
         throw std::runtime_error{"Failed to open/create DB "s + m_db};
+    validate_and_recover_storage(m_storage, m_db);
     setup_index_structure();
     populate_indexes();
 }
 
 yar::db::engine::engine(yar::db::engine&& e) :
     m_db{std::move(e.m_db)},
+    m_lock{std::move(e.m_lock)},
     m_collection{std::move(e.m_collection)},
     m_index{std::move(e.m_index)},
     m_storage{std::move(e.m_storage)},
@@ -123,10 +161,7 @@ yar::db::engine::engine(yar::db::engine&& e) :
     m_writable{std::exchange(e.m_writable, false)}
 {}
 
-yar::db::engine::~engine()
-{
-    ::unlock(m_db);
-}
+yar::db::engine::~engine() = default;
 
 void yar::db::fail_next_write(yar::db::engine& engine)
 {

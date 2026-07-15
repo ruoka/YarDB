@@ -17,7 +17,7 @@ using namespace yar::http::details; // For stoll() and other details
 class fixture
 {
 public:
-    fixture(string_view f) : file{f}, m_port{"21120"s}, server{file, m_port}
+    fixture(string_view f) : file{f}, m_port{"21120"s}
     {
         // Set logging app name and sd_id for tests (using instance methods)
         slog.app_name("yardb")
@@ -30,18 +30,20 @@ public:
         auto fs = fstream{};
         fs.open(file, ios::out);
         fs.close();
-        server.start();
+        server = std::make_unique<yar::http::rest_api_server>(file, m_port);
+        server->start();
         // Wait longer for server to start and bind to port
         std::this_thread::sleep_for(1000ms);
     }
 
     const std::string& port() const { return m_port; }
-    yar::http::rest_api_server& get_server() { return server; }
+    yar::http::rest_api_server& get_server() { return *server; }
 
     ~fixture()
     {
         // Stop the server and wait for the thread to finish
-        server.stop();
+        server->stop();
+        server.reset();
         remove(file.c_str());
         // Also remove the PID lock file
         const auto pid_file = file + ".pid"s;
@@ -51,7 +53,7 @@ public:
 private:
     std::string file;
     std::string m_port;
-    yar::http::rest_api_server server;
+    std::unique_ptr<yar::http::rest_api_server> server;
 };
 
 // Helper function to parse HTTP status line and headers

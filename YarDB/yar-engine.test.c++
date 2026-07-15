@@ -66,6 +66,119 @@ auto test_set()
             require_true(documents[0].match(document));
         };
 
+        section("StorageLockRejectsConcurrentOpen") = []
+        {
+            const auto test_file = "./engine_lock_concurrent_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+
+            require_throws([test_file]
+            {
+                auto second = yar::db::engine{test_file};
+            });
+        };
+
+        section("StorageLockReleasesOnDestruction") = []
+        {
+            const auto test_file = "./engine_lock_release_test.db";
+            const auto setup = fixture{test_file};
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(std::filesystem::exists(test_file + ".pid"s));
+            }
+
+            require_false(std::filesystem::exists(test_file + ".pid"s));
+            auto reopened = yar::db::engine{test_file};
+        };
+
+        section("StorageLockOwnershipMovesWithEngine") = []
+        {
+            const auto test_file = "./engine_lock_move_test.db";
+            const auto setup = fixture{test_file};
+            {
+                auto original = yar::db::engine{test_file};
+                auto moved = std::move(original);
+                require_throws([test_file]
+                {
+                    auto second = yar::db::engine{test_file};
+                });
+            }
+
+            auto reopened = yar::db::engine{test_file};
+        };
+
+        section("ExistingStorageLockRequiresManualRecovery") = []
+        {
+            const auto test_file = "./engine_lock_stale_test.db";
+            const auto setup = fixture{test_file};
+            const auto lock_file = test_file + ".pid"s;
+            {
+                auto stale = std::ofstream{lock_file};
+                stale << "stale\n";
+            }
+
+            require_throws([test_file]
+            {
+                auto engine = yar::db::engine{test_file};
+            });
+
+            require_true(std::filesystem::remove(lock_file));
+            auto recovered = yar::db::engine{test_file};
+        };
+
+        section("TruncatedTailRecoversLastCompleteRecord") = []
+        {
+            const auto test_file = "./engine_truncated_tail_test.db";
+            const auto setup = fixture{test_file};
+            auto last_complete = std::uintmax_t{0};
+            {
+                auto engine = yar::db::engine{test_file};
+                engine.collection("TruncatedTail"s);
+                auto first = object{{"value"s, 1ll}},
+                    second = object{{"value"s, 2ll}};
+                require_true(engine.create(first).has_value());
+                last_complete = std::filesystem::file_size(test_file);
+                require_true(engine.create(second).has_value());
+            }
+
+            const auto truncated_size = std::filesystem::file_size(test_file) - 4;
+            std::filesystem::resize_file(test_file, truncated_size);
+
+            auto recovered = yar::db::engine{test_file};
+            recovered.collection("TruncatedTail"s);
+            auto documents = object{};
+            require_true(recovered.read(object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+            require_eq(std::filesystem::file_size(test_file), last_complete);
+        };
+
+        section("InvalidRecordStatusFailsClosed") = []
+        {
+            const auto test_file = "./engine_corrupt_status_test.db";
+            const auto setup = fixture{test_file};
+            {
+                auto engine = yar::db::engine{test_file};
+                engine.collection("CorruptStatus"s);
+                auto document = object{{"value"s, 1ll}};
+                require_true(engine.create(document).has_value());
+            }
+
+            const auto original_size = std::filesystem::file_size(test_file);
+            {
+                auto file = std::fstream{test_file, std::ios::in | std::ios::out | std::ios::binary};
+                file.seekp(0);
+                file.put('X');
+                file.flush();
+            }
+
+            require_throws([test_file]
+            {
+                auto engine = yar::db::engine{test_file};
+            });
+            require_eq(std::filesystem::file_size(test_file), original_size);
+        };
+
         section("Create9") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

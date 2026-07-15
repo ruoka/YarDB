@@ -185,6 +185,65 @@ public:
 
 private:
 
+    class storage_lock
+    {
+    public:
+        explicit storage_lock(const std::filesystem::path& database) :
+            m_path{database.string() + ".pid"}
+        {
+            auto file = std::ofstream{m_path, std::ios::out | std::ios::noreplace};
+            if(not file.is_open())
+                throw std::runtime_error{"Database lock already exists: " + m_path.string()};
+
+            file << std::chrono::system_clock::now().time_since_epoch().count() << '\n';
+            file.flush();
+            if(file.fail())
+            {
+                auto error = std::error_code{};
+                std::filesystem::remove(m_path, error);
+                throw std::runtime_error{"Failed to initialize database lock: " + m_path.string()};
+            }
+            m_owns_lock = true;
+        }
+
+        storage_lock(const storage_lock&) = delete;
+        storage_lock& operator=(const storage_lock&) = delete;
+
+        storage_lock(storage_lock&& other) noexcept :
+            m_path{std::move(other.m_path)},
+            m_owns_lock{std::exchange(other.m_owns_lock, false)}
+        {}
+
+        storage_lock& operator=(storage_lock&& other) noexcept
+        {
+            if(this != &other)
+            {
+                release();
+                m_path = std::move(other.m_path);
+                m_owns_lock = std::exchange(other.m_owns_lock, false);
+            }
+            return *this;
+        }
+
+        ~storage_lock()
+        {
+            release();
+        }
+
+    private:
+        void release() noexcept
+        {
+            if(not std::exchange(m_owns_lock, false))
+                return;
+
+            auto error = std::error_code{};
+            std::filesystem::remove(m_path, error);
+        }
+
+        std::filesystem::path m_path;
+        bool m_owns_lock = false;
+    };
+
     friend void fail_next_write(engine&);
     friend void fail_write(engine&, std::size_t);
 
@@ -198,6 +257,8 @@ private:
     void populate_indexes();
 
     std::string m_db;
+
+    storage_lock m_lock;
 
     std::string m_collection;
 

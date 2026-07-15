@@ -15,6 +15,10 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 
 `tools/CB.sh` is a thin wrapper over `deps/tester/tools/CB.sh.core`. Requires **Clang 21+** with libc++ modules (`std.cppm`).
 
+## Coding standards
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md#c-coding-standards) is the canonical coding standard for humans and agents. Follow its C++23 modules-only policy, `snake_case` naming, Allman production braces, accessor rules, standard-library-first guidance, RAII, and `std::expected` error model. This file only adds automation and JSONL test guidance; do not duplicate the coding standard here.
+
 ## Canonical commands
 
 ```bash
@@ -27,10 +31,11 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 # Scoped test run (preferred while fixing)
 ./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'
 
-# Target by module/file substring
-./tools/CB.sh debug test "yar-httpd" --jsonl --jsonl-output=always
-./tools/CB.sh debug test "yar-odata" --jsonl --jsonl-output=always
-./tools/CB.sh debug test "yar-engine" --jsonl --jsonl-output=always
+# Target by registered test-name substring
+./tools/CB.sh debug test "REST API status" --jsonl --jsonl-output=always
+./tools/CB.sh debug test "parse_filter" --jsonl --jsonl-output=always
+./tools/CB.sh debug test "database engine" --jsonl --jsonl-output=always
+./tools/CB.sh debug test "index count and view" --jsonl --jsonl-output=always
 
 # Full YarDB suite (final verification — always tag-filter; unfiltered runs pull in deps/tester probes)
 ./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'
@@ -43,7 +48,7 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 
 **Hidden tags:** bracket tags starting with `.` (Catch2-style, e.g. `[.jsonl-probe]`) are **skipped on unfiltered runs**. In YarDB, unfiltered runs also pull in `deps/tester` `[jsonl-probe]` intentional failures — always scope with `--tags='\[yardb\]'`.
 
-**Scoped runs:** Prefer `--tags='\[yardb\]'` while fixing. An unfiltered run includes `deps/tester/examples/` (excluded from YarDB builds) and tester probe fixtures; do not expect `summary.passed: true` without a tag filter.
+**Scoped runs:** Prefer `--tags='\[yardb\]'` while fixing. Examples are excluded, but an unfiltered run includes tester probe fixtures; do not expect `summary.passed: true` without a project tag.
 
 **Flags:**
 - `--jsonl` — machine-readable stdout for CB and `test_runner`
@@ -62,11 +67,7 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 
 ## Network tests and sandbox
 
-`yar-httpd.test.c++` starts a real HTTP server. In Cursor sandbox environments, `tools/CB.sh` sets `NET_DISABLE_NETWORK_TESTS=1` automatically (`CB_SANDBOX_DISABLE_NETWORK_TESTS=1`). Override explicitly if you need network tests locally:
-
-```bash
-NET_DISABLE_NETWORK_TESTS=0 ./tools/CB.sh debug test "yar-httpd" --jsonl
-```
+`yar-httpd.test.c++` starts a real HTTP server on port `21120` and currently does not honor `NET_DISABLE_NETWORK_TESTS`. Run HTTP integration tests only where loopback bind/connect is available. The environment variable disables supported dependency-level network tests, not YarDB's HTTP fixture.
 
 ## Triage workflow (test failure)
 

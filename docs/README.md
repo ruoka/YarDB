@@ -14,39 +14,21 @@ This directory contains comprehensive project documentation organized by topic a
 - **[programs.md](programs.md)** - Detailed documentation for all executables (`yardb`, `yarsh`, `yarproxy`, etc.)
 - **[deployment.md](deployment.md)** - Deployment procedures and production considerations
 
-### 📋 Proposals & Planning
-- **[rest_api_evaluation.md](rest_api_evaluation.md)** - REST API evaluation, feature status, and prioritized roadmap
-
 ### 🤖 Agent / automation
 - **[../AGENTS.md](../AGENTS.md)** - JSONL commands and triage for AI agents and CI
 
 ### 📁 Archive
 - **[archive/](archive/)** - Completed/historical documentation
   - **[odata-metadata-plan.md](archive/odata-metadata-plan.md)** - ✅ **COMPLETED** OData /$metadata endpoint implementation (December 2025)
+  - **[rest_api_evaluation.md](archive/rest_api_evaluation.md)** - Historical REST API design evaluation
 
 ## 🎯 Current Development Focus
 
-**Recommended next (API):** Relationship / navigation model for `$expand` and `$apply`. See **[rest_api_evaluation.md](rest_api_evaluation.md)**.
+See the canonical **[development roadmap](development.md#development-roadmap)**. Shipped work belongs in **[changelog.md](changelog.md)**.
 
-Broader roadmap priorities (see **[development.md](development.md)**):
+## ✅ Shipped Work
 
-1. **🔐 Security & Authentication** — scoped PATs, JWT/RBAC (Bearer PAT MVP shipped; see [changelog.md](changelog.md))
-2. **📊 Observability & Monitoring** — Prometheus `/metrics`, `/ready` 503 semantics (`GET /health`, `GET /ready`, and `correlation_id` tracing shipped)
-3. **🔒 TLS Proxy Implementation** — Cloud-native TLS termination
-4. **🔗 Relationship model** — Prerequisite for full `$expand` / `$apply`
-
-## ✅ Latest shipped (July 2026)
-
-See **[changelog.md](changelog.md)** for the full list. Most recent:
-
-- **Storage integrity** — transactional write errors, atomic engine locking, strict startup validation, and truncated-tail recovery
-- **HTTP hardening** — PATCH missing IDs return 404; 1 MiB request limit returns 413
-- **Typed secondary indexes** — primitive types remain distinct and numeric ranges use native ordering
-- **Public probes** — **`GET /health`** and **`GET /ready`** return `{}` (PAT-exempt)
-- **`correlation_id` tracing** — `X-Correlation-ID` on all HTTP handler logs
-- **yarproxy header forwarding** — `Authorization` and `X-Correlation-ID` to backends; `header_forward_auth` / `header_forward_correlation` smokes
-- **yarsh smokes** — auth CRUD, `$filter` `or` / `startswith`, OData query cases
-- **`yarexport` `export_empty`** smoke — export fresh DB with no documents
+See **[changelog.md](changelog.md)**, the single source of truth for shipped features and current verification totals.
 
 ## 📖 Reading Guide
 
@@ -68,9 +50,10 @@ See **[changelog.md](changelog.md)** for the full list. Most recent:
 
 ## 📝 Documentation Principles
 
-1. **Root README.md** - Project overview and entry point
-2. **docs/** - Detailed documentation by topic
-3. **docs/changelog.md** - Canonical completed-work log (grows over time)
-4. **docs/archive/** - Historical/completed proposals
-5. **Keep it current** - Update changelog when features ship; keep README as an index
-6. **Link related docs** - Cross-reference between documents
+1. **Root README.md** - Concise project overview and entry point
+2. **programs.md** - Canonical executable and HTTP API behavior
+3. **deployment.md** - Canonical operational, security, backup, and recovery guidance
+4. **development.md** - Contributor workflow and active roadmap
+5. **changelog.md** - Canonical shipped-work log and current verification totals
+6. **archive/** - Historical evaluations and completed proposals; never the current reference
+7. **Link instead of copying** - Keep detailed facts in their canonical document

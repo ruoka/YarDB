@@ -32,49 +32,60 @@ Thank you for your interest in contributing to YarDB! This document provides gui
 
 4. **Run tests:**
    ```bash
-   ./tools/CB.sh debug test     # Build and run all tests
+   ./tools/CB.sh debug test --tags='\[yardb\]'
    ```
 
 ### Using Dev Containers
 
 The project includes a VS Code devcontainer configuration. Simply open the project in VS Code and select "Reopen in Container" when prompted.
 
-## Code Style
+## C++ Coding Standards
 
-The project follows the [C++ Core Guidelines](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md) for code style and best practices, with the following exception:
+YarDB targets C++23 and follows the [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines), except for the project naming rules below.
 
-**Naming Convention:**
-- **All identifiers use `snake_case`** (including class names, functions, variables, etc.)
-- This differs from the Core Guidelines' typical PascalCase for classes and camelCase for functions
-- Examples:
-  - Classes: `database_engine`, `http_server` (not `DatabaseEngine`, `HttpServer`)
-  - Functions: `get_data()`, `process_request()` (not `getData()`, `processRequest()`)
-  - Variables: `user_name`, `connection_count` (not `userName`, `connectionCount`)
+### Naming
 
-**Other Style Rules:**
-- Use 4 spaces for indentation in C++ files
-- Follow P1204R0 module organization guidelines
-- Keep modules focused and well-documented
-- Refer to the C++ Core Guidelines for:
-  - [Functions](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#s-functions)
-  - [Classes and class hierarchies](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#s-class)
-  - [Resource management](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#s-resource)
-  - [Error handling](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#s-errors)
-  - And other sections as applicable
+- Use `snake_case` for every identifier, including types, functions, variables, and members.
+- Use `UPPER_SNAKE_CASE` for constants and enumerators where an uppercase name is appropriate.
+- Do not use Java-style `get_` or `set_` accessors. Prefer `size()`, `id()`, `collection()`, `update_state()`, and similar natural names.
+- Module partitions use the `yar:` prefix.
+
+### Source Style
+
+- Use exactly four spaces for indentation.
+- Production `.c++m` and `.c++` code uses Allman braces.
+- Compact K&R-style test registration lambdas are acceptable in `.test.c++`; control-flow braces remain Allman style.
+- Prefer `auto` when the initializer makes the type clear.
+- Prefer `"value"s` and `"value"sv` with `auto` for owning strings and string views.
+- Avoid trailing return types unless required by dependent template syntax.
+- Prefer concise range algorithms and range-based loops over index loops and hand-written equivalents.
+- Prefer the standard library over project-specific helpers when it expresses the operation clearly.
+
+### Design and Error Handling
+
+- Use RAII for ownership and cleanup; do not introduce raw owning pointers.
+- Use `std::expected` for recoverable operation failures and exceptions for construction failures or violated invariants.
+- Keep behavior-preserving refactors compatible with existing tests; do not change assertions to hide regressions.
+- Keep modules focused and APIs small. Remove redundant compatibility paths when all callers can migrate together.
+- Prefer clear return values over output parameters for new APIs.
 
 ## Module Organization
 
+- Use modules instead of traditional headers. A global module fragment with a platform header is acceptable only when standard C++ has no equivalent.
 - Module files use `.c++m` extension
 - Implementation files use `.impl.c++` extension
 - Test files use `.test.c++` extension (co-located with source)
-- Module names start with project prefix (`yar:`, `yar:engine`, etc.)
+- Module partitions use names such as `yar:engine`, `yar:index`, and `yar:httpd`
 
 ## Testing
 
 - Unit tests are co-located with source files using `.test.c++` extension
-- Run tests with `./tools/CB.sh debug test`
-- Run specific tests with `./tools/CB.sh debug test "pattern"`
-- Ensure all tests pass before submitting a pull request
+- Tag YarDB tests with `[yardb]`
+- Run scoped tests while developing: `./tools/CB.sh debug test "pattern" --jsonl --jsonl-output=always`
+- Run the complete suite with `./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'`
+- Run `./tools/CB.sh release test --tags='\[yardb\]'` before committing
+- Use `require_*` when later assertions depend on success and `check_*` for independent checks
+- Nested test sections execute later; capture shared fixtures by value, normally through `std::shared_ptr`
 
 ## Submitting Changes
 
@@ -102,7 +113,7 @@ The project follows the [C++ Core Guidelines](https://github.com/isocpp/CppCoreG
 - Common commands:
   - `./tools/CB.sh debug build` - Build in debug mode
   - `./tools/CB.sh release build` - Build in release mode
-  - `./tools/CB.sh debug test` - Build and run all tests
+  - `./tools/CB.sh debug test --tags='\[yardb\]'` - Build and run all YarDB tests
   - `./tools/CB.sh debug test "pattern"` - Run filtered tests
   - `./tools/CB.sh debug clean` - Clean build artifacts
   - `./tools/CB.sh debug list` - List all translation units

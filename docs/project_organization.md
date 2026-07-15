@@ -66,8 +66,7 @@ YarDB/
     ├── deployment.md            # Deployment guide
     ├── programs.md              # Executable reference
     ├── project_organization.md  # This file
-    ├── rest_api_evaluation.md   # API status and prioritized TODO
-    └── archive/                 # Completed proposals and plans
+    └── archive/                 # Historical evaluations and completed plans
 ```
 
 ## P1204R0 Compliance

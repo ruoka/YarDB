@@ -1,5 +1,7 @@
 # YarDB REST API Design Evaluation
 
+> Archived July 2026. This document records the historical evaluation that guided the REST API work. It is not the current roadmap or API reference. See [`../programs.md`](../programs.md) for current behavior, [`../development.md`](../development.md) for planned work, and [`../changelog.md`](../changelog.md) for shipped changes.
+
 ## Recommended Next Improvement
 
 **Relationship / navigation model** (see TODO #2 below) — prerequisite for full `$expand` and `$apply`.
@@ -47,7 +49,7 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
 6. **✅ `GET /health` liveness probe** — `{}`; public when PAT auth is enabled
 7. **✅ `GET /ready` readiness probe** — `{}`; public when PAT auth is enabled (503 when not ready: not yet implemented)
 
-**Remaining:** scoped tokens, JWT/OAuth2, RBAC, engine-backed `/ready` `503` semantics, Prometheus `/metrics`. See [changelog.md](changelog.md) and [development.md](development.md#development-roadmap).
+**Remaining:** scoped tokens, JWT/OAuth2, RBAC, engine-backed `/ready` `503` semantics, Prometheus `/metrics`. See [changelog.md](../changelog.md) and [development.md](../development.md#development-roadmap).
 
 #### REST Features (completed)
 

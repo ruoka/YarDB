@@ -2,7 +2,7 @@
 
 Shipped features, fixes, and test harness work. **Newest first** within each month.
 
-For planned work see [rest_api_evaluation.md](rest_api_evaluation.md) and [development.md](development.md#development-roadmap).
+For planned work see [development.md](development.md#development-roadmap). Historical design evaluations live under [archive/](archive/).
 
 ---
 
@@ -68,7 +68,7 @@ Earlier July commits: piped yarsh harness (`031d52f`), yarexport JSONL fix + smo
 ### Engine, indexes & tests
 
 - Multivalue secondary indexes; `std::flat_map` collection map
-- Expanded `[yardb]` unit tests: index, engine, OData count, HTTP gaps (`838d033`; now 318 tests and 1157 assertions)
+- Expanded `[yardb]` unit tests: index, engine, OData count, and HTTP gaps (`838d033`)
 - **`yarsh` REPL**: full body display, resilient bad JSON, `@Authorization` / conditional headers (`ac824c5`)
 
 ### Documentation

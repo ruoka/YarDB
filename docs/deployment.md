@@ -6,11 +6,11 @@
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ⚠️ **Partial**: Bearer PAT MVP, liveness/readiness probes, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
-- ❌ **Missing**: Scoped auth, TLS, Prometheus metrics, high availability
+- ⚠️ **Partial**: Bearer PAT MVP, safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
+- ❌ **Missing**: Scoped auth, TLS at reverse proxy, Prometheus metrics, high availability
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
-- 🔐 **Security & Authentication** (scoped PATs, JWT, RBAC, TLS)
+- 🔐 **Security & Authentication** (scoped PATs, JWT, RBAC, TLS at reverse proxy; safe bind defaults shipped)
 - 📊 **Monitoring & Observability** (Prometheus `/metrics`; probes shipped — engine-backed `/ready` 503 deferred)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
 
@@ -37,12 +37,28 @@
 ## 🐳 Container Deployment
 
 ### Using Dev Container
+
+The devcontainer forwards ports `2112` and `2113` to the host. Because forwarded traffic does not arrive on container loopback, use a public bind address **with PAT** when you want host access:
+
+```bash
+yardb --bind=0.0.0.0 --pat=devtoken --clog 2112
+```
+
+For in-container-only work (smoke tests, `yarsh` to `127.0.0.1`), the default `127.0.0.1` bind is sufficient:
+
+```bash
+yardb --clog 2112
+```
+
+### Docker Image
+
 ```bash
 # Build using the provided Dockerfile
 docker build -f .devcontainer/Dockerfile -t yardb .
 
-# Run container
-docker run -p 2112:2112 -v /data:/data yardb yardb --file=/data/yar.db
+# Run container (public bind + PAT required for -p publishing)
+docker run -p 2112:2112 -v /data:/data yardb \
+  yardb --bind=0.0.0.0 --pat-file=/data/pat.txt --file=/data/yar.db
 ```
 
 ### Docker Compose Example
@@ -55,7 +71,7 @@ services:
       - "2112:2112"
     volumes:
       - ./data:/data
-    command: ["yardb", "--file=/data/yar.db", "--clog"]
+    command: ["yardb", "--bind=0.0.0.0", "--pat-file=/data/pat.txt", "--file=/data/yar.db", "--clog"]
     restart: unless-stopped
 ```
 
@@ -263,7 +279,7 @@ sar -n DEV 1
 
 ## 📋 Deployment Checklist
 
-- [ ] **Security**: Enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
+- [ ] **Security**: Bind to private interfaces (or explicit public bind with PAT); enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
 - [ ] **Monitoring**: Set up metrics collection and alerting
 - [ ] **Backup**: Configure regular backup procedures
 - [ ] **Single writer**: Ensure one process owns each database and document the stale-lock runbook

@@ -273,7 +273,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL
 - **Current State**: Bearer PAT on `yardb` (`--pat` / `--pat-file`, SHA-256 hashed in memory, public `GET /health` and `GET /ready`). `net::http` also has optional Basic auth middleware for custom servers.
-- **Shipped** (see [changelog.md](changelog.md)): PAT MVP, hashed storage, auth smokes
+- **Shipped** (see [changelog.md](changelog.md)): PAT MVP, hashed storage, auth smokes, safe bind defaults (`--bind`, default `127.0.0.1`, refuse `0.0.0.0`/`::` without PAT)
 - **Planned Implementation**:
   - Scoped tokens (read-only vs write)
   - JWT/OAuth2 token authentication
@@ -349,6 +349,7 @@ The storage writer remains single-owner. A write lock covers file mutation and s
 
 ### Security Architecture
 - **TLS Proxy Pattern**: Transport security handled externally for separation of concerns
+- **Bind Policy**: Default `127.0.0.1`; public bind requires an explicit flag; refuse `0.0.0.0` without PAT
 - **Authentication Strategy**: JWT-based with refresh tokens for stateless auth
 - **Authorization Model**: RBAC with collection/database-level permissions
 

@@ -18,10 +18,15 @@ The main database server that provides a RESTful HTTP API for document storage a
 ### Usage
 
 ```bash
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
 ```
 
 ### Options
+
+- `--bind=<host>` - Listen address (default: `127.0.0.1`)
+  - Use `127.0.0.1` for local development and reverse-proxy deployments
+  - Use `--bind=0.0.0.0` for Docker, devcontainers, and Kubernetes port publishing
+  - Binding to `0.0.0.0` or `::` **requires** `--pat` or `--pat-file`
 
 - `--file=<name>` - Database file path (default: `yar.db`)
   - The database file stores all collections and documents
@@ -51,9 +56,13 @@ When any PAT is configured, API routes require a valid Bearer token (via `net` `
 
 ### Security Note
 
-**Default:** No PAT flags → open API (development only).
+**Default bind:** `127.0.0.1` (loopback only). Suitable for local development and when a reverse proxy connects on localhost.
 
-**With `--pat` / `--pat-file`:** Bearer PAT required on every route. Suitable for simple deployments; use TLS in production.
+**Docker / devcontainer:** Port forwarding requires `--bind=0.0.0.0` plus PAT authentication.
+
+**Default API:** No PAT flags → open API on the bind address (development only).
+
+**With `--pat` / `--pat-file`:** Bearer PAT required on every route. Required for `--bind=0.0.0.0`; recommended for any routable deployment. Use TLS at a reverse proxy in production.
 
 **Future:** JWT/OAuth2, RBAC, scoped tokens.
 
@@ -62,8 +71,11 @@ When any PAT is configured, API routes require a valid Bearer token (via `net` `
 ### Example
 
 ```bash
-# Start server on default port 2112 with default database file
+# Local development (loopback only)
 yardb
+
+# Docker / devcontainer with host port forwarding
+yardb --bind=0.0.0.0 --pat=devtoken 2112
 
 # Start server on port 8080 with custom database file
 yardb --file=production.db 8080

@@ -30,3 +30,8 @@ else
 fi
 
 echo "Dev container ready."
+echo ""
+echo "yardb bind notes:"
+echo "  - Default bind is 127.0.0.1 (in-container localhost)."
+echo "  - For host port forwarding on :2112, use:"
+echo "      yardb --bind=0.0.0.0 --pat=devtoken 2112"

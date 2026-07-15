@@ -61,8 +61,12 @@ inline auto database_error_response(const yar::db::db_error& error)
 export class rest_api_server
 {
 public:
-    rest_api_server(std::string_view file, std::string_view port_or_service) :
+    rest_api_server(
+        std::string_view file,
+        std::string_view port_or_service,
+        std::string_view bind_host = "127.0.0.1"sv) :
         m_file{file},
+        m_bind_host{bind_host},
         m_port_or_service{port_or_service},
         m_engine{file}
     {
@@ -79,10 +83,11 @@ public:
         {
             try
             {
-                slog << info("SERVER_START") << "Server starting on port: " << m_port_or_service
+                slog << info("SERVER_START") << "Server starting on " << m_bind_host << ":" << m_port_or_service
+                      << std::pair{"addr"sv, m_bind_host}
                       << std::pair{"port"sv, m_port_or_service}
                       << flush;
-                m_server.listen(m_port_or_service);
+                m_server.listen(m_bind_host, m_port_or_service);
             }
             catch(const std::exception& e)
             {
@@ -117,7 +122,7 @@ public:
     // For backward compatibility - blocks forever
     void listen()
     {
-        m_server.listen(m_port_or_service);
+        m_server.listen(m_bind_host, m_port_or_service);
     }
 
     ~rest_api_server()
@@ -1331,6 +1336,7 @@ private:
     }
 
     std::string m_file;
+    std::string m_bind_host;
     std::string m_port_or_service;
     yar::db::engine m_engine;
     ::http::server m_server;

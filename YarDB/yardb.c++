@@ -8,7 +8,11 @@ using namespace std;
 using namespace net;
 
 const auto usage = R"(
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
+
+Listen address (default: 127.0.0.1):
+  --bind=<host>       Bind host (default 127.0.0.1). Use --bind=0.0.0.0 for Docker/port-forwarding.
+                      Binding to 0.0.0.0 or :: requires --pat or --pat-file.
 
 Optional PAT authentication (Bearer token):
   --pat=<token>       Accept a personal access token (repeatable)
@@ -136,6 +140,23 @@ auto validate_hashed_pat(const set<pat_hash>& hashed_values, string_view authori
     return false;
 }
 
+auto is_public_bind(string_view host) -> bool
+{
+    const auto normalized = trim(host);
+    return normalized == "0.0.0.0"sv
+        || normalized == "::"sv
+        || normalized == "::0"sv
+        || normalized == "[::]"sv;
+}
+
+void validate_bind_policy(string_view bind_host, bool has_pat)
+{
+    if(is_public_bind(bind_host) && !has_pat)
+        throw runtime_error{
+            "refusing to bind to "s + string{bind_host}
+            + " without PAT authentication; use --pat or --pat-file, or bind to 127.0.0.1"};
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -143,6 +164,7 @@ try
 {
     const auto arguments = span(argv,argc).subspan(1);
     auto file = "yar.db"s;
+    auto bind_host = "127.0.0.1"s;
     auto service_or_port = "2112"s;
     auto raw_pats = vector<string>{};
     auto pat_files = vector<string>{};
@@ -186,6 +208,18 @@ try
             continue;
         }
 
+        if(option.starts_with("--bind="))
+        {
+            bind_host = string{option.substr(string_view{"--bind="}.size())};
+            if(bind_host.empty())
+            {
+                cerr << "Error: --bind requires a host address" << endl;
+                cerr << usage << endl;
+                return 1;
+            }
+            continue;
+        }
+
         if(option.starts_with("--pat="))
         {
             raw_pats.push_back(string{option.substr(string_view{"--pat="}.size())});
@@ -211,11 +245,14 @@ try
     for(const auto& pat_file : pat_files)
         load_pat_file(pat_file, raw_pats);
 
+    const auto has_pat = !raw_pats.empty();
+    validate_bind_policy(bind_host, has_pat);
+
     auto hashed_pats = set<pat_hash>{};
     append_hashed_pats(raw_pats, hashed_pats);
 
-    slog << notice << "Starting up server" << flush;
-    auto server = yar::http::rest_api_server{file, service_or_port};
+    slog << notice << "Starting up server on " << bind_host << ":" << service_or_port << flush;
+    auto server = yar::http::rest_api_server{file, service_or_port, bind_host};
 
     if(!hashed_pats.empty())
     {

@@ -8,6 +8,15 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Safe bind defaults
+
+| Item | Summary |
+|------|---------|
+| **Default loopback bind** | `yardb` listens on `127.0.0.1` by default |
+| **`--bind=<host>`** | Explicit listen address; use `--bind=0.0.0.0` for Docker/devcontainer port forwarding |
+| **Public bind policy** | Refuses `0.0.0.0` and `::` without `--pat` / `--pat-file` |
+| **Tests** | `tests/yardb/smoke.sh` bind-policy smoke harness |
+
 ### Engine reader/writer concurrency
 
 | Item | Summary |

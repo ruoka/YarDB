@@ -4,7 +4,7 @@ Guidance for AI agents and automation using JSONL test and build output in this 
 
 ## Golden rule
 
-Use **`--jsonl`**. Parse **stdout only** (one JSON object per line, `schema: "tester-jsonl"`). Treat **stderr** as human/CB wrapper logs — do not parse it for pass/fail.
+Use **`--jsonl=failures`**. Parse **stdout only** (one JSON object per line, `schema: "tester-jsonl"`). Treat **stderr** as human/CB wrapper logs — do not parse it for pass/fail.
 
 ## Setup
 
@@ -23,25 +23,25 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 
 ```bash
 # Translation-unit inventory
-./tools/CB.sh debug list --jsonl
+./tools/CB.sh debug list --jsonl=failures
 
 # Build with compile telemetry
-./tools/CB.sh debug build --jsonl
+./tools/CB.sh debug build --jsonl=failures
 
 # Scoped test run (preferred while fixing)
-./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'
+./tools/CB.sh debug test --jsonl=failures --tags='\[yardb\]'
 
 # Target by registered test-name substring
-./tools/CB.sh debug test "REST API status" --jsonl --jsonl-output=always
-./tools/CB.sh debug test "parse_filter" --jsonl --jsonl-output=always
-./tools/CB.sh debug test "database engine" --jsonl --jsonl-output=always
-./tools/CB.sh debug test "index count and view" --jsonl --jsonl-output=always
+./tools/CB.sh debug test "REST API status" --jsonl=failures
+./tools/CB.sh debug test "parse_filter" --jsonl=failures
+./tools/CB.sh debug test "database engine" --jsonl=failures
+./tools/CB.sh debug test "index count and view" --jsonl=failures
 
 # Full YarDB suite (final verification — always tag-filter; unfiltered runs pull in deps/tester probes)
-./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'
+./tools/CB.sh debug test --jsonl=failures --tags='\[yardb\]'
 
 # Test catalogue (ids, tags, depends_on for scoped runs)
-./tools/CB.sh debug test --list --jsonl
+./tools/CB.sh debug test --list --jsonl=failures
 ```
 
 **Tag syntax:** YarDB tests use `[yardb]`. Escape brackets in shell: `--tags='\[yardb\]'`. Substring/regex filters also work: `--tags='ETag'`.
@@ -50,18 +50,19 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 
 **Scoped runs:** Prefer `--tags='\[yardb\]'` while fixing. Examples are excluded, but an unfiltered run includes tester probe fixtures; do not expect `summary.passed: true` without a project tag.
 
-**Flags:**
-- `--jsonl` — machine-readable stdout for CB and `test_runner`
-- `--jsonl-output=always` — emit `assertion_passed` as well as `assertion_failed` (default: failures only)
+**Unified JSONL modes:**
+- `--jsonl` / `--jsonl=failures` — aggregates plus actionable failures
+- `--jsonl=summary` — lifecycle and final aggregates only
+- `--jsonl=trace` — complete telemetry, including passing assertions
 
-**CB flag forwarding:** `--tags=`, `--list`, `--jsonl`, `--output=jsonl`, `--jsonl-output=…`, and `--slowest=…` may appear after `test` without `--`. Use `--` only for uncommon `test_runner` flags. Legacy form: `./tools/CB.sh debug test -- --output=jsonl`.
+**CB flag forwarding:** `--tags=`, `--list`, `--jsonl[=summary|failures|trace]`, `--jsonl-output-max-bytes=…`, and `--slowest=…` may appear after `test` without `--`.
 
 **Examples excluded:** `deps/tester/examples/` are not built or run (`CB_INCLUDE_EXAMPLES_MODE=never`). Use project tags in `YarDB/*.test.c++`.
 
 **Re-run tests without rebuild** (after `./tools/CB.sh debug build`):
 
 ```bash
-./build-darwin-debug/bin/test_runner --output=jsonl --jsonl-output=always --tags='\[yardb\]'
+./build-darwin-debug/bin/test_runner --jsonl=failures --tags='\[yardb\]'
 # Linux: ./build-linux-debug/bin/test_runner ...
 ```
 
@@ -79,19 +80,19 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
      - Read `first_failure` — `file`, `line`, `message`, and usually the failing `matcher` with `actual` / `expected`. Open the source at that location.
      - Read `failed_test_ids` for the full failure set.
 
-3. For detailed diagnosis, grep stdout for `assertion_failed` (use `assertion_passed` as well when you passed `--jsonl-output=always`):
+3. For detailed diagnosis, inspect `assertion_failed`:
    - `matcher` — e.g. `require_eq`, `check_contains` (not generic `require` / `check`)
    - `actual`, `expected`, `file`, `line`, `column`
 
 4. Fix the source, then **re-run the exact same scoped command**.
 
-If `matcher` is `"require"` or `"check"` on a `require_eq` / `check_eq` line, stale test objects are likely — rebuild test TUs (`./tools/CB.sh debug build --jsonl`), not only `tester_assertions.pcm`. Then re-run the test command. See [deps/tester/docs/tester-improvements.md](deps/tester/docs/tester-improvements.md) §2.4.
+If `matcher` is `"require"` or `"check"` on a `require_eq` / `check_eq` line, stale test objects are likely — rebuild test TUs (`./tools/CB.sh debug build --jsonl=failures`), not only `tester_assertions.pcm`. Then re-run the test command.
 
 ## Triage workflow (build failure)
 
 1. Find `command_end` with `"ok": false` — use the `argv` array to rerun without shell parsing.
 2. Check `compile_end` events: `cache_hit: false` means that translation unit recompiled; `cache_hit: true` means incremental skip. When `rebuild_reason` is `flag_change`, read the single `profile_changed` event for `profile_diff` (not repeated on each `compile_end`).
-3. Rebuild: `./tools/CB.sh debug build --jsonl`, then re-run tests.
+3. Rebuild: `./tools/CB.sh debug build --jsonl=failures`, then re-run tests.
 
 ## Event reference (stdout)
 
@@ -121,7 +122,7 @@ Filter `run_id=<cb>` or `parent_run_id=<cb>` to correlate `list` → `build` →
 |-------|-----|
 | `run_start` / `run_end` | Run boundaries; `run_start` has `cwd`, `argv`, `config` (from `TESTER_CONFIG` when CB spawns the child), `env` (curated test-relevant vars when set, e.g. `NET_DISABLE_NETWORK_TESTS`, `CURSOR_SANDBOX`), `passed`, `duration_ms` on `run_end` |
 | `assertion_failed` | Always on failed assertions (`matcher`, `actual`, `expected`, optional `message`) |
-| `assertion_passed` | With `--jsonl-output=always` |
+| `assertion_passed` | Trace mode |
 | `test` | Per-test rollup (`success`, `output`, assertion counts) |
 | `summary` | `tests_ok`/`tests_total`, `failed_test_ids`, `first_failure` |
 | `exception` | Uncaught exceptions (`exception_type`, `message`, `file`, `line`) |
@@ -161,9 +162,9 @@ HTTP integration tests use a `fixture` that starts `rest_api_server` on port `21
 ## Example agent loop
 
 ```text
-1. ./tools/CB.sh debug build --jsonl
-2. ./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'
-   # or narrower: ./tools/CB.sh debug test "ETag" --jsonl --jsonl-output=always
+1. ./tools/CB.sh debug build --jsonl=failures
+2. ./tools/CB.sh debug test --jsonl=failures --tags='\[yardb\]'
+   # or narrower: ./tools/CB.sh debug test "ETag" --jsonl=failures
 3. Parse last summary or run_end → check passed
 4. If false: follow triage workflow (first_failure + assertion_failed) → edit → re-run the same scoped command
 5. Before commit: ./tools/CB.sh release test --tags='\[yardb\]'

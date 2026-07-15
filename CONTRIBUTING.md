@@ -81,8 +81,8 @@ YarDB targets C++23 and follows the [C++ Core Guidelines](https://isocpp.github.
 
 - Unit tests are co-located with source files using `.test.c++` extension
 - Tag YarDB tests with `[yardb]`
-- Run scoped tests while developing: `./tools/CB.sh debug test "pattern" --jsonl --jsonl-output=always`
-- Run the complete suite with `./tools/CB.sh debug test --jsonl --jsonl-output=always --tags='\[yardb\]'`
+- Run scoped tests while developing: `./tools/CB.sh debug test "pattern" --jsonl=failures`
+- Run the complete suite with `./tools/CB.sh debug test --jsonl=failures --tags='\[yardb\]'`
 - Run `./tools/CB.sh release test --tags='\[yardb\]'` before committing
 - Use `require_*` when later assertions depend on success and `check_*` for independent checks
 - Nested test sections execute later; capture shared fixtures by value, normally through `std::shared_ptr`

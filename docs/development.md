@@ -327,6 +327,19 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Memory Management**: Memory-mapped files, optimized storage
 - **Horizontal Scaling**: Multi-node clustering support
 
+##### Engine Reader/Writer Concurrency Plan
+
+`std::shared_mutex` becomes useful only after read operations stop mutating shared engine state:
+
+1. Remove mutable `m_collection`; pass the collection explicitly to every engine operation.
+2. Give each reader an independent `std::ifstream` or reader handle so concurrent reads never share stream cursor or error state.
+3. Protect collection indexes with `std::shared_mutex`.
+4. Use `std::shared_lock` for `read`, `count`, `history`, `metadata_timestamp`, and `metadata_position`.
+5. Use `std::unique_lock` for create, update, destroy, replace, upsert, index configuration, and reindexing.
+6. Keep compound conditional HTTP writes under one exclusive transaction boundary so precondition checks and mutation observe the same version.
+
+The storage writer remains single-owner. A write lock covers file mutation and staged index publication; readers retain their shared lock until all selected records have been decoded. Add concurrent-reader, reader-versus-writer, and conditional-update stress tests before changing the public thread-safety contract.
+
 #### Developer Experience
 - **Configuration Files**: YAML/JSON configuration instead of CLI-only
 - **API Documentation**: OpenAPI/Swagger documentation

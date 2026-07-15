@@ -18,6 +18,9 @@ inline constexpr long long max_query_top = 10000;           // Maximum value for
 inline constexpr long long max_query_skip = 100000;        // Maximum value for $skip query parameter
 inline constexpr int max_query_fields = 1000;        // Maximum number of fields in comma-separated lists
 
+// Request limits
+inline constexpr std::size_t max_request_body_size = 1024 * 1024; // 1 MiB
+
 // Collection name limits
 inline constexpr int max_collection_name_length = 256;  // Maximum length for collection names
 

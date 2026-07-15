@@ -332,30 +332,6 @@ private:
         };
     }
 
-    // Middleware: Body size validation - prevents memory exhaustion from oversized requests
-    // YarDB-specific version that returns JSON error responses
-    // Generic version available in ::http::body_size_validation_middleware()
-    // Available for use when body size limits are needed (e.g., for POST/PUT handlers)
-    // Example usage: add to build_middleware_chain() or use directly in ::http::wrap()
-    middleware_factory body_size_validation_middleware(std::size_t max_size) const
-    {
-        return [max_size](handler next)
-        {
-            return [max_size, next = std::move(next)](auto req, auto body, auto hdr) mutable
-            {
-                if(body.size() > max_size)
-                {
-                    auto error = xson::object{
-                        {"error", "Payload Too Large"s},
-                        {"message", "Request body exceeds maximum size"s}
-                    };
-                    return response_with_headers{status_payload_too_large, xson::json::stringify(error), std::optional<::http::headers>{}};
-                }
-                return next(req, body, hdr);
-            };
-        };
-    }
-
     // Rate limiting middleware - optional, uses ::http::rate_limiting_middleware
     // Returns middleware factory if rate limiting is enabled, otherwise returns empty optional
     std::optional<middleware_factory> rate_limiting_middleware() const
@@ -401,11 +377,11 @@ private:
     }
 
     // Build standard middleware chain for handlers
-    // Order: rate limiting -> CORS -> correlation ID -> authentication -> correlation logging -> accept validation -> error handling
+    // Order: rate limiting -> CORS -> correlation ID -> authentication -> body size -> correlation logging -> accept validation -> error handling
     std::vector<middleware_factory> build_middleware_chain(std::string_view method, std::string_view log_event, std::string_view error_event, bool requires_headers = false) const
     {
-        // Count: correlation ID, correlation logging, accept validation, error handling, optionally rate limiting, CORS, authentication
-        constexpr std::size_t base_middleware_count = 4; // correlation ID + correlation logging + accept validation + error handling
+        // Count: correlation ID, body size, correlation logging, accept validation, error handling, optionally rate limiting, CORS, authentication
+        constexpr std::size_t base_middleware_count = 5;
         const std::size_t middleware_count = base_middleware_count + 
             (m_rate_limiting_enabled ? 1 : 0) + 
             (m_cors_enabled ? 1 : 0) + 
@@ -438,13 +414,16 @@ private:
                 middlewares.emplace_back(*auth_mw);
         }
         
-        // 5. Correlation logging (uses correlation ID from step 3)
+        // 5. Body size validation (reject before logging or parsing oversized bodies)
+        middlewares.emplace_back(::http::middleware::body_size_validation_middleware(yar::db::max_request_body_size));
+
+        // 6. Correlation logging (uses correlation ID from step 3)
         middlewares.emplace_back(correlation_logging_middleware(method, log_event));
         
-        // 6. Accept validation
+        // 7. Accept validation
         middlewares.emplace_back(accept_validation_middleware(requires_headers));
         
-        // 7. Error handling (last - wraps everything)
+        // 8. Error handling (last - wraps everything)
         middlewares.emplace_back(error_handling_middleware(method, error_event));
         
         return middlewares;

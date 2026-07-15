@@ -321,6 +321,18 @@ auto test_set()
             require_true(error.has("message"s));
         };
 
+        section("POST with oversized body returns 413 Payload Too Large") = [setup]
+        {
+            const auto oversized_body = std::string(1024 * 1024 + 1, 'x');
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/testitems"s, oversized_body
+            );
+
+            require_eq(status, "413"s);
+            require_eq(reason, "Payload Too Large"s);
+            require_true(response_body.contains("1048576 bytes"s));
+        };
+
         section("PUT updates document and returns 200 OK with Content-Location header") = [setup]
         {
             // First create a document

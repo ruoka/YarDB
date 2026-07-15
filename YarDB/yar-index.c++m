@@ -296,7 +296,7 @@ public:
     // @param storage Database file stream for fallback scans
     // @param selector Query selector (ignores $top, $skip, $desc)
     // @return Number of matching documents
-    std::size_t count(std::fstream& storage, const xson::object& selector) const;
+    std::size_t count(std::istream& storage, const xson::object& selector) const;
 
     // Update document and assign _id if missing
     // Increments sequence counter for new _id assignment

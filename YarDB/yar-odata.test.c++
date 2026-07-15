@@ -707,18 +707,17 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"name"s}).has_value());
+                                require_true(engine.index("users"s, {"name"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}};
                 auto bob = object{{"name"s, "Bob"s}};
                 auto charlie = object{{"name"s, "Charlie"s}};
-                require_true(engine.create(alice).has_value());
-                require_true(engine.create(bob).has_value());
-                require_true(engine.create(charlie).has_value());
+                require_true(engine.create("users"s, alice).has_value());
+                require_true(engine.create("users"s, bob).has_value());
+                require_true(engine.create("users"s, charlie).has_value());
 
                 const auto parsed = parse_filter("startswith(name, 'A')"sv);
-                auto documents = read_with_parsed_filter(engine, object{}, parsed);
+                auto documents = read_with_parsed_filter(engine, "users"s, object{}, parsed);
 
                 then("Returns only names with prefix A") = [documents]
                 {
@@ -735,14 +734,13 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"Customer"s}).has_value());
+                                require_true(engine.index("users"s, {"Customer"s}).has_value());
 
                 auto selector = object{};
                 auto filters = std::vector<string_filter>{
                     {"startswith"sv, "Customer/Name"sv, "Ac"sv}
                 };
-                lower_startswith_filters(engine, selector, filters);
+                lower_startswith_filters(engine, "users"s, selector, filters);
 
                 then("Keeps post-filter and leaves selector empty") = [selector, filters]
                 {
@@ -758,14 +756,13 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"name"s}).has_value());
+                                require_true(engine.index("users"s, {"name"s}).has_value());
 
                 auto selector = object{};
                 auto filters = std::vector<string_filter>{
                     {"startswith"sv, "name"sv, "Al"sv}
                 };
-                lower_startswith_filters(engine, selector, filters);
+                lower_startswith_filters(engine, "users"s, selector, filters);
 
                 then("Moves constraint into selector and clears string filter") = [selector, filters]
                 {
@@ -792,19 +789,18 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"age"s, "status"s}).has_value());
+                                require_true(engine.index("users"s, {"age"s, "status"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}, {"age"s, 30ll}, {"status"s, "active"s}},
                     bob = object{{"name"s, "Bob"s}, {"age"s, 20ll}, {"status"s, "active"s}},
                     charlie = object{{"name"s, "Charlie"s}, {"age"s, 22ll}, {"status"s, "inactive"s}};
-                require_true(engine.create(alice).has_value());
-                require_true(engine.create(bob).has_value());
-                require_true(engine.create(charlie).has_value());
+                require_true(engine.create("users"s, alice).has_value());
+                require_true(engine.create("users"s, bob).has_value());
+                require_true(engine.create("users"s, charlie).has_value());
 
                 const auto parsed = parse_filter("age gt 25 or status eq 'active'"sv);
                 require_true(parsed.has_or());
-                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
 
                 then("Returns union count without reading all documents into caller") = [count]
                 {
@@ -818,19 +814,18 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"email"s}).has_value());
+                                require_true(engine.index("users"s, {"email"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}, {"email"s, "alice@example.com"s}},
                     bob = object{{"name"s, "Bob"s}, {"email"s, "bob@test.com"s}},
                     charlie = object{{"name"s, "Charlie"s}, {"email"s, "charlie@example.org"s}};
-                require_true(engine.create(alice).has_value());
-                require_true(engine.create(bob).has_value());
-                require_true(engine.create(charlie).has_value());
+                require_true(engine.create("users"s, alice).has_value());
+                require_true(engine.create("users"s, bob).has_value());
+                require_true(engine.create("users"s, charlie).has_value());
 
                 const auto parsed = parse_filter("contains(email, '@example')"sv);
                 require_false(parsed.has_or());
-                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
 
                 then("Counts only documents matching string filter") = [count]
                 {
@@ -844,19 +839,18 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"name"s}).has_value());
+                                require_true(engine.index("users"s, {"name"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}},
                     bob = object{{"name"s, "Bob"s}},
                     charlie = object{{"name"s, "Charlie"s}};
-                require_true(engine.create(alice).has_value());
-                require_true(engine.create(bob).has_value());
-                require_true(engine.create(charlie).has_value());
+                require_true(engine.create("users"s, alice).has_value());
+                require_true(engine.create("users"s, bob).has_value());
+                require_true(engine.create("users"s, charlie).has_value());
 
                 const auto parsed = parse_filter("startswith(name, 'A')"sv);
                 require_false(parsed.has_or());
-                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
 
                 then("Uses engine.count on lowered selector") = [count]
                 {
@@ -870,18 +864,17 @@ auto register_odata_tests()
                 std::remove((test_file + ".pid").c_str());
 
                 auto engine = yar::db::engine{test_file};
-                engine.collection("users"s);
-                require_true(engine.index({"status"s}).has_value());
+                                require_true(engine.index("users"s, {"status"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}, {"status"s, "active"s}},
                     bob = object{{"name"s, "Bob"s}, {"status"s, "deleted"s}},
                     charlie = object{{"name"s, "Charlie"s}, {"status"s, "active"s}};
-                require_true(engine.create(alice).has_value());
-                require_true(engine.create(bob).has_value());
-                require_true(engine.create(charlie).has_value());
+                require_true(engine.create("users"s, alice).has_value());
+                require_true(engine.create("users"s, bob).has_value());
+                require_true(engine.create("users"s, charlie).has_value());
 
                 const auto parsed = parse_filter("status ne 'deleted'"sv);
-                const auto count = count_with_parsed_filter(engine, object{}, parsed);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
 
                 then("Falls back to scan count via engine.count") = [count]
                 {
@@ -950,24 +943,22 @@ auto register_odata_tests()
                     auto engine = yar::db::engine{test_file};
                     
                     // Create collection with various field types
-                    engine.collection("users"s);
-                    auto user_doc = xson::object{
+                                        auto user_doc = xson::object{
                         {"_id"s, 1ll},
                         {"name"s, "John"s},
                         {"age"s, 30ll},
                         {"salary"s, 50000.5},
                         {"active"s, true}
                     };
-                    require_true(engine.create(user_doc).has_value());
+                    require_true(engine.create("users"s, user_doc).has_value());
                     
                     // Create another collection
-                    engine.collection("orders"s);
-                    auto order_doc = xson::object{
+                                        auto order_doc = xson::object{
                         {"_id"s, 1ll},
                         {"userId"s, 1ll},
                         {"total"s, 99.99}
                     };
-                    require_true(engine.create(order_doc).has_value());
+                    require_true(engine.create("orders"s, order_doc).has_value());
                     
                     // Generate metadata (no locking needed in single-threaded test)
                     auto metadata = yar::http::odata::generate_metadata(engine);

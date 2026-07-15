@@ -1,5 +1,6 @@
 export module yar:engine;
 export import :db_error;
+import :metadata;
 import :index;
 import std;
 import xson;
@@ -8,180 +9,98 @@ export namespace yar::db {
 
 using object = xson::object;
 
-// Database engine providing CRUD operations and indexing capabilities
-// Thread-safe when used through ext::lockable wrapper
+struct write_preconditions
+{
+    std::optional<position_type> if_match_position;
+    std::optional<std::chrono::system_clock::time_point> if_unmodified_since;
+};
+
+// Database engine providing CRUD operations and indexing capabilities.
+// Read operations use shared locking; writes use exclusive locking.
 class engine
 {
 public:
 
-    // Construct engine and open/create database file
-    // @param db Path to database file (default: "./yar.db")
-    // @throws std::runtime_error if database cannot be opened or created
     engine(std::string_view db = "./yar.db"s);
-
-    // Move constructor
     engine(engine&&);
-
-    // Destructor - closes database and releases lock file
     ~engine();
 
 //  Indexing
 
-    // Add secondary index keys for the current collection
-    // Creates index metadata in _db collection and enables querying by these keys
-    // @param keys Vector of field names to index
-    db_result<> index(std::vector<std::string> keys);
-
-    // Rebuild all indexes by scanning the entire database
-    // Called automatically on startup (twice: first to discover schema, second to build indexes)
-    // Can be called at runtime after adding new secondary keys to index existing documents
+    db_result<> index(std::string_view collection, std::vector<std::string> keys);
     db_result<> reindex();
-
-    // Secondary index field names for the current collection
-    // @return Indexed field names (empty if none)
-    std::vector<std::string> indexed_keys() const;
+    std::vector<std::string> indexed_keys(std::string_view collection) const;
 
 //  CRUD
 
-    // Create a new document in the current collection
-    // Automatically assigns _id if not present
-    // @param document Document to create (may be modified to add _id)
-    // @return Success or an explicit storage error
-    db_result<> create(object& document);
+    db_result<> create(std::string_view collection, object& document);
+    bool read(std::string_view collection, const object& selector, object& documents);
+    std::size_t count(std::string_view collection, const object& selector) const;
+    std::optional<std::chrono::system_clock::time_point> metadata_timestamp(std::string_view collection, const object& selector) const;
+    std::optional<std::int64_t> metadata_position(std::string_view collection, const object& selector) const;
 
-    // Read documents matching the selector from the current collection
-    // Supports OData query parameters: $top, $skip, $filter, $orderby, $select
-    // @param selector Query selector (can include OData parameters)
-    // @param documents Output array of matching documents
-    // @return true if any documents found, false otherwise
-    bool read(const object& selector, object& documents);
+    db_result<std::size_t> update(
+        std::string_view collection,
+        const object& selector,
+        const object& updates,
+        object& documents,
+        write_preconditions preconditions = {});
 
-    // Count documents matching the selector (index-only when possible)
-    // @param selector Query selector (ignores $top, $skip, $desc)
-    // @return Number of matching documents in the current collection
-    std::size_t count(const object& selector) const;
-    
-    // Get metadata timestamp for the first document matching the selector
-    // Used for Last-Modified HTTP header generation
-    // @param selector Query selector to find document
-    // @return Timestamp if document found, std::nullopt otherwise
-    std::optional<std::chrono::system_clock::time_point> metadata_timestamp(const object& selector) const;
-    
-    // Get metadata position for the first document matching the selector
-    // Used for ETag HTTP header generation
-    // @param selector Query selector to find document
-    // @return Position if document found, std::nullopt otherwise
-    std::optional<std::int64_t> metadata_position(const object& selector) const;
+    db_result<std::size_t> destroy(
+        std::string_view collection,
+        const object& selector,
+        object& documents,
+        write_preconditions preconditions = {});
 
-    // Update documents matching the selector
-    // Merges updates with existing document fields (existing fields preserved unless overridden)
-    // Old document is marked as updated, new version appended to storage
-    // @param selector Query selector to find documents to update
-    // @param updates Fields to update/add (merged with existing document)
-    // @param documents Output array of updated documents
-    // @return Number of updated documents or an explicit storage error
-    db_result<std::size_t> update(const object& selector, const object& updates, object& documents);
+    bool history(std::string_view collection, const object& selector, object& documents);
 
-    // Delete documents matching the selector
-    // Documents are marked as deleted but remain in storage for history tracking
-    // @param selector Query selector to find documents to delete
-    // @param documents Output array of deleted documents
-    // @return Number of deleted documents or an explicit storage error
-    db_result<std::size_t> destroy(const object& selector, object& documents);
-
-//  Chain of updates
-
-    // Get version history for documents matching the selector
-    // Traverses metadata.previous chain to collect all versions (created, updated, deleted)
-    // @param selector Query selector to find documents
-    // @param documents Output array of all document versions in reverse chronological order
-    // @return true if any documents found, false otherwise
-    bool history(const object& selector, object& documents);
-
-//  For convenience
-
-    // Upsert: update if exists, create if not
-    // @param selector Query selector to find existing document
-    // @param updates Document fields (used for update or create)
-    // @param documents Output array of updated/created documents
-    // @return Number of updated or created documents, or an explicit storage error
-    db_result<std::size_t> upsert(const object& selector, object& updates, object& documents)
+    db_result<std::size_t> upsert(std::string_view collection, const object& selector, object& updates, object& documents)
     {
-        auto result = update(selector, updates, documents);
+        auto result = update(collection, selector, updates, documents);
         if(not result)
             return std::unexpected{result.error()};
         if(*result > 0)
             return result;
 
-        auto created = create(updates);
+        auto created = create(collection, updates);
         if(not created)
             return std::unexpected{created.error()};
         documents += updates;
         return 1;
     }
 
-    // Upsert: update if exists, create if not (without returning documents)
-    // @param selector Query selector to find existing document
-    // @param updates Document fields (used for update or create)
-    // @return Number of updated or created documents, or an explicit storage error
-    db_result<std::size_t> upsert(const object& selector, object& updates)
+    db_result<std::size_t> upsert(std::string_view collection, const object& selector, object& updates)
     {
         auto documents = object{};
-        return upsert(selector, updates, documents);
+        return upsert(collection, selector, updates, documents);
     }
 
-    // Replace: delete existing document and create new one with same _id
-    // Only replaces if document exists (does not create if not found)
-    // @param selector Query selector to find document to replace
-    // @param document New document to create (will have same _id as replaced document)
-    // @return Number of replaced documents or an explicit storage error
-    db_result<std::size_t> replace(const object& selector, object& document);
+    db_result<std::size_t> replace(
+        std::string_view collection,
+        const object& selector,
+        object& document,
+        write_preconditions preconditions = {});
 
-    // Update documents matching the selector (without returning documents)
-    // @param selector Query selector to find documents to update
-    // @param updates Fields to update/add
-    // @return Number of updated documents or an explicit storage error
-    db_result<std::size_t> update(const object& selector, const object& updates)
+    db_result<std::size_t> update(std::string_view collection, const object& selector, const object& updates)
     {
         auto documents = object{};
-        return update(selector, updates, documents);
+        return update(collection, selector, updates, documents);
     }
 
-    // Delete documents matching the selector (without returning documents)
-    // @param selector Query selector to find documents to delete
-    // @return Number of deleted documents or an explicit storage error
-    db_result<std::size_t> destroy(const object& selector)
+    db_result<std::size_t> destroy(std::string_view collection, const object& selector)
     {
         auto documents = object{};
-        return destroy(selector, documents);
+        return destroy(collection, selector, documents);
     }
 
-//  Getters & setters
-
-    // Get current collection name
-    // @return Current collection name
-    const auto& collection() const
-    {
-        return m_collection;
-    };
-
-    // Set current collection name
-    // All CRUD operations operate on the current collection
-    // @param in_use Collection name to switch to
-    void collection(std::string_view in_use)
-    {
-        m_collection = in_use;
-    }
-
-    // Get list of all collection names in the database
-    // @return Vector of collection names
     auto collections() const
     {
+        auto lock = std::shared_lock{m_rwlock};
         auto documents = std::vector<std::string>{};
         for(const auto& entry : m_index)
             documents.push_back(entry.first);
         return documents;
-    };
+    }
 
 private:
 
@@ -247,27 +166,32 @@ private:
     friend void fail_next_write(engine&);
     friend void fail_write(engine&, std::size_t);
 
+    [[nodiscard]] std::ifstream open_reader() const;
     bool consume_write_failure();
+    bool preconditions_met(const yar::db::metadata& metadata_record, const write_preconditions& preconditions) const;
 
-    // First pass: Set up index structure by discovering secondary keys from _db collection
-    // and updating sequence counters for all documents
     void setup_index_structure();
-
-    // Second pass: Populate indexes with document positions
     void populate_indexes();
 
+    db_result<> create_impl(std::string_view collection, object& document);
+    db_result<std::size_t> update_impl(
+        std::string_view collection,
+        const object& selector,
+        const object& updates,
+        object& documents,
+        write_preconditions preconditions);
+    db_result<std::size_t> upsert_impl(
+        std::string_view collection,
+        const object& selector,
+        object& updates,
+        object& documents);
+
     std::string m_db;
-
     storage_lock m_lock;
-
-    std::string m_collection;
-
     std::flat_map<std::string, yar::db::index> m_index;
-
-    mutable std::fstream m_storage;
-
+    std::fstream m_storage;
+    mutable std::shared_mutex m_rwlock;
     std::size_t m_writes_until_failure = 0;
-
     bool m_writable = true;
 };
 

@@ -101,15 +101,11 @@ inline auto parse_comma_separated_list(std::string_view list_value)
 struct handler_context {
     const ::http::uri uri;
     const std::string collection;
-    std::lock_guard<utils::lockable<yar::db::engine>> guard;
-    
-    handler_context(std::string_view request, utils::lockable<yar::db::engine>& engine)
+
+    handler_context(std::string_view request, yar::db::engine&)
         : uri{request}
         , collection{validate_collection_name(uri.path[1])}
-        , guard{engine}
-    {
-        engine.collection(collection);
-    }
+    {}
 };
 
 
@@ -137,6 +133,48 @@ inline ::http::response_with_headers make_error_response_with_headers(const std:
 inline auto make_error_response_simple(const std::string& status, const std::string& error_type, const std::string& message)
 {
     return make_error_response<std::tuple<std::string, std::string>>(status, error_type, message);
+}
+
+// Build engine write preconditions from conditional HTTP headers.
+inline auto write_preconditions_from_headers(const ::http::headers& headers) -> yar::db::write_preconditions
+{
+    using namespace std::string_literals;
+    auto pre = yar::db::write_preconditions{};
+
+    if(headers.contains("if-match"s))
+    {
+        const auto& value = headers["if-match"s];
+        if(value != "*")
+        {
+            auto etag = value;
+            if(not etag.empty() && etag.front() == '"')
+                etag.erase(0, 1);
+            if(not etag.empty() && etag.back() == '"')
+                etag.pop_back();
+            try
+            {
+                pre.if_match_position = utils::stoll(etag);
+            }
+            catch(const std::exception&)
+            {
+                pre.if_match_position = -1;
+            }
+        }
+    }
+
+    if(headers.contains("if-unmodified-since"s))
+    {
+        try
+        {
+            pre.if_unmodified_since = utils::parse_rfc1123_date(headers["if-unmodified-since"s]);
+        }
+        catch(const std::exception&)
+        {
+            pre.if_unmodified_since = std::chrono::system_clock::time_point::min();
+        }
+    }
+
+    return pre;
 }
 
 // Generate ETag from metadata position

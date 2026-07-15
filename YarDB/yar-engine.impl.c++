@@ -110,12 +110,15 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
             "Failed to recover truncated database tail at offset "s + std::to_string(last_complete)};
 }
 
-// Helper template to extract metadata value from first matching document
 template<typename T, typename Extractor>
-auto metadata_value(std::fstream& storage, const yar::db::index_view& view, const yar::db::object& selector, Extractor extractor) -> std::optional<T>
+auto metadata_value(
+    std::istream& storage,
+    const yar::db::index_view& view,
+    const yar::db::object& selector,
+    Extractor extractor) -> std::optional<T>
 {
     using xson::fson::operator >>;
-    
+
     for(const auto position : view)
     {
         auto metadata = yar::db::metadata{};
@@ -124,12 +127,27 @@ auto metadata_value(std::fstream& storage, const yar::db::index_view& view, cons
         storage.seekg(position, storage.beg);
         storage >> metadata >> document;
         if(document.match(selector))
-        {
             return extractor(metadata);
-        }
     }
-    
-    return std::nullopt; // No matching document found
+
+    return std::nullopt;
+}
+
+const yar::db::index* find_index(
+    const std::flat_map<std::string, yar::db::index>& indexes,
+    std::string_view collection)
+{
+    const auto it = indexes.find(std::string{collection});
+    if(it == indexes.end())
+        return nullptr;
+    return std::addressof(it->second);
+}
+
+yar::db::index* find_index(
+    std::flat_map<std::string, yar::db::index>& indexes,
+    std::string_view collection)
+{
+    return std::addressof(indexes[std::string{collection}]);
 }
 
 } // namespace
@@ -137,7 +155,6 @@ auto metadata_value(std::fstream& storage, const yar::db::index_view& view, cons
 yar::db::engine::engine(std::string_view db) :
     m_db{db},
     m_lock{m_db},
-    m_collection{"_db"s},
     m_index{},
     m_storage{}
 {
@@ -154,7 +171,6 @@ yar::db::engine::engine(std::string_view db) :
 yar::db::engine::engine(yar::db::engine&& e) :
     m_db{std::move(e.m_db)},
     m_lock{std::move(e.m_lock)},
-    m_collection{std::move(e.m_collection)},
     m_index{std::move(e.m_index)},
     m_storage{std::move(e.m_storage)},
     m_writes_until_failure{std::exchange(e.m_writes_until_failure, 0)},
@@ -162,6 +178,34 @@ yar::db::engine::engine(yar::db::engine&& e) :
 {}
 
 yar::db::engine::~engine() = default;
+
+std::ifstream yar::db::engine::open_reader() const
+{
+    auto reader = std::ifstream{m_db, std::ios::in | std::ios::binary};
+    if(not reader.is_open())
+        throw std::runtime_error{"Failed to open database for reading: "s + m_db};
+    return reader;
+}
+
+bool yar::db::engine::preconditions_met(
+    const metadata& metadata_record,
+    const write_preconditions& preconditions) const
+{
+    if(preconditions.if_match_position
+        && metadata_record.position != *preconditions.if_match_position)
+        return false;
+
+    if(preconditions.if_unmodified_since)
+    {
+        using namespace std::chrono;
+        const auto document_seconds = floor<seconds>(metadata_record.timestamp);
+        const auto client_seconds = floor<seconds>(*preconditions.if_unmodified_since);
+        if(document_seconds > client_seconds)
+            return false;
+    }
+
+    return true;
+}
 
 void yar::db::fail_next_write(yar::db::engine& engine)
 {
@@ -180,8 +224,6 @@ bool yar::db::engine::consume_write_failure()
     return --m_writes_until_failure == 0;
 }
 
-// First pass: Set up index structure by discovering secondary keys from _db collection
-// and updating sequence counters for all documents
 void yar::db::engine::setup_index_structure()
 {
     using xson::fson::operator >>;
@@ -198,10 +240,8 @@ void yar::db::engine::setup_index_structure()
         if(m_storage.fail())
             break;
 
-        // Update sequence counter for all documents
         m_index[metadata.collection].update(document);
 
-        // Process _db collection documents to set up secondary keys for other collections
         if(metadata.collection == "_db"s)
         {
             const auto collection_name = static_cast<std::string>(document["collection"s]);
@@ -215,7 +255,6 @@ void yar::db::engine::setup_index_structure()
     }
 }
 
-// Second pass: Populate indexes with document positions
 void yar::db::engine::populate_indexes()
 {
     using xson::fson::operator >>;
@@ -232,7 +271,6 @@ void yar::db::engine::populate_indexes()
         if(m_storage.fail())
             break;
 
-        // Skip deleted or updated documents (they're not in the current index)
         if(metadata.status == metadata::deleted || metadata.status == metadata::updated)
             continue;
 
@@ -244,6 +282,8 @@ void yar::db::engine::populate_indexes()
 yar::db::db_result<> yar::db::engine::reindex()
 {
     using xson::fson::operator >>;
+
+    auto lock = std::unique_lock{m_rwlock};
 
     if(not m_writable)
         return std::unexpected{db_error(
@@ -281,16 +321,19 @@ yar::db::db_result<> yar::db::engine::reindex()
     return {};
 }
 
-std::vector<std::string> yar::db::engine::indexed_keys() const
+std::vector<std::string> yar::db::engine::indexed_keys(std::string_view collection) const
 {
-    const auto it = m_index.find(m_collection);
-    if(it == m_index.end())
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
         return {};
-    return it->second.keys();
+    return index->keys();
 }
 
-yar::db::db_result<> yar::db::engine::index(std::vector<std::string> keys)
+yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::vector<std::string> keys)
 {
+    auto lock = std::unique_lock{m_rwlock};
+
     if(not m_writable)
         return std::unexpected{db_error(
             db_error_code::rollback_failure,
@@ -298,14 +341,12 @@ yar::db::db_result<> yar::db::engine::index(std::vector<std::string> keys)
             "Database writes are disabled after an unsuccessful rollback"s)};
 
     auto original = m_index;
-    auto& current_index = m_index[m_collection];
+    auto& current_index = m_index[std::string{collection}];
     current_index.add(keys);
-    auto selector = yar::db::object{"collection"s, m_collection};
+    auto selector = yar::db::object{"collection"s, std::string{collection}};
     auto document = yar::db::object{selector, {"keys"s, current_index.keys()}};
-    const auto collection = m_collection;
-    m_collection = "_db"s;
-    auto result = upsert(selector, document);
-    m_collection = collection;
+    auto documents = yar::db::object{};
+    auto result = upsert_impl("_db"s, selector, document, documents);
     if(not result)
     {
         m_index = std::move(original);
@@ -315,9 +356,15 @@ yar::db::db_result<> yar::db::engine::index(std::vector<std::string> keys)
             result.error().message)};
     }
     return {};
-};
+}
 
-yar::db::db_result<> yar::db::engine::create(yar::db::object& document)
+yar::db::db_result<> yar::db::engine::create(std::string_view collection, yar::db::object& document)
+{
+    auto lock = std::unique_lock{m_rwlock};
+    return create_impl(collection, document);
+}
+
+yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, yar::db::object& document)
 {
     using xson::fson::operator <<;
 
@@ -336,8 +383,8 @@ yar::db::db_result<> yar::db::engine::create(yar::db::object& document)
             "Failed to determine database size: "s + file_size_error.message())};
 
     auto staged = m_index;
-    auto& index = staged[m_collection];
-    auto metadata = yar::db::metadata{m_collection};
+    auto& index = staged[std::string{collection}];
+    auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     index.update(document);
@@ -360,26 +407,31 @@ yar::db::db_result<> yar::db::engine::create(yar::db::object& document)
             db_operation::create,
             "Failed to append and flush the new document"s)};
     }
-    
-    // Insert into index using the position that was set by metadata operator<<
-    // (which is the start position of the metadata record where data is written)
+
     index.insert(document, metadata.position);
     m_index = std::move(staged);
     return {};
 }
 
-std::size_t yar::db::engine::count(const yar::db::object& selector) const
+std::size_t yar::db::engine::count(std::string_view collection, const yar::db::object& selector) const
 {
-    const auto it = m_index.find(m_collection);
-    if(it == m_index.end())
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
         return 0;
 
-    return it->second.count(m_storage, selector);
+    auto reader = open_reader();
+    return index->count(reader, selector);
 }
 
-bool yar::db::engine::read(const yar::db::object& selector, yar::db::object& documents)
+bool yar::db::engine::read(std::string_view collection, const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;
+
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
+        return false;
 
     documents = yar::db::object{yar::db::object::array{}};
     auto top = std::numeric_limits<yar::db::sequence_type>::max();
@@ -391,18 +443,17 @@ bool yar::db::engine::read(const yar::db::object& selector, yar::db::object& doc
         skip = selector["$skip"s];
 
     auto success = false;
-    const auto& index = m_index[m_collection];
+    auto reader = open_reader();
 
-    for(const auto position : index.view(selector))
+    for(const auto position : index->view(selector))
     {
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};
-        m_storage.clear();
-        m_storage.seekg(position, m_storage.beg);
-        m_storage >> metadata >> document;
+        reader.clear();
+        reader.seekg(position, reader.beg);
+        reader >> metadata >> document;
         if(document.match(selector))
         {
-            // Skip the first N matching documents
             if(skip > 0)
             {
                 --skip;
@@ -411,37 +462,59 @@ bool yar::db::engine::read(const yar::db::object& selector, yar::db::object& doc
 
             documents += std::move(document);
             success = true;
-            if(--top == 0) break;
+            if(--top == 0)
+                break;
         }
     }
 
     return success;
 }
 
-std::optional<std::chrono::system_clock::time_point> yar::db::engine::metadata_timestamp(const yar::db::object& selector) const
+std::optional<std::chrono::system_clock::time_point> yar::db::engine::metadata_timestamp(
+    std::string_view collection,
+    const yar::db::object& selector) const
 {
-    const auto it = m_index.find(m_collection);
-    if(it == m_index.end())
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
         return std::nullopt;
-    const auto& index = it->second;
+
+    auto reader = open_reader();
     return metadata_value<std::chrono::system_clock::time_point>(
-        m_storage, index.view(selector), selector, [](const yar::db::metadata& m) { return m.timestamp; });
+        reader, index->view(selector), selector, [](const yar::db::metadata& m) { return m.timestamp; });
 }
 
-std::optional<std::int64_t> yar::db::engine::metadata_position(const yar::db::object& selector) const
+std::optional<std::int64_t> yar::db::engine::metadata_position(
+    std::string_view collection,
+    const yar::db::object& selector) const
 {
-    const auto it = m_index.find(m_collection);
-    if(it == m_index.end())
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
         return std::nullopt;
-    const auto& index = it->second;
+
+    auto reader = open_reader();
     return metadata_value<std::int64_t>(
-        m_storage, index.view(selector), selector, [](const yar::db::metadata& m) { return m.position; });
+        reader, index->view(selector), selector, [](const yar::db::metadata& m) { return m.position; });
 }
 
 yar::db::db_result<std::size_t> yar::db::engine::update(
+    std::string_view collection,
     const yar::db::object& selector,
     const yar::db::object& updates,
-    yar::db::object& documents)
+    yar::db::object& documents,
+    write_preconditions preconditions)
+{
+    auto lock = std::unique_lock{m_rwlock};
+    return update_impl(collection, selector, updates, documents, preconditions);
+}
+
+yar::db::db_result<std::size_t> yar::db::engine::update_impl(
+    std::string_view collection,
+    const yar::db::object& selector,
+    const yar::db::object& updates,
+    yar::db::object& documents,
+    write_preconditions preconditions)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
@@ -461,9 +534,11 @@ yar::db::db_result<std::size_t> yar::db::engine::update(
         object new_document;
     };
     auto pending = std::vector<pending_update>{};
-    const auto& index = m_index[m_collection];
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
+        return 0;
 
-    for(const auto position : index.view(selector))
+    for(const auto position : index->view(selector))
     {
         auto metadata = yar::db::metadata{};
         auto old_document = yar::db::object{};
@@ -477,6 +552,12 @@ yar::db::db_result<std::size_t> yar::db::engine::update(
                 "Failed to read a document selected for update"s)};
         if(old_document.match(selector))
         {
+            if(not preconditions_met(metadata, preconditions))
+                return std::unexpected{db_error(
+                    db_error_code::precondition_failed,
+                    db_operation::update,
+                    "Write preconditions were not met"s)};
+
             auto new_document = old_document;
             new_document += updates;
             pending.push_back({position, metadata, std::move(old_document), std::move(new_document)});
@@ -495,7 +576,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update(
             "Failed to determine database size: "s + file_size_error.message())};
 
     auto staged = m_index;
-    auto& staged_index = staged[m_collection];
+    auto& staged_index = staged[std::string{collection}];
     for(auto& entry : pending)
     {
         staged_index.erase(entry.old_document);
@@ -559,11 +640,15 @@ yar::db::db_result<std::size_t> yar::db::engine::update(
 }
 
 yar::db::db_result<std::size_t> yar::db::engine::destroy(
+    std::string_view collection,
     const yar::db::object& selector,
-    yar::db::object& documents)
+    yar::db::object& documents,
+    write_preconditions preconditions)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
+
+    auto lock = std::unique_lock{m_rwlock};
 
     if(not m_writable)
         return std::unexpected{db_error(
@@ -577,9 +662,11 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
         top = selector["$top"s];
 
     auto positions = std::vector<position_type>{};
-    const auto& index = m_index[m_collection];
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
+        return 0;
 
-    for(const auto position : index.view(selector))
+    for(const auto position : index->view(selector))
     {
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};
@@ -593,10 +680,17 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
                 "Failed to read a document selected for deletion"s)};
         if(document.match(selector))
         {
+            if(not preconditions_met(metadata, preconditions))
+                return std::unexpected{db_error(
+                    db_error_code::precondition_failed,
+                    db_operation::destroy,
+                    "Write preconditions were not met"s)};
+
             documents += std::move(document);
             positions.push_back(position);
 
-            if(--top == 0) break;
+            if(--top == 0)
+                break;
         }
     }
 
@@ -612,7 +706,7 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
             "Failed to determine database size: "s + file_size_error.message())};
 
     auto staged = m_index;
-    auto& staged_index = staged[m_collection];
+    auto& staged_index = staged[std::string{collection}];
     for(const auto& document : documents.get<yar::db::object::array>())
         staged_index.erase(document);
 
@@ -646,11 +740,15 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
 }
 
 yar::db::db_result<std::size_t> yar::db::engine::replace(
+    std::string_view collection,
     const yar::db::object& selector,
-    yar::db::object& document)
+    yar::db::object& document,
+    write_preconditions preconditions)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
+
+    auto lock = std::unique_lock{m_rwlock};
 
     if(not m_writable)
         return std::unexpected{db_error(
@@ -660,8 +758,11 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
 
     auto positions = std::vector<position_type>{};
     auto old_documents = std::vector<object>{};
-    const auto& index = m_index[m_collection];
-    for(const auto position : index.view(selector))
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
+        return 0;
+
+    for(const auto position : index->view(selector))
     {
         auto metadata = yar::db::metadata{};
         auto old_document = yar::db::object{};
@@ -675,6 +776,12 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
                 "Failed to read a document selected for replacement"s)};
         if(old_document.match(selector))
         {
+            if(not preconditions_met(metadata, preconditions))
+                return std::unexpected{db_error(
+                    db_error_code::precondition_failed,
+                    db_operation::replace,
+                    "Write preconditions were not met"s)};
+
             positions.push_back(position);
             old_documents.push_back(std::move(old_document));
         }
@@ -692,12 +799,12 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
             "Failed to determine database size: "s + file_size_error.message())};
 
     auto staged = m_index;
-    auto& staged_index = staged[m_collection];
+    auto& staged_index = staged[std::string{collection}];
     for(const auto& old_document : old_documents)
         staged_index.erase(old_document);
     staged_index.update(document);
 
-    auto metadata = yar::db::metadata{m_collection};
+    auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     m_storage << metadata << document;
@@ -750,26 +857,50 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     return positions.size();
 }
 
-bool yar::db::engine::history(const yar::db::object& selector, yar::db::object& documents)
+bool yar::db::engine::history(std::string_view collection, const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;
 
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
+        return false;
+
     documents = yar::db::object{yar::db::object::array{}};
     auto success = false;
-    const auto& index = m_index[m_collection];
+    auto reader = open_reader();
 
-    for(auto position : index.view(selector))
+    for(auto position : index->view(selector))
         while(position >= 0)
         {
             auto metadata = yar::db::metadata{};
             auto document = yar::db::object{};
-            m_storage.clear();
-            m_storage.seekg(position, m_storage.beg);
-            m_storage >> metadata >> document;
+            reader.clear();
+            reader.seekg(position, reader.beg);
+            reader >> metadata >> document;
             position = metadata.previous;
             documents += std::move(document);
             success = true;
         }
 
     return success;
+}
+
+yar::db::db_result<std::size_t> yar::db::engine::upsert_impl(
+    std::string_view collection,
+    const object& selector,
+    object& updates,
+    object& documents)
+{
+    auto result = update_impl(collection, selector, updates, documents, {});
+    if(not result)
+        return std::unexpected{result.error()};
+    if(*result > 0)
+        return result;
+
+    auto created = create_impl(collection, updates);
+    if(not created)
+        return std::unexpected{created.error()};
+    documents += updates;
+    return 1;
 }

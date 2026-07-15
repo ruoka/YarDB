@@ -36,6 +36,18 @@ using middleware_factory = ::http::middleware_factory;
 
 inline auto database_error_response(const yar::db::db_error& error)
 {
+    if(error.code == yar::db::db_error_code::precondition_failed)
+    {
+        auto body = xson::object{
+            {"error", "Precondition Failed"s},
+            {"message", error.message}
+        };
+        return response_with_headers{
+            status_precondition_failed,
+            xson::json::stringify(body),
+            std::optional<::http::headers>{}};
+    }
+
     auto body = xson::object{
         {"error", "Internal Server Error"s},
         {"message", error.message}
@@ -442,7 +454,7 @@ private:
             
             const auto ctx = handler_context{request, m_engine};
             auto document = xson::json::parse(body);
-            const auto created = m_engine.create(document);
+            const auto created = m_engine.create(ctx.collection, document);
             if(not created)
                 return database_error_response(created.error());
             
@@ -467,7 +479,6 @@ private:
         // List all collections - Refactored to use middleware pattern
         auto list_collections_handler = [this]([[maybe_unused]] ::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
         {
-            const auto guard = std::lock_guard{m_engine};
             auto response = xson::object{"collections", m_engine.collections()};
 
             // Add OData metadata if requested
@@ -511,7 +522,6 @@ private:
                                        [[maybe_unused]] ::http::body_view body, 
                                        [[maybe_unused]] ::http::headers& headers)
         {
-            const auto guard = std::lock_guard{m_engine};
             
             // Generate metadata from existing collections
             auto metadata = yar::http::odata::generate_metadata(m_engine);
@@ -545,7 +555,7 @@ private:
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
 
-            const auto found = m_engine.read(selector, documents);
+            const auto found = m_engine.read(ctx.collection, selector, documents);
 
             // Check if document was found
             if(!found || documents.get<xson::object::array>().empty())
@@ -567,8 +577,8 @@ private:
             
             // Get actual document modification time and position from metadata
             auto response_headers = ::http::headers{};
-            auto metadata_timestamp = m_engine.metadata_timestamp(selector);
-            auto metadata_position = m_engine.metadata_position(selector);
+            auto metadata_timestamp = m_engine.metadata_timestamp(ctx.collection, selector);
+            auto metadata_position = m_engine.metadata_position(ctx.collection, selector);
             
             // Generate ETag from position
             if(metadata_position.has_value())
@@ -629,20 +639,16 @@ private:
             {
                 // Build selector for counting (without $top/$skip to get full count)
                 auto count_selector = xson::object{};
-                
-                const auto guard = std::lock_guard{m_engine};
                 const auto collection_name = validate_collection_name(uri.path[1]);
-                m_engine.collection(collection_name);
-
                 const auto count = [&]() -> std::size_t
                 {
                     if(params.contains("$filter"s))
                     {
                         const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
-                        return yar::http::odata::count_with_parsed_filter(m_engine, count_selector, parsed_filter);
+                        return yar::http::odata::count_with_parsed_filter(m_engine, collection_name, count_selector, parsed_filter);
                     }
 
-                    return m_engine.count(count_selector);
+                    return m_engine.count(collection_name, count_selector);
                 }();
                 
                 // Return count as JSON number (OData spec: $count=true returns just the number)
@@ -710,19 +716,15 @@ private:
                     return response_with_headers{status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{}};
                 }
             }
-            
-            const auto guard = std::lock_guard{m_engine};
             const auto collection_name = validate_collection_name(uri.path[1]);
-            m_engine.collection(collection_name);
-
             if(params.contains("$filter"s))
             {
                 const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
-                document = yar::http::odata::read_with_parsed_filter(m_engine, selector, parsed_filter);
+                document = yar::http::odata::read_with_parsed_filter(m_engine, collection_name, selector, parsed_filter);
             }
             else
             {
-                m_engine.read(selector, document);
+                m_engine.read(collection_name, selector, document);
             }
             
             // Post-process: Apply $select projection (result transformation)
@@ -849,13 +851,8 @@ private:
             // Extract collection name from path (e.g., /_db/users -> users)
             const auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
             
-            const auto guard = std::lock_guard{m_engine};
-            
             // Switch to target collection
-            m_engine.collection(collection_name);
-            
-            // Add keys to index (this updates the index structure)
-            const auto indexed = m_engine.index(keys);
+            const auto indexed = m_engine.index(collection_name, keys);
             if(not indexed)
                 return database_error_response(indexed.error());
             
@@ -867,9 +864,7 @@ private:
             // Get the updated _db document to return
             auto selector = xson::object{"collection"s, collection_name};
             auto db_documents = xson::object{};
-            m_engine.collection("_db"s); // Switch to _db collection
-            auto found = m_engine.read(selector, db_documents);
-            m_engine.collection(collection_name); // Restore original collection
+            auto found = m_engine.read("_db"s, selector, db_documents);
             
             if(!found || db_documents.get<xson::object::array>().empty())
             {
@@ -955,13 +950,10 @@ private:
             // Extract collection name from path
             const auto collection_name = validate_collection_name(uri.path[2]);
             
-            const auto guard = std::lock_guard{m_engine};
-            
             // Get existing keys from _db collection (if any)
             auto selector = xson::object{"collection"s, collection_name};
             auto existing_docs = xson::object{};
-            m_engine.collection("_db"s);
-            auto has_existing = m_engine.read(selector, existing_docs);
+            auto has_existing = m_engine.read("_db"s, selector, existing_docs);
             
             // Build set of existing keys to avoid duplicates
             auto existing_keys_set = std::set<std::string>{};
@@ -1053,10 +1045,7 @@ private:
             }
             
             // Switch to target collection
-            m_engine.collection(collection_name);
-            
-            // Add new keys to index (this merges with existing)
-            const auto indexed = m_engine.index(new_keys);
+            const auto indexed = m_engine.index(collection_name, new_keys);
             if(not indexed)
                 return database_error_response(indexed.error());
             
@@ -1066,10 +1055,8 @@ private:
                 return database_error_response(reindexed.error());
             
             // Get the updated _db document to return
-            m_engine.collection("_db"s);
             auto db_documents = xson::object{};
-            auto found = m_engine.read(selector, db_documents);
-            m_engine.collection(collection_name); // Restore original collection
+            auto found = m_engine.read("_db"s, selector, db_documents);
             
             if(!found || db_documents.get<xson::object::array>().empty())
             {
@@ -1126,101 +1113,52 @@ private:
             
             const auto selector = xson::object{"_id", id};
             auto existing_docs = xson::object{};
-
-            const auto guard = std::lock_guard{m_engine};
             const auto collection = validate_collection_name(uri.path[1]);
-            m_engine.collection(collection);
-            
-            // Check if document exists
-            const auto exists = m_engine.read(selector, existing_docs);
+            const auto exists = m_engine.read(collection, selector, existing_docs);
             auto response_headers = ::http::headers{};
             const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
-            
-            // Check conditional requests (only if document exists)
+            const auto preconditions = write_preconditions_from_headers(headers);
+
             if(exists && !existing_docs.get<xson::object::array>().empty())
             {
-                // Check If-Match header (ETag-based)
-                auto metadata_position = m_engine.metadata_position(selector);
-                if(metadata_position.has_value())
+                auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+                if(metadata_level != yar::http::odata::metadata_level::none)
+                    document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
+
+                const auto replaced = m_engine.replace(collection, selector, document, preconditions);
+                if(not replaced)
+                    return database_error_response(replaced.error());
+
+                auto new_metadata_position = m_engine.metadata_position(collection, selector);
+                if(new_metadata_position.has_value())
                 {
-                    auto current_etag = generate_etag(metadata_position.value());
-                    auto match_check = check_if_match(headers, current_etag);
-                    if(match_check.has_value() && !match_check.value())
-                    {
-                        // Precondition failed - ETag doesn't match
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "ETag does not match current resource version"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
-                        return response_with_headers{status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{}};
-                    }
+                    auto new_etag = generate_etag(new_metadata_position.value());
+                    response_headers.set("etag"s, new_etag);
                 }
-                
-                // Check If-Unmodified-Since conditional request
-                auto metadata_timestamp = m_engine.metadata_timestamp(selector);
-                if(metadata_timestamp.has_value())
-                {
-                    auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
-                    if(unmodified_check.has_value() && !unmodified_check.value())
-                    {
-                        // Precondition failed - document was modified since client's date
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "Document has been modified since the specified date"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
-                        return response_with_headers{status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{}};
-                    }
-                }
+
+                response_headers.set("content-location"s, resource_path);
+                return response_with_headers{::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers)};
             }
-            
+
             // Add OData metadata if requested
             auto metadata_level = yar::http::odata::parse_metadata_level(headers);
             if(metadata_level != yar::http::odata::metadata_level::none)
                 document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
-            
-            if(exists && !existing_docs.get<xson::object::array>().empty())
-            {
-                // Document exists - replace it
-                const auto replaced = m_engine.replace(selector, document);
-                if(not replaced)
-                    return database_error_response(replaced.error());
-                
-                // Get new ETag after update
-                auto new_metadata_position = m_engine.metadata_position(selector);
-                if(new_metadata_position.has_value())
-                {
-                    auto new_etag = generate_etag(new_metadata_position.value());
-                    response_headers.set("etag"s, new_etag);
-                }
-                
-                // Add Content-Location header for updated resource
-                response_headers.set("content-location"s, resource_path);
-                
-                // Return 200 OK for update
-                return response_with_headers{::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers)};
-            }
-            else
+
             {
                 // Document doesn't exist - create it
-                const auto created = m_engine.create(document);
+                const auto created = m_engine.create(collection, document);
                 if(not created)
                     return database_error_response(created.error());
-                
-                // Get ETag after creation
-                auto new_metadata_position = m_engine.metadata_position(selector);
+
+                auto new_metadata_position = m_engine.metadata_position(collection, selector);
                 if(new_metadata_position.has_value())
                 {
                     auto new_etag = generate_etag(new_metadata_position.value());
                     response_headers.set("etag"s, new_etag);
                 }
-                
-                // Add Location header for newly created resource
+
                 response_headers.set("location"s, resource_path);
-                
                 return response_with_headers{status_created, xson::json::stringify(document), std::make_optional(response_headers)};
             }
         };
@@ -1249,14 +1187,9 @@ private:
             auto documents = xson::object{};
             const auto id = utils::stoll(uri.path[2]); // Regex ensures numeric format
             const auto selector = xson::object{"_id", id};
-
-            const auto guard = std::lock_guard{m_engine};
             const auto collection = validate_collection_name(uri.path[1]);
-            m_engine.collection(collection);
-            
-            // Check conditional requests (only if document exists)
             auto existing_docs = xson::object{};
-            const auto exists = m_engine.read(selector, existing_docs);
+            const auto exists = m_engine.read(collection, selector, existing_docs);
             if(not exists || existing_docs.get<xson::object::array>().empty())
             {
                 auto error = xson::object{
@@ -1271,47 +1204,8 @@ private:
                     std::optional<::http::headers>{}};
             }
 
-            if(exists && !existing_docs.get<xson::object::array>().empty())
-            {
-                // Check If-Match header (ETag-based)
-                auto metadata_position = m_engine.metadata_position(selector);
-                if(metadata_position.has_value())
-                {
-                    auto current_etag = generate_etag(metadata_position.value());
-                    auto match_check = check_if_match(headers, current_etag);
-                    if(match_check.has_value() && !match_check.value())
-                    {
-                        // Precondition failed - ETag doesn't match
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "ETag does not match current resource version"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
-                        return response_with_headers{status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{}};
-                    }
-                }
-                
-                // Check If-Unmodified-Since conditional request
-                auto metadata_timestamp = m_engine.metadata_timestamp(selector);
-                if(metadata_timestamp.has_value())
-                {
-                    auto unmodified_check = check_if_unmodified_since(headers, metadata_timestamp.value());
-                    if(unmodified_check.has_value() && !unmodified_check.value())
-                    {
-                        // Precondition failed - document was modified since client's date
-                        auto error = xson::object{
-                            {"error", "Precondition Failed"s},
-                            {"message", "Document has been modified since the specified date"s},
-                            {"collection", collection},
-                            {"id", id}
-                        };
-                        return response_with_headers{status_precondition_failed, xson::json::stringify(error), std::optional<::http::headers>{}};
-                    }
-                }
-            }
-            
-            const auto updated = m_engine.update(selector, updates, documents);
+            const auto preconditions = write_preconditions_from_headers(headers);
+            const auto updated = m_engine.update(collection, selector, updates, documents, preconditions);
             if(not updated)
                 return database_error_response(updated.error());
             
@@ -1340,7 +1234,7 @@ private:
             response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
             
             // Get new ETag after update
-            auto new_metadata_position = m_engine.metadata_position(selector);
+            auto new_metadata_position = m_engine.metadata_position(collection, selector);
             if(new_metadata_position.has_value())
             {
                 auto new_etag = generate_etag(new_metadata_position.value());
@@ -1363,7 +1257,8 @@ private:
             const auto id = utils::stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
-            const auto deleted = m_engine.destroy(selector, documents);
+            const auto preconditions = write_preconditions_from_headers(headers);
+            const auto deleted = m_engine.destroy(ctx.collection, selector, documents, preconditions);
 
             if(not deleted)
                 return database_error_response(deleted.error());
@@ -1394,10 +1289,8 @@ private:
             const auto uri = ::http::uri{request};
             auto documents = xson::object{};
             const auto selector = xson::object{"$top", 1ll};
-
-            const auto guard = std::lock_guard{m_engine};
-            m_engine.collection(uri.path[1]);
-            const auto deleted = m_engine.destroy(selector, documents);
+            const auto collection_name = validate_collection_name(uri.path[1]);
+            const auto deleted = m_engine.destroy(collection_name, selector, documents);
             if(not deleted)
                 return database_error_response(deleted.error());
             return response_with_headers{::http::status_ok, xson::json::stringify(documents), std::optional<::http::headers>{}};
@@ -1412,7 +1305,6 @@ private:
         auto reindex_handler = [this]([[maybe_unused]] ::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
         {
             // Reindex all collections - this rebuilds indexes from scratch
-            const auto guard = std::lock_guard{m_engine};
             const auto reindexed = m_engine.reindex();
             if(not reindexed)
                 return database_error_response(reindexed.error());
@@ -1440,7 +1332,7 @@ private:
 
     std::string m_file;
     std::string m_port_or_service;
-    utils::lockable<yar::db::engine> m_engine;
+    yar::db::engine m_engine;
     ::http::server m_server;
     std::thread m_listen_thread;
     mutable std::mutex m_start_mutex;
@@ -1468,7 +1360,7 @@ private:
 
 inline void fail_next_write(rest_api_server& server)
 {
-    fail_next_write(static_cast<yar::db::engine&>(server.m_engine));
+    fail_next_write(server.m_engine);
 }
 
 } // namespace yar::http

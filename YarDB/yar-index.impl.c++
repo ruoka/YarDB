@@ -238,7 +238,7 @@ std::optional<std::size_t> try_index_only_count(
 }
 
 std::size_t count_by_scan(
-    std::fstream& storage,
+    std::istream& storage,
     const yar::db::index& index,
     const yar::db::object& selector)
 {
@@ -294,7 +294,7 @@ bool yar::db::index::secondary_key(const yar::db::object& selector) const
     return false;
 }
 
-std::size_t yar::db::index::count(std::fstream& storage, const yar::db::object& selector) const
+std::size_t yar::db::index::count(std::istream& storage, const yar::db::object& selector) const
 {
     if(const auto fast = try_index_only_count(*this, selector))
         return *fast;

@@ -720,13 +720,14 @@ export inline auto prefix_exclusive_upper_bound(std::string_view prefix) -> std:
 // Lower startswith(field, prefix) to indexed {$gte, $lt} range when field is a top-level secondary key
 export inline void lower_startswith_filters(
     yar::db::engine& engine,
+    std::string_view collection,
     xson::object& selector,
     std::vector<string_filter>& string_filters)
 {
     if(string_filters.empty())
         return;
 
-    const auto indexed_keys = engine.indexed_keys();
+    const auto indexed_keys = engine.indexed_keys(collection);
     auto indexed = std::unordered_set<std::string>{};
     indexed.reserve(indexed_keys.size());
     for(const auto& key : indexed_keys)
@@ -927,6 +928,7 @@ export inline auto filter_documents_by_or(
 // Count documents for $count=true — index-only when the parsed filter allows it
 export inline auto count_with_parsed_filter(
     yar::db::engine& engine,
+    std::string_view collection,
     xson::object query_selector,
     const parsed_filter& filter) -> std::size_t
 {
@@ -937,9 +939,9 @@ export inline auto count_with_parsed_filter(
 
         for(auto branch : filter.or_branches)
         {
-            lower_startswith_filters(engine, branch.selector, branch.string_filters);
+            lower_startswith_filters(engine, collection, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
-            engine.read(branch.selector, branch_docs);
+            engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_string_filters(branch_docs, branch.string_filters);
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
@@ -953,12 +955,12 @@ export inline auto count_with_parsed_filter(
     merge_selector_into(query_selector, filter.and_selector);
 
     auto string_filters = filter.and_string_filters;
-    lower_startswith_filters(engine, query_selector, string_filters);
+    lower_startswith_filters(engine, collection, query_selector, string_filters);
 
     if(not string_filters.empty())
     {
         auto documents = xson::object{};
-        engine.read(query_selector, documents);
+        engine.read(collection, query_selector, documents);
         documents = apply_string_filters(documents, string_filters);
         if(not documents.is_array())
             return 0;
@@ -966,12 +968,13 @@ export inline auto count_with_parsed_filter(
         return documents.get<xson::object::array>().size();
     }
 
-    return engine.count(query_selector);
+    return engine.count(collection, query_selector);
 }
 
 // Execute $filter via engine.read — one read per OR branch, merged by _id
 export inline auto read_with_parsed_filter(
     yar::db::engine& engine,
+    std::string_view collection,
     xson::object query_selector,
     const parsed_filter& filter)
 {
@@ -990,9 +993,9 @@ export inline auto read_with_parsed_filter(
 
         for(auto branch : filter.or_branches)
         {
-            lower_startswith_filters(engine, branch.selector, branch.string_filters);
+            lower_startswith_filters(engine, collection, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
-            engine.read(branch.selector, branch_docs);
+            engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_string_filters(branch_docs, branch.string_filters);
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
@@ -1003,10 +1006,10 @@ export inline auto read_with_parsed_filter(
     merge_selector_into(query_selector, filter.and_selector);
 
     auto string_filters = filter.and_string_filters;
-    lower_startswith_filters(engine, query_selector, string_filters);
+    lower_startswith_filters(engine, collection, query_selector, string_filters);
 
     auto documents = xson::object{};
-    engine.read(query_selector, documents);
+    engine.read(collection, query_selector, documents);
     return apply_string_filters(documents, string_filters);
 }
 
@@ -1166,13 +1169,12 @@ inline auto infer_document_schema(const xson::object& document) -> xson::object:
 
 // Infer schema from collection (use most recent document)
 // Requires engine to be locked by caller and collection to be set
-inline auto infer_collection_schema(yar::db::engine& engine) -> xson::object::array
+inline auto infer_collection_schema(yar::db::engine& engine, std::string_view collection) -> xson::object::array
 {
-    // Get the most recent document (first one with $top=1 as approximation)
     auto selector = xson::object{"$top"s, 1ll};
     auto documents = xson::object{};
-    
-    if(engine.read(selector, documents) && documents.is_array() && !documents.get<xson::object::array>().empty())
+
+    if(engine.read(collection, selector, documents) && documents.is_array() && !documents.get<xson::object::array>().empty())
     {
         const auto& doc = documents.get<xson::object::array>()[0];
         return infer_document_schema(doc);
@@ -1212,8 +1214,7 @@ export auto generate_metadata(yar::db::engine& engine) -> xson::object
         });
         
         // Infer schema and create EntityType
-        engine.collection(collection_name);
-        auto properties = infer_collection_schema(engine);
+        auto properties = infer_collection_schema(engine, collection_name);
         
         entity_types.push_back(xson::object{
             {"Name"s, collection_name},

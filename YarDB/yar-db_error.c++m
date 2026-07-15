@@ -1,0 +1,35 @@
+export module yar:db_error;
+import std;
+
+export namespace yar::db {
+
+// Write operations are atomic for detected process-level I/O failures.
+// Crash durability requires a separate WAL or committed transaction record.
+enum class db_error_code
+{
+    io_failure,
+    rollback_failure,
+    corrupt_storage
+};
+
+enum class db_operation
+{
+    create,
+    update,
+    destroy,
+    replace,
+    index,
+    reindex
+};
+
+struct db_error
+{
+    db_error_code code;
+    db_operation operation;
+    std::string message;
+};
+
+template<typename T = void>
+using db_result = std::expected<T, db_error>;
+
+}

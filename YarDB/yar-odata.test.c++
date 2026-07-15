@@ -708,14 +708,14 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"name"s});
+                require_true(engine.index({"name"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}};
                 auto bob = object{{"name"s, "Bob"s}};
                 auto charlie = object{{"name"s, "Charlie"s}};
-                require_true(engine.create(alice));
-                require_true(engine.create(bob));
-                require_true(engine.create(charlie));
+                require_true(engine.create(alice).has_value());
+                require_true(engine.create(bob).has_value());
+                require_true(engine.create(charlie).has_value());
 
                 const auto parsed = parse_filter("startswith(name, 'A')"sv);
                 auto documents = read_with_parsed_filter(engine, object{}, parsed);
@@ -736,7 +736,7 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"Customer"s});
+                require_true(engine.index({"Customer"s}).has_value());
 
                 auto selector = object{};
                 auto filters = std::vector<string_filter>{
@@ -759,7 +759,7 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"name"s});
+                require_true(engine.index({"name"s}).has_value());
 
                 auto selector = object{};
                 auto filters = std::vector<string_filter>{
@@ -793,14 +793,14 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"age"s, "status"s});
+                require_true(engine.index({"age"s, "status"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}, {"age"s, 30ll}, {"status"s, "active"s}},
                     bob = object{{"name"s, "Bob"s}, {"age"s, 20ll}, {"status"s, "active"s}},
                     charlie = object{{"name"s, "Charlie"s}, {"age"s, 22ll}, {"status"s, "inactive"s}};
-                require_true(engine.create(alice));
-                require_true(engine.create(bob));
-                require_true(engine.create(charlie));
+                require_true(engine.create(alice).has_value());
+                require_true(engine.create(bob).has_value());
+                require_true(engine.create(charlie).has_value());
 
                 const auto parsed = parse_filter("age gt 25 or status eq 'active'"sv);
                 require_true(parsed.has_or());
@@ -819,14 +819,14 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"email"s});
+                require_true(engine.index({"email"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}, {"email"s, "alice@example.com"s}},
                     bob = object{{"name"s, "Bob"s}, {"email"s, "bob@test.com"s}},
                     charlie = object{{"name"s, "Charlie"s}, {"email"s, "charlie@example.org"s}};
-                require_true(engine.create(alice));
-                require_true(engine.create(bob));
-                require_true(engine.create(charlie));
+                require_true(engine.create(alice).has_value());
+                require_true(engine.create(bob).has_value());
+                require_true(engine.create(charlie).has_value());
 
                 const auto parsed = parse_filter("contains(email, '@example')"sv);
                 require_false(parsed.has_or());
@@ -845,14 +845,14 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"name"s});
+                require_true(engine.index({"name"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}},
                     bob = object{{"name"s, "Bob"s}},
                     charlie = object{{"name"s, "Charlie"s}};
-                require_true(engine.create(alice));
-                require_true(engine.create(bob));
-                require_true(engine.create(charlie));
+                require_true(engine.create(alice).has_value());
+                require_true(engine.create(bob).has_value());
+                require_true(engine.create(charlie).has_value());
 
                 const auto parsed = parse_filter("startswith(name, 'A')"sv);
                 require_false(parsed.has_or());
@@ -871,14 +871,14 @@ auto register_odata_tests()
 
                 auto engine = yar::db::engine{test_file};
                 engine.collection("users"s);
-                engine.index({"status"s});
+                require_true(engine.index({"status"s}).has_value());
 
                 auto alice = object{{"name"s, "Alice"s}, {"status"s, "active"s}},
                     bob = object{{"name"s, "Bob"s}, {"status"s, "deleted"s}},
                     charlie = object{{"name"s, "Charlie"s}, {"status"s, "active"s}};
-                require_true(engine.create(alice));
-                require_true(engine.create(bob));
-                require_true(engine.create(charlie));
+                require_true(engine.create(alice).has_value());
+                require_true(engine.create(bob).has_value());
+                require_true(engine.create(charlie).has_value());
 
                 const auto parsed = parse_filter("status ne 'deleted'"sv);
                 const auto count = count_with_parsed_filter(engine, object{}, parsed);
@@ -958,7 +958,7 @@ auto register_odata_tests()
                         {"salary"s, 50000.5},
                         {"active"s, true}
                     };
-                    engine.create(user_doc);
+                    require_true(engine.create(user_doc).has_value());
                     
                     // Create another collection
                     engine.collection("orders"s);
@@ -967,7 +967,7 @@ auto register_odata_tests()
                         {"userId"s, 1ll},
                         {"total"s, 99.99}
                     };
-                    engine.create(order_doc);
+                    require_true(engine.create(order_doc).has_value());
                     
                     // Generate metadata (no locking needed in single-threaded test)
                     auto metadata = yar::http::odata::generate_metadata(engine);

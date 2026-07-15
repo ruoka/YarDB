@@ -34,6 +34,18 @@ inline const auto collection_route_with_id = "/(?!health$|ready$)[a-z][a-z0-9]*/
 using handler = ::http::callback_with_headers;
 using middleware_factory = ::http::middleware_factory;
 
+inline auto database_error_response(const yar::db::db_error& error)
+{
+    auto body = xson::object{
+        {"error", "Internal Server Error"s},
+        {"message", error.message}
+    };
+    return response_with_headers{
+        status_internal_server_error,
+        xson::json::stringify(body),
+        std::optional<::http::headers>{}};
+}
+
 export class rest_api_server
 {
 public:
@@ -184,6 +196,7 @@ public:
 
 private:
 
+    friend void fail_next_write(rest_api_server&);
 
     // Middleware: Correlation ID logging - extracts and logs correlation ID for all requests
     middleware_factory correlation_logging_middleware(std::string_view method, std::string_view log_event) const
@@ -450,7 +463,9 @@ private:
             
             const auto ctx = handler_context{request, m_engine};
             auto document = xson::json::parse(body);
-            m_engine.create(document);
+            const auto created = m_engine.create(document);
+            if(not created)
+                return database_error_response(created.error());
             
             // Add Location header pointing to the newly created resource
             auto response_headers = ::http::headers{};
@@ -861,10 +876,14 @@ private:
             m_engine.collection(collection_name);
             
             // Add keys to index (this updates the index structure)
-            m_engine.index(keys);
+            const auto indexed = m_engine.index(keys);
+            if(not indexed)
+                return database_error_response(indexed.error());
             
             // Reindex to populate the new indexes
-            m_engine.reindex();
+            const auto reindexed = m_engine.reindex();
+            if(not reindexed)
+                return database_error_response(reindexed.error());
             
             // Get the updated _db document to return
             auto selector = xson::object{"collection"s, collection_name};
@@ -1058,10 +1077,14 @@ private:
             m_engine.collection(collection_name);
             
             // Add new keys to index (this merges with existing)
-            m_engine.index(new_keys);
+            const auto indexed = m_engine.index(new_keys);
+            if(not indexed)
+                return database_error_response(indexed.error());
             
             // Reindex to populate the new indexes
-            m_engine.reindex();
+            const auto reindexed = m_engine.reindex();
+            if(not reindexed)
+                return database_error_response(reindexed.error());
             
             // Get the updated _db document to return
             m_engine.collection("_db"s);
@@ -1183,7 +1206,9 @@ private:
             if(exists && !existing_docs.get<xson::object::array>().empty())
             {
                 // Document exists - replace it
-                m_engine.replace(selector, document);
+                const auto replaced = m_engine.replace(selector, document);
+                if(not replaced)
+                    return database_error_response(replaced.error());
                 
                 // Get new ETag after update
                 auto new_metadata_position = m_engine.metadata_position(selector);
@@ -1202,7 +1227,9 @@ private:
             else
             {
                 // Document doesn't exist - create it
-                m_engine.create(document);
+                const auto created = m_engine.create(document);
+                if(not created)
+                    return database_error_response(created.error());
                 
                 // Get ETag after creation
                 auto new_metadata_position = m_engine.metadata_position(selector);
@@ -1291,7 +1318,9 @@ private:
                 }
             }
             
-            m_engine.upsert(selector, updates, documents);
+            const auto upserted = m_engine.upsert(selector, updates, documents);
+            if(not upserted)
+                return database_error_response(upserted.error());
             
             // Add OData metadata if requested
             auto metadata_level = yar::http::odata::parse_metadata_level(headers);
@@ -1343,7 +1372,10 @@ private:
             const auto selector = xson::object{"_id", id};
             const auto deleted = m_engine.destroy(selector, documents);
 
-            if(!deleted)
+            if(not deleted)
+                return database_error_response(deleted.error());
+
+            if(*deleted == 0)
             {
                 auto error = xson::object{
                     {"error", "Not Found"s},
@@ -1372,7 +1404,9 @@ private:
 
             const auto guard = std::lock_guard{m_engine};
             m_engine.collection(uri.path[1]);
-            m_engine.destroy(selector, documents);
+            const auto deleted = m_engine.destroy(selector, documents);
+            if(not deleted)
+                return database_error_response(deleted.error());
             return response_with_headers{::http::status_ok, xson::json::stringify(documents), std::optional<::http::headers>{}};
         };
 
@@ -1386,7 +1420,9 @@ private:
         {
             // Reindex all collections - this rebuilds indexes from scratch
             const auto guard = std::lock_guard{m_engine};
-            m_engine.reindex();
+            const auto reindexed = m_engine.reindex();
+            if(not reindexed)
+                return database_error_response(reindexed.error());
 
             auto response = xson::object{
                 {"status", "reindexing completed"s},
@@ -1436,5 +1472,10 @@ private:
     std::function<bool(std::string_view token)> m_validate_token = nullptr;
     std::string m_auth_realm = "YarDB API"s;
 };
+
+inline void fail_next_write(rest_api_server& server)
+{
+    fail_next_write(static_cast<yar::db::engine&>(server.m_engine));
+}
 
 } // namespace yar::http

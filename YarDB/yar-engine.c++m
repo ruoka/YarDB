@@ -1,4 +1,5 @@
 export module yar:engine;
+export import :db_error;
 import :index;
 import std;
 import xson;
@@ -29,12 +30,12 @@ public:
     // Add secondary index keys for the current collection
     // Creates index metadata in _db collection and enables querying by these keys
     // @param keys Vector of field names to index
-    void index(std::vector<std::string> keys);
+    db_result<> index(std::vector<std::string> keys);
 
     // Rebuild all indexes by scanning the entire database
     // Called automatically on startup (twice: first to discover schema, second to build indexes)
     // Can be called at runtime after adding new secondary keys to index existing documents
-    void reindex();
+    db_result<> reindex();
 
     // Secondary index field names for the current collection
     // @return Indexed field names (empty if none)
@@ -45,8 +46,8 @@ public:
     // Create a new document in the current collection
     // Automatically assigns _id if not present
     // @param document Document to create (may be modified to add _id)
-    // @return true if successful, false on I/O error
-    bool create(object& document);
+    // @return Success or an explicit storage error
+    db_result<> create(object& document);
 
     // Read documents matching the selector from the current collection
     // Supports OData query parameters: $top, $skip, $filter, $orderby, $select
@@ -78,15 +79,15 @@ public:
     // @param selector Query selector to find documents to update
     // @param updates Fields to update/add (merged with existing document)
     // @param documents Output array of updated documents
-    // @return true if any documents updated, false otherwise
-    bool update(const object& selector, const object& updates, object& documents);
+    // @return Number of updated documents or an explicit storage error
+    db_result<std::size_t> update(const object& selector, const object& updates, object& documents);
 
     // Delete documents matching the selector
     // Documents are marked as deleted but remain in storage for history tracking
     // @param selector Query selector to find documents to delete
     // @param documents Output array of deleted documents
-    // @return true if any documents deleted, false otherwise
-    bool destroy(const object& selector, object& documents);
+    // @return Number of deleted documents or an explicit storage error
+    db_result<std::size_t> destroy(const object& selector, object& documents);
 
 //  Chain of updates
 
@@ -103,36 +104,44 @@ public:
     // @param selector Query selector to find existing document
     // @param updates Document fields (used for update or create)
     // @param documents Output array of updated/created documents
-    // @return true if document updated or created
-    bool upsert(const object& selector, object& updates, object& documents)
+    // @return Number of updated or created documents, or an explicit storage error
+    db_result<std::size_t> upsert(const object& selector, object& updates, object& documents)
     {
-        return update(selector, updates, documents) || create(updates);
+        auto result = update(selector, updates, documents);
+        if(not result)
+            return std::unexpected{result.error()};
+        if(*result > 0)
+            return result;
+
+        auto created = create(updates);
+        if(not created)
+            return std::unexpected{created.error()};
+        documents += updates;
+        return 1;
     }
 
     // Upsert: update if exists, create if not (without returning documents)
     // @param selector Query selector to find existing document
     // @param updates Document fields (used for update or create)
-    // @return true if document updated or created
-    bool upsert(const object& selector, object& updates)
+    // @return Number of updated or created documents, or an explicit storage error
+    db_result<std::size_t> upsert(const object& selector, object& updates)
     {
-        return update(selector, updates) || create(updates);
+        auto documents = object{};
+        return upsert(selector, updates, documents);
     }
 
     // Replace: delete existing document and create new one with same _id
     // Only replaces if document exists (does not create if not found)
     // @param selector Query selector to find document to replace
     // @param document New document to create (will have same _id as replaced document)
-    // @return true if document replaced, false if not found
-    bool replace(const object& selector, object& document)
-    {
-        return destroy(selector) && create(document);
-    }
+    // @return Number of replaced documents or an explicit storage error
+    db_result<std::size_t> replace(const object& selector, object& document);
 
     // Update documents matching the selector (without returning documents)
     // @param selector Query selector to find documents to update
     // @param updates Fields to update/add
-    // @return true if any documents updated, false otherwise
-    bool update(const object& selector, const object& updates)
+    // @return Number of updated documents or an explicit storage error
+    db_result<std::size_t> update(const object& selector, const object& updates)
     {
         auto documents = object{};
         return update(selector, updates, documents);
@@ -140,8 +149,8 @@ public:
 
     // Delete documents matching the selector (without returning documents)
     // @param selector Query selector to find documents to delete
-    // @return true if any documents deleted, false otherwise
-    bool destroy(const object& selector)
+    // @return Number of deleted documents or an explicit storage error
+    db_result<std::size_t> destroy(const object& selector)
     {
         auto documents = object{};
         return destroy(selector, documents);
@@ -176,6 +185,11 @@ public:
 
 private:
 
+    friend void fail_next_write(engine&);
+    friend void fail_write(engine&, std::size_t);
+
+    bool consume_write_failure();
+
     // First pass: Set up index structure by discovering secondary keys from _db collection
     // and updating sequence counters for all documents
     void setup_index_structure();
@@ -190,6 +204,10 @@ private:
     std::flat_map<std::string, yar::db::index> m_index;
 
     mutable std::fstream m_storage;
+
+    std::size_t m_writes_until_failure = 0;
+
+    bool m_writable = true;
 };
 
 } // namespace yar::db

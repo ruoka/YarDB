@@ -205,6 +205,20 @@ auto test_set()
             require_eq(name, "Test Item"s);
         };
 
+        section("POST storage failure returns 500 Internal Server Error") = [setup]
+        {
+            fail_next_write(setup->get_server());
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/writefailures"s, R"({"name":"Rejected"})"s
+            );
+
+            require_eq(status, "500"s);
+            require_eq(reason, "Internal Server Error"s);
+            const auto error = json::parse(response_body);
+            require_eq(error["error"s].get<string>(), "Internal Server Error"s);
+            require_true(error.has("message"s));
+        };
+
         section("GET existing document returns 200 OK with single object") = [setup]
         {
             // First create a document

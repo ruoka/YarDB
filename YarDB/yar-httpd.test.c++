@@ -407,6 +407,26 @@ auto test_set()
             const string content_location = headers["content-location"s];
             require_eq(content_location, "/testitems/"s + std::to_string(id));
         };
+
+        section("PATCH missing document returns 404 without creating it") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "PATCH"s, "/missingpatches/99999"s, R"({"value":75})"s
+            );
+
+            require_eq(status, "404"s);
+            require_eq(reason, "Not Found"s);
+            const auto error = json::parse(response_body);
+            require_eq(error["error"s].get<string>(), "Not Found"s);
+            require_eq(error["collection"s].get<string>(), "missingpatches"s);
+            require_eq(error["id"s], xson::integer_type{99999});
+
+            auto [count_status, count_reason, count_headers, count_body] = make_request(
+                setup->port(), "GET"s, "/missingpatches?$count=true"s, ""s
+            );
+            require_eq(count_status, "200"s);
+            require_eq(count_body, "0"s);
+        };
     };
 
     test_case("OData query parameters, [yardb]") = []

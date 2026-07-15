@@ -1278,6 +1278,20 @@ private:
             // Check conditional requests (only if document exists)
             auto existing_docs = xson::object{};
             const auto exists = m_engine.read(selector, existing_docs);
+            if(not exists || existing_docs.get<xson::object::array>().empty())
+            {
+                auto error = xson::object{
+                    {"error", "Not Found"s},
+                    {"message", "Document not found"s},
+                    {"collection", collection},
+                    {"id", id}
+                };
+                return response_with_headers{
+                    status_not_found,
+                    xson::json::stringify(error),
+                    std::optional<::http::headers>{}};
+            }
+
             if(exists && !existing_docs.get<xson::object::array>().empty())
             {
                 // Check If-Match header (ETag-based)
@@ -1318,9 +1332,9 @@ private:
                 }
             }
             
-            const auto upserted = m_engine.upsert(selector, updates, documents);
-            if(not upserted)
-                return database_error_response(upserted.error());
+            const auto updated = m_engine.update(selector, updates, documents);
+            if(not updated)
+                return database_error_response(updated.error());
             
             // Add OData metadata if requested
             auto metadata_level = yar::http::odata::parse_metadata_level(headers);

@@ -464,20 +464,21 @@ auto get_document_handler = [this](::http::request_view request,
 **Files:** `YarDB/yar-httpd.c++m`, `YarDB/yar-engine.c++m`
 
 **Efficient Integration:**
-- Engine operations use lockable wrapper for thread safety
-- Handlers acquire engine lock via `handler_context` RAII
+- Engine concurrency is internal (`std::shared_mutex`); HTTP handlers call the engine directly
+- `handler_context` validates the collection name only; no external engine lock wrapper
 - Database operations return xson::object (efficient binary format)
 - JSON stringification only when needed for HTTP response
 
 **Lock Management:**
 ```cpp
 struct handler_context {
-    std::lock_guard<utils::lockable<yar::db::engine>> guard;  // RAII lock
-    // ...
+    const ::http::uri uri;
+    const std::string collection;
+    // engine locking is inside yar::db::engine (shared_lock reads, unique_lock writes)
 };
 ```
 
-**Recommendation:** ✅ Good efficiency. Consider lock-free optimizations for read-heavy workloads.
+**Recommendation:** ✅ Good efficiency. Concurrent reads no longer serialize behind a global HTTP-layer lock.
 
 #### 4.3 HTTP Server Performance ⭐⭐⭐
 **Files:** `deps/net/net/net-http_server.c++m`, `YarDB/yar-httpd.c++m`
@@ -605,7 +606,7 @@ catch(const std::invalid_argument& e)
 
 **Perfect RAII:**
 - Sockets, streams, locks all use RAII
-- `handler_context` provides RAII engine lock
+- Engine `shared_mutex` and per-read `std::ifstream` handles scope locking and I/O lifetime
 - No resource leaks observed
 
 **Recommendation:** ✅ Perfect resource management.
@@ -614,17 +615,17 @@ catch(const std::invalid_argument& e)
 **Files:** `YarDB/yar-httpd.c++m`, `YarDB/yar-engine.c++m`
 
 **Good Thread Safety:**
-- Engine wrapped in `utils::lockable` for thread-safe access
-- Handlers acquire lock via `handler_context`
-- HTTP server runs in separate thread
-- Proper mutex usage for server start/stop
+- Engine uses `std::shared_mutex` for reader/writer locking
+- Reads (`read`, `count`, `metadata_*`) take `shared_lock`; writes take `unique_lock`
+- Conditional HTTP writes use atomic `write_preconditions` under the write lock
+- HTTP server runs in separate thread; proper mutex usage for server start/stop
 
 **Observation:**
 - One thread per connection (current net4cpp limitation)
-- Engine lock serializes all database operations
-- Appropriate for current concurrency model
+- Concurrent reads can proceed in parallel; writes remain exclusive
+- Single process still owns each database file (`.pid` lock)
 
-**Recommendation:** ✅ Good thread safety for current architecture. Consider lock-free optimizations when adding async I/O.
+**Recommendation:** ✅ Good thread safety for current architecture. Further gains depend on async I/O in net4cpp.
 
 ---
 

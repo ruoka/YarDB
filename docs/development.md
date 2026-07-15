@@ -327,18 +327,17 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Memory Management**: Memory-mapped files, optimized storage
 - **Horizontal Scaling**: Multi-node clustering support
 
-##### Engine Reader/Writer Concurrency Plan
+##### Engine Reader/Writer Concurrency — ✅ implemented (Jul 2026)
 
-`std::shared_mutex` becomes useful only after read operations stop mutating shared engine state:
+Reader/writer granularity is implemented in the engine; see [changelog.md](changelog.md#july-2026).
 
-1. Remove mutable `m_collection`; pass the collection explicitly to every engine operation.
-2. Give each reader an independent `std::ifstream` or reader handle so concurrent reads never share stream cursor or error state.
-3. Protect collection indexes with `std::shared_mutex`.
-4. Use `std::shared_lock` for `read`, `count`, `history`, `metadata_timestamp`, and `metadata_position`.
-5. Use `std::unique_lock` for create, update, destroy, replace, upsert, index configuration, and reindexing.
-6. Keep compound conditional HTTP writes under one exclusive transaction boundary so precondition checks and mutation observe the same version.
+- **Explicit collection**: every engine operation takes `collection`; no mutable `m_collection`.
+- **Independent readers**: each read opens its own `std::ifstream` so concurrent reads do not share stream cursor or error state.
+- **`std::shared_mutex`**: `shared_lock` for `read`, `count`, `history`, `metadata_timestamp`, and `metadata_position`; `unique_lock` for writes and index configuration.
+- **Atomic conditional writes**: HTTP `If-Match` / `If-Unmodified-Since` map to `write_preconditions` checked under the same exclusive lock as the mutation.
+- **HTTP layer**: `rest_api_server` holds a plain `engine`; external `lockable<engine>` wrapper removed.
 
-The storage writer remains single-owner. A write lock covers file mutation and staged index publication; readers retain their shared lock until all selected records have been decoded. Add concurrent-reader, reader-versus-writer, and conditional-update stress tests before changing the public thread-safety contract.
+The storage writer remains single-owner. A write lock covers file mutation and staged index publication; readers retain their shared lock until selected records are decoded.
 
 #### Developer Experience
 - **Configuration Files**: YAML/JSON configuration instead of CLI-only

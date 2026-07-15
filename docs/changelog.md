@@ -8,6 +8,15 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Engine reader/writer concurrency
+
+| Item | Summary |
+|------|---------|
+| **Explicit collection API** | Removed mutable `m_collection`; every engine operation takes `collection` explicitly (`b5cd61d`) |
+| **Reader/writer locking** | `std::shared_mutex` with independent `std::ifstream` per read; HTTP layer no longer wraps `lockable<engine>` |
+| **Atomic conditional writes** | `write_preconditions` (`If-Match`, `If-Unmodified-Since`) checked under the same exclusive lock as create/update/replace/destroy |
+| **Tests** | Concurrent reader and stale-precondition engine tests; `[yardb]` suite at **320 tests and 1172 assertions** |
+
 ### Storage, engine & HTTP hardening
 
 | Item | Summary |

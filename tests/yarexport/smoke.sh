@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, missing_file, help"
+      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, missing_file, help"
       exit 0
       ;;
     *)
@@ -338,6 +338,44 @@ EOF
   end_case force_overwrite_ok
 }
 
+test_export_stdout_full() {
+  should_run export_stdout_full || return 0
+  begin_case export_stdout_full
+  local coll
+  coll="$(collection stdoutfull)"
+
+  if [[ ! -e /dev/full ]]; then
+    log "skip export_stdout_full: /dev/full unavailable"
+    end_case export_stdout_full
+    return 0
+  fi
+
+  stop_yardb
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"alpha","value":1}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  stop_yardb_keep_db
+
+  set +e
+  LAST_EXPORT_OUTPUT="$("${YAREXPORT_BIN}" --file="${YARDB_DB}" --live >/dev/full 2>&1)"
+  LAST_EXPORT_STATUS=$?
+  set -e
+
+  assert_export_status 1 "stdout_full_nonzero"
+  LAST_OUTPUT="${LAST_EXPORT_OUTPUT}"
+  assert_contains "failed writing export to stdout" "stdout_full_message"
+
+  cleanup_yardb_files
+  end_case export_stdout_full
+}
+
 test_missing_file() {
   should_run missing_file || return 0
   begin_case missing_file
@@ -382,6 +420,7 @@ main() {
   test_compact_roundtrip
   test_force_preserves_on_bad_input
   test_force_overwrite_ok
+  test_export_stdout_full
   test_missing_file
   test_help
 

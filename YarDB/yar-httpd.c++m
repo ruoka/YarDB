@@ -25,10 +25,10 @@ constexpr auto correlation_id_header = "x-correlation-id"sv;
 // Cached correlation ID header string (headers API requires std::string)
 const auto correlation_id_header_str = std::string{correlation_id_header};
 
-// Collection routes exclude reserved path segments (e.g. /health, /ready probes).
-inline const auto collection_route = "/(?!health$|ready$)[a-z][a-z0-9]*"s;
-inline const auto collection_route_with_query = "/(?!health$|ready$)[a-z][a-z0-9]*(\\?.*)?"s;
-inline const auto collection_route_with_id = "/(?!health$|ready$)[a-z][a-z0-9]*/[0-9]+"s;
+// Collection routes exclude reserved path segments (e.g. /health, /ready, /metrics).
+inline const auto collection_route = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*"s;
+inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*(\\?.*)?"s;
+inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*/[0-9]+"s;
 
 // Handler type aliases for middleware composition
 using handler = ::http::callback_with_headers;
@@ -456,11 +456,13 @@ private:
     }
 
     // Build standard middleware chain for handlers
-    // Order: rate limiting -> CORS -> correlation ID -> authentication -> body size -> correlation logging -> accept validation -> error handling
+    // Vector order is inner→outer for wrap() (reversed when composing). Metrics is near the
+    // outside so GET /metrics short-circuits before Accept/auth; scrapes are not counted.
+    // Logical request flow: error handling → metrics → accept → … → handler
     std::vector<middleware_factory> build_middleware_chain(std::string_view method, std::string_view log_event, std::string_view error_event, bool requires_headers = false) const
     {
-        // Count: correlation ID, body size, correlation logging, accept validation, error handling, optionally rate limiting, CORS, authentication
-        constexpr std::size_t base_middleware_count = 5;
+        // Count: correlation ID, body size, correlation logging, accept validation, metrics, error handling, optionally rate limiting, CORS, authentication
+        constexpr std::size_t base_middleware_count = 6;
         const std::size_t middleware_count = base_middleware_count + 
             (m_rate_limiting_enabled ? 1 : 0) + 
             (m_cors_enabled ? 1 : 0) + 
@@ -469,40 +471,43 @@ private:
         auto middlewares = std::vector<middleware_factory>{};
         middlewares.reserve(middleware_count);
         
-        // 1. Rate limiting (first - reject early before processing)
+        // 1. Rate limiting (innermost optional — reject early before processing)
         if(m_rate_limiting_enabled)
         {
             if(auto rate_mw = rate_limiting_middleware())
                 middlewares.emplace_back(*rate_mw);
         }
         
-        // 2. CORS (early - handles OPTIONS preflight requests)
+        // 2. CORS
         if(m_cors_enabled)
         {
             if(auto cors_mw = cors_middleware())
                 middlewares.emplace_back(*cors_mw);
         }
         
-        // 3. Correlation ID (early - ensures correlation ID exists for logging)
+        // 3. Correlation ID
         middlewares.emplace_back(::http::middleware::correlation_id_middleware());
         
-        // 4. Authentication (before business logic)
+        // 4. Authentication
         if(m_authentication_enabled)
         {
             if(auto auth_mw = authentication_middleware())
                 middlewares.emplace_back(*auth_mw);
         }
         
-        // 5. Body size validation (reject before logging or parsing oversized bodies)
+        // 5. Body size validation
         middlewares.emplace_back(::http::middleware::body_size_validation_middleware(yar::db::max_request_body_size));
 
-        // 6. Correlation logging (uses correlation ID from step 3)
+        // 6. Correlation logging
         middlewares.emplace_back(correlation_logging_middleware(method, log_event));
         
         // 7. Accept validation
         middlewares.emplace_back(accept_validation_middleware(requires_headers));
+
+        // 8. Prometheus metrics (outer vs accept/auth so scrapers need not send Accept: json)
+        middlewares.emplace_back(::http::middleware::metrics_middleware());
         
-        // 8. Error handling (last - wraps everything)
+        // 9. Error handling (outermost)
         middlewares.emplace_back(error_handling_middleware(method, error_event));
         
         return middlewares;
@@ -604,6 +609,18 @@ private:
         m_server.get("/ready"s).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(ready_handler, ready_middlewares));
+
+        // GET /metrics — Prometheus scrape (short-circuited by metrics_middleware; handler is unused)
+        auto metrics_handler = []([[maybe_unused]] ::http::request_view request,
+                                  [[maybe_unused]] ::http::body_view body,
+                                  [[maybe_unused]] ::http::headers& headers)
+        {
+            return response_with_headers{status_ok, ""s, std::optional<::http::headers>{}};
+        };
+        auto metrics_middlewares = build_middleware_chain(method_get, "METRICS_SCRAPE"sv, "METRICS_SCRAPE_ERROR"sv, false);
+        m_server.get("/metrics"s).response_with_headers(
+            "text/plain"sv,
+            ::http::middleware::wrap(metrics_handler, metrics_middlewares));
 
         // GET /$metadata - OData 4.01 JSON CSDL metadata endpoint
         auto metadata_handler = [this]([[maybe_unused]] ::http::request_view request, 

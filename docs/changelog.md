@@ -8,6 +8,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Observability
+
+| Item | Summary |
+|------|---------|
+| **Prometheus `GET /metrics`** | Minimum HTTP metrics via `net::http::middleware::metrics_middleware` — `http_requests_total` and `http_request_duration_seconds` (`method`, `status` labels); public with PAT; scrapes not counted |
+
 ### Platform & tooling
 
 | Item | Summary |

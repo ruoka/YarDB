@@ -6,12 +6,12 @@
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ⚠️ **Partial**: Bearer PAT MVP, safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
-- ❌ **Missing**: Scoped auth, TLS at reverse proxy, Prometheus metrics, high availability
+- ⚠️ **Partial**: Bearer PAT MVP, safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
+- ❌ **Missing**: Scoped auth, TLS at reverse proxy, high availability
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
 - 🔐 **Security & Authentication** (scoped PATs, JWT, RBAC, TLS at reverse proxy; safe bind defaults shipped)
-- 📊 **Monitoring & Observability** (Prometheus `/metrics`; liveness/readiness probes shipped)
+- 📊 **Monitoring & Observability** (minimum Prometheus `/metrics` shipped; richer labels / tracing planned; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
 
 ## 🏗️ Building for Production

@@ -289,11 +289,11 @@ Current shipped work and verification totals are maintained only in [changelog.m
   - `GET /health` liveness probe (`{}`; public with PAT auth)
   - `GET /ready` readiness probe — `200` + `{}` when `ready`; otherwise `503` + `{"status":...}`; public with PAT auth
   - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
-- **Remaining** (near-term):
-  - **Prometheus `/metrics`** — request latency, throughput, errors
+  - **Prometheus `GET /metrics`** (minimum) — `http_requests_total` and `http_request_duration_seconds` histogram labeled by `method` + `status` via `net` `metrics_middleware` (public with PAT auth; scrapes not counted)
 - **Planned Implementation** (longer-term):
+  - Richer metrics (path/collection labels, process metrics) once cardinality is designed
   - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)
-- **Timeline**: 1-2 months
+- **Timeline**: longer-term observability expansions
 - **Impact**: Essential for production operations and debugging
 
 #### 3. 🔒 TLS Proxy Implementation
@@ -354,7 +354,7 @@ The storage writer remains single-owner. A write lock covers file mutation and s
 
 ### Observability Strategy
 - **Logging**: ✅ **IMPLEMENTED** - Dual-mode (syslog RFC 5424 + JSONL) with structured fields support, RFC 5424 message IDs, default JSONL format
-- **Metrics**: Prometheus standard for cloud-native monitoring (planned)
+- **Metrics**: ✅ **IMPLEMENTED** (minimum) — Prometheus `GET /metrics` with request counters and latency histogram (`method`, `status`)
 - **Tracing**: OpenTelemetry for distributed request tracking (planned)
 
 ### Module Architecture

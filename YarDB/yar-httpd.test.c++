@@ -3342,6 +3342,23 @@ auto test_set()
         };
     };
 
+    test_case("GET /metrics Prometheus scrape, [yardb]") = []
+    {
+        const auto test_file = "./httpd_metrics_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET /metrics returns 200 with http_requests_total") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/metrics"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(body.find("http_requests_total") != std::string::npos);
+            require_true(body.find("# TYPE http_requests_total counter") != std::string::npos);
+        };
+    };
+
     test_case("GET /ready readiness probe, [yardb]") = []
     {
         const auto test_file = "./httpd_ready_test.db";
@@ -3411,6 +3428,16 @@ auto test_set()
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
             require_eq(body, "{}"s);
+        };
+
+        section("GET /metrics without Authorization returns 200 when PAT enabled") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/metrics"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(body.find("http_requests_total") != std::string::npos);
         };
 
         section("Protected route without Authorization returns 401") = [setup]

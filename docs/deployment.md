@@ -31,7 +31,7 @@
 - **`yardb`** - Main database server
 - **`yarsh`** - Interactive client (supports piped stdin for scripts/CI; see `./tests/yarsh/smoke.sh`)
 - **`yarproxy`** - HTTP fan-out proxy (dev/testing; not production HA)
-- **`yarexport`** - Offline DB export to JSONL (stop `yardb` first; see `./tests/yarexport/smoke.sh`)
+- **`yarexport` / `yarimport`** - Offline JSONL export/import and compaction (`--live`; see `./tests/yarexport/smoke.sh`)
 - **`benchmark`** - Performance testing
 
 ## 🐳 Container Deployment
@@ -200,13 +200,18 @@ On startup, YarDB validates record status, positions, and history links. An inco
 # Stop yardb before exporting the file it has open
 yarexport --file=production.db > backup.jsonl
 
+# Compact (drop history/tombstones): live export → import → swap
+yarexport --file=production.db --live > /tmp/live.jsonl
+yarimport --file=production.db.new --input=/tmp/live.jsonl
+mv production.db production.db.bak && mv production.db.new production.db
+
 # Validate lines (optional)
 yarexport --file=production.db | jq -e . >/dev/null
 
 # Smoke test locally: ./tests/yarexport/smoke.sh
 ```
 
-Automated backup/restore and point-in-time recovery are not implemented yet. Stop `yardb` before copying or exporting its open database.
+Point-in-time recovery is not implemented yet. Stop `yardb` before copying, exporting, or compacting its open database.
 
 ### Storage Requirements
 - **Database Files**: FSON-encoded binary format
@@ -219,7 +224,7 @@ Automated backup/restore and point-in-time recovery are not implemented yet. Sto
 ### Current Limitations
 - **Single Node**: Each `yardb` process owns one database file; no built-in clustering
 - **`yarproxy`**: Round-robin reads and write fan-out only — independent DBs, no sync, no guaranteed consistency (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
-- **No Backup**: Manual export only (`yarexport`)
+- **Manual backup/compact only**: `yarexport` / `yarimport` (no automated PITR)
 
 ### Future HA Features (Roadmap)
 - **Multi-node Replication** with automatic failover and conflict handling

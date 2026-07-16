@@ -120,9 +120,9 @@ An interactive and pipeable HTTP client. See [yarsh program documentation](docs/
 
 A development HTTP fan-out proxy for independent `yardb` instances, not replication or HA. See [yarproxy program documentation](docs/programs.md#yarproxy---http-fan-out-proxy).
 
-### yarexport - Data Export Utility
+### yarexport / yarimport - Export, Import, Compaction
 
-Exports FSON records as JSONL. See [yarexport program documentation](docs/programs.md#yarexport---data-export-utility).
+Export FSON records as JSONL (`yarexport`, including `--live` for current docs only) and rebuild a database offline (`yarimport`). See [yarexport](docs/programs.md#yarexport---data-export-utility) and [yarimport](docs/programs.md#yarimport---offline-import--compaction).
 
 ## Operations
 
@@ -150,7 +150,7 @@ See [LICENSE](LICENSE) for details.
 
 Start at [docs/README.md](docs/README.md) for the full documentation index. Key guides:
 
-- [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, `yarproxy`, `yarexport`
+- [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, `yarproxy`, `yarexport`, `yarimport`
 - [Development Guide](docs/development.md) - Build, test, roadmap
 - [Deployment Guide](docs/deployment.md) - Production deployment
 - [Changelog](docs/changelog.md) - Shipped features and smoke coverage

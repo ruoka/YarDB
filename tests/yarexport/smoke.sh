@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# yarexport smoke tests: seed yardb, stop server, export JSONL, validate output.
+# yarexport / yarimport smoke tests: seed yardb, stop server, export/import, validate.
 #
 # Usage:
 #   ./tests/yarexport/smoke.sh [--jsonl] [--case NAME]
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_empty, export_seeded, missing_file, help"
+      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, missing_file, help"
       exit 0
       ;;
     *)
@@ -93,6 +93,148 @@ EOF
   end_case export_seeded
 }
 
+test_export_live() {
+  should_run export_live || return 0
+  begin_case export_live
+  local coll
+  coll="$(collection live)"
+
+  stop_yardb
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"keep","email":"keep@example.com"}
+POST /${coll}
+{"name":"mutate","email":"old@example.com"}
+POST /${coll}
+{"name":"drop","email":"drop@example.com"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  local mutate_id drop_id
+  mutate_id="$(python3 -c 'import re,sys; ids=re.findall(r"\"_id\"\s*:\s*(\d+)", sys.argv[1]); print(ids[1] if len(ids)>=2 else "")' "${LAST_OUTPUT}")"
+  drop_id="$(python3 -c 'import re,sys; ids=re.findall(r"\"_id\"\s*:\s*(\d+)", sys.argv[1]); print(ids[2] if len(ids)>=3 else "")' "${LAST_OUTPUT}")"
+
+  run_yarsh "$(cat <<EOF
+PUT /_db/${coll}
+{"keys":["email"]}
+PATCH /${coll}/${mutate_id}
+{"email":"new@example.com"}
+DELETE /${coll}/${drop_id}
+EXIT
+EOF
+)"
+  assert_contains " 200 " "index_or_patch_ok"
+  assert_contains " 204 " "delete_ok"
+
+  stop_yardb_keep_db
+
+  run_yarexport "${YARDB_DB}"
+  assert_export_status 0 "full_export_ok"
+  local full_count
+  full_count="$(printf '%s\n' "${LAST_EXPORT_OUTPUT}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+
+  run_yarexport "${YARDB_DB}" --live
+  assert_export_status 0 "live_export_ok"
+  assert_valid_jsonl "live_jsonl_syntax"
+  assert_live_jsonl_record_shape "live_shape"
+  assert_jsonl_contains_document "${coll}" "name" "keep" "keep_live"
+  assert_jsonl_contains_document "${coll}" "email" "new@example.com" "mutated_live"
+  assert_jsonl_lacks_document "${coll}" "name" "drop" "deleted_absent"
+  assert_jsonl_lacks_document "${coll}" "email" "old@example.com" "old_version_absent"
+  assert_jsonl_contains_document "_db" "collection" "${coll}" "db_index_config"
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local live_count
+  live_count="$(printf '%s\n' "${LAST_EXPORT_OUTPUT}" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+  if [[ "${live_count}" -lt "${full_count}" ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"live_fewer_than_full\"}"
+  else
+    fail "expected live export (${live_count}) < full export (${full_count})"
+  fi
+
+  cleanup_yardb_files
+  end_case export_live
+}
+
+test_compact_roundtrip() {
+  should_run compact_roundtrip || return 0
+  begin_case compact_roundtrip
+  local coll compact_db live_jsonl
+  coll="$(collection compact)"
+  compact_db="$(mktemp "${TMPDIR:-/tmp}/yarcompact.XXXXXX.db")"
+  live_jsonl="$(mktemp "${TMPDIR:-/tmp}/yarcompact.XXXXXX.jsonl")"
+  rm -f "${compact_db}"
+
+  stop_yardb
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"alpha","email":"alpha@example.com"}
+POST /${coll}
+{"name":"beta","email":"beta@example.com"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  local beta_id
+  beta_id="$(python3 -c 'import re,sys; ids=re.findall(r"\"_id\"\s*:\s*(\d+)", sys.argv[1]); print(ids[1] if len(ids)>=2 else "")' "${LAST_OUTPUT}")"
+
+  run_yarsh "$(cat <<EOF
+PUT /_db/${coll}
+{"keys":["email"]}
+PATCH /${coll}/${beta_id}
+{"email":"beta2@example.com"}
+PATCH /${coll}/${beta_id}
+{"email":"beta3@example.com"}
+EXIT
+EOF
+)"
+  assert_contains " 200 " "history_created"
+
+  stop_yardb_keep_db
+  local source_db="${YARDB_DB}"
+
+  run_yarexport "${source_db}" --live
+  assert_export_status 0 "live_export_ok"
+  printf '%s\n' "${LAST_EXPORT_OUTPUT}" >"${live_jsonl}"
+
+  run_yarimport "${compact_db}" "${live_jsonl}"
+  assert_import_status 0 "import_ok"
+  assert_file_smaller_than "${compact_db}" "${source_db}" "compact_smaller"
+
+  start_yardb_with_db "${compact_db}"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=email eq 'beta3@example.com'
+EXIT
+EOF
+)"
+  assert_contains "beta3@example.com" "index_query_works"
+
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$count=true
+EXIT
+EOF
+)"
+  assert_contains "Response Body:" "count_body_section"
+  if ! printf '%s\n' "${LAST_OUTPUT}" | awk '/Response Body:/{getline; if ($0 == "2") found=1} END{exit !found}'; then
+    fail "expected count body to be 2 after compact import"
+  fi
+  TESTS_RUN=$((TESTS_RUN + 1))
+  jsonl_emit '{"type":"smoke_assert_passed","matcher":"live_count_two"}'
+
+  stop_yardb_keep_db
+  rm -f "${source_db}" "${source_db}.pid" "${source_db}.log" "${live_jsonl}"
+  cleanup_yardb_files
+  end_case compact_roundtrip
+}
+
 test_missing_file() {
   should_run missing_file || return 0
   begin_case missing_file
@@ -114,7 +256,13 @@ test_help() {
   LAST_OUTPUT="$("${YAREXPORT_BIN}" --help 2>&1)"
   assert_contains "yarexport" "help_banner"
   assert_contains "--file=" "help_file_option"
+  assert_contains "--live" "help_live_option"
   assert_contains "JSONL" "help_jsonl_note"
+
+  LAST_OUTPUT="$("${YARIMPORT_BIN}" --help 2>&1)"
+  assert_contains "yarimport" "import_help_banner"
+  assert_contains "--file=" "import_help_file"
+  assert_contains "--input=" "import_help_input"
   end_case help
 }
 
@@ -123,10 +271,12 @@ main() {
   trap stop_yardb EXIT
 
   jsonl_emit "{\"type\":\"smoke_start\",\"schema\":\"yarexport-smoke\",\"version\":1}"
-  log "yarexport smoke tests (build=${BUILD_DIR})"
+  log "yarexport/yarimport smoke tests (build=${BUILD_DIR})"
 
   test_export_empty
   test_export_seeded
+  test_export_live
+  test_compact_roundtrip
   test_missing_file
   test_help
 

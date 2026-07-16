@@ -496,27 +496,27 @@ Exports database contents from the FSON-encoded database file to JSONL on stdout
 - **Debugging**: Inspect database contents in human-readable format
 - **Analysis**: Extract data for external analysis tools
 - **Recovery**: Export data from corrupted or problematic databases
+- **Compaction**: `--live` export of current documents only (pair with `yarimport`)
 
 ### Usage
 
 ```bash
-yarexport [--help] [--file=<name>]
+yarexport [--help] [--file=<name>] [--live]
 ```
 
 ### Options
 
 - `--file=<name>` - Database file to export (default: `yar.db`)
+- `--live` - Export only current documents (`status=created`); omit history, tombstones, and file positions
 - `--help` - Display usage information
 
 ### Output Format
 
-Each exported document includes:
-- `collection` - Collection name
-- `status` - Document status
-- `timestamp` - ISO8601 formatted timestamp
-- `position` - Position in database file
-- `previous` - Previous document position
-- `document` - The actual document data
+**Full export** (default) includes:
+- `collection`, `status`, `timestamp`, `position`, `previous`, `document`
+
+**Live export** (`--live`) includes:
+- `collection`, `document` (current versions only, including live `_db` index configs)
 
 Output is JSONL: one JSON object per line (no trailing commas). Stop `yardb` before exporting the same database file.
 
@@ -529,6 +529,9 @@ yarexport > export.jsonl
 # Export specific database file
 yarexport --file=production.db > production_export.jsonl
 
+# Live-only export for compaction
+yarexport --file=production.db --live > live.jsonl
+
 # Export and filter with jq
 yarexport --file=mydb.db | jq 'select(.collection=="users")'
 ```
@@ -538,11 +541,11 @@ yarexport --file=mydb.db | jq 'select(.collection=="users")'
 ```bash
 ./tests/yarexport/smoke.sh
 ./tests/yarexport/smoke.sh --jsonl
-./tests/yarexport/smoke.sh --case export_empty
-./tests/yarexport/smoke.sh --case export_seeded
+./tests/yarexport/smoke.sh --case export_live
+./tests/yarexport/smoke.sh --case compact_roundtrip
 ```
 
-Cases: `export_empty`, `export_seeded`, `missing_file`, `help`. `export_empty` exports a freshly started database with no documents. `export_seeded` seeds data via `yarsh`, stops `yardb`, exports the DB file, and validates JSONL syntax plus record shape.
+Cases: `export_empty`, `export_seeded`, `export_live`, `compact_roundtrip`, `missing_file`, `help`.
 
 ### Use Cases
 
@@ -551,4 +554,46 @@ Cases: `export_empty`, `export_seeded`, `missing_file`, `help`. `export_empty` e
 - **Debugging**: Inspect database contents when server is not running
 - **Data Analysis**: Extract data for analysis with external tools
 - **Recovery**: Export data from databases that cannot be started
+- **Compaction**: Reclaim space from updates/deletes via live export + `yarimport`
+
+## yarimport - Offline Import / Compaction
+
+Rebuilds a FSON database from live JSONL produced by `yarexport --live`.
+
+### Purpose
+
+- Offline compaction (drop history and tombstones)
+- Restore from a live-only backup
+- Preserve `_id` values and secondary index configuration (`_db`)
+
+### Usage
+
+```bash
+yarimport [--help] [--file=<name>] [--input=<path>] [--force]
+```
+
+### Options
+
+- `--file=<name>` - Output database path (default: `yar.db`)
+- `--input=<path>` - JSONL input (default: stdin)
+- `--force` - Overwrite an existing non-empty output file
+- `--help` - Display usage information
+
+### Compaction workflow
+
+```bash
+# 1. Stop yardb
+# 2. Export current documents only
+yarexport --file=production.db --live > /tmp/live.jsonl
+
+# 3. Import into a new file
+yarimport --file=production.db.new --input=/tmp/live.jsonl
+
+# 4. Swap and restart
+mv production.db production.db.bak
+mv production.db.new production.db
+# start yardb --file=production.db
+```
+
+`yarimport` refuses `status=updated` / `status=deleted` rows (use `--live` export). Secondary indexes are restored from live `_db` rows via `engine.index()`, then `reindex()`.
 

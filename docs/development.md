@@ -315,6 +315,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 ### 📋 Future Enhancements (Post-MVP)
 
 #### Data Management & Operations
+- **Compaction**: ✅ **IMPLEMENTED** (offline) — `yarexport --live` + `yarimport` rewrite current documents only
 - **Backup/Restore**: Point-in-time recovery, incremental backups
 - **Data Migration**: Schema evolution, migration tools
 - **Advanced Indexing**: Compound indexes, full-text search

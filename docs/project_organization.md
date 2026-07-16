@@ -30,13 +30,14 @@ YarDB/
 │   ├── yardb.c++                # Main database server executable
 │   ├── yarsh.c++                # Shell interface executable
 │   ├── yarproxy.c++             # Proxy server executable
-│   └── yarexport.c++            # Data export utility executable
+│   ├── yarexport.c++            # Data export utility executable
+│   └── yarimport.c++            # Offline import / compaction executable
 │
 ├── tests/                       # Functional/Integration tests (P1204R0)
 │   ├── yarsh/                   # Piped yarsh smoke tests (CI + local)
 │   │   ├── lib.sh               # yardb lifecycle + assertions
 │   │   └── smoke.sh             # smoke entry point
-│   ├── yarexport/               # yarexport smoke tests
+│   ├── yarexport/               # yarexport / yarimport smoke tests
 │   │   ├── lib.sh
 │   │   └── smoke.sh
 │   ├── yarproxy/                # yarproxy smoke tests
@@ -156,7 +157,7 @@ Dependencies are managed as git submodules in `deps/`:
   - Example: `yar-engine.test.c++` tests `yar-engine.c++m`
 - **Functional Tests**: In `tests/` directory
   - `tests/yarsh/smoke.sh` — black-box CLI smoke tests (piped `yarsh` + ephemeral `yardb`)
-  - `tests/yarexport/smoke.sh` — export JSONL smoke tests (seed `yardb`, stop server, validate `yarexport`)
+  - `tests/yarexport/smoke.sh` — export/import/compaction smoke tests (`--live`, `yarimport` roundtrip)
   - `tests/yarproxy/smoke.sh` — proxy smoke tests (multi-replica cluster, fan-out writes, round-robin reads)
   - `tests/yar.sh` — manual multi-server demo
 - **Test Runner**: Unit tests via `./tools/CB.sh debug test --tags='\[yardb\]'`; smoke via `./tests/yarsh/smoke.sh`, `./tests/yarexport/smoke.sh`, and `./tests/yarproxy/smoke.sh`

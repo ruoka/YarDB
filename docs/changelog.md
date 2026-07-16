@@ -8,6 +8,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Storage & tooling
+
+| Item | Summary |
+|------|---------|
+| **Offline compaction** | `yarexport --live` exports current documents only; new `yarimport` rebuilds a FSON file (preserves `_id` and `_db` indexes). Workflow: stop yardb → live export → import → swap |
+
 ### Security
 
 | Item | Summary |

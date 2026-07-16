@@ -325,11 +325,12 @@ EOF
 
   start_yardb_with_db "${target_db}"
   run_yarsh "$(cat <<EOF
-GET /${coll}?\$filter=name eq 'alpha'
+GET /${coll}
 EXIT
 EOF
 )"
   assert_contains "alpha@example.com" "force_overwrite_readable"
+  assert_contains '"name" : "alpha"' "force_overwrite_document"
 
   stop_yardb_keep_db
   rm -f "${YARDB_DB}" "${YARDB_DB}.pid" "${YARDB_DB}.log" "${live_jsonl}"

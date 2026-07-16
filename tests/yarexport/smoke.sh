@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, missing_file, help"
+      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, missing_file, help"
       exit 0
       ;;
     *)
@@ -235,6 +235,108 @@ EOF
   end_case compact_roundtrip
 }
 
+test_force_preserves_on_bad_input() {
+  should_run force_preserves_on_bad_input || return 0
+  begin_case force_preserves_on_bad_input
+  local coll marker_db bad_jsonl before_sha
+  coll="$(collection forcebad)"
+  marker_db="$(mktemp "${TMPDIR:-/tmp}/yarforce.XXXXXX.db")"
+  bad_jsonl="$(mktemp "${TMPDIR:-/tmp}/yarforce.XXXXXX.jsonl")"
+  rm -f "${marker_db}"
+
+  stop_yardb
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"keep-me","marker":"original-db"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  stop_yardb_keep_db
+  cp "${YARDB_DB}" "${marker_db}"
+  before_sha="$(sha256sum "${marker_db}" | awk '{print $1}')"
+  printf '%s\n' '{"collection":"broken","document":{"name":"x"},"status":"deleted"}' >"${bad_jsonl}"
+
+  run_yarimport "${marker_db}" "${bad_jsonl}" --force
+  assert_import_status 1 "force_bad_input_fails"
+  LAST_OUTPUT="${LAST_IMPORT_OUTPUT}"
+  assert_contains "refusing to import status=deleted" "force_bad_input_message"
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  local after_sha
+  after_sha="$(sha256sum "${marker_db}" | awk '{print $1}')"
+  if [[ "${before_sha}" == "${after_sha}" ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_preserves_original_db\"}"
+  else
+    fail "expected --force failure to leave original database bytes unchanged"
+  fi
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ ! -e "${marker_db}.yarimport.tmp" && ! -e "${marker_db}.yarimport.tmp.pid" ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_cleans_staging\"}"
+  else
+    fail "expected failed --force import to remove staging sidecar files"
+  fi
+
+  rm -f "${marker_db}" "${marker_db}.pid" "${bad_jsonl}"
+  cleanup_yardb_files
+  end_case force_preserves_on_bad_input
+}
+
+test_force_overwrite_ok() {
+  should_run force_overwrite_ok || return 0
+  begin_case force_overwrite_ok
+  local coll target_db live_jsonl
+  coll="$(collection forceok)"
+  target_db="$(mktemp "${TMPDIR:-/tmp}/yarforce.XXXXXX.db")"
+  live_jsonl="$(mktemp "${TMPDIR:-/tmp}/yarforce.XXXXXX.jsonl")"
+  rm -f "${target_db}"
+
+  stop_yardb
+  start_yardb
+
+  run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"alpha","email":"alpha@example.com"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_created"
+
+  stop_yardb_keep_db
+  cp "${YARDB_DB}" "${target_db}"
+
+  run_yarexport "${YARDB_DB}" --live
+  assert_export_status 0 "live_export_ok"
+  printf '%s\n' "${LAST_EXPORT_OUTPUT}" >"${live_jsonl}"
+
+  run_yarimport "${target_db}" "${live_jsonl}" --force
+  assert_import_status 0 "force_overwrite_ok"
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ -s "${target_db}" && ! -e "${target_db}.yarimport.tmp" ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_target_rewritten\"}"
+  else
+    fail "expected successful --force import to rewrite target and remove staging sidecar"
+  fi
+
+  start_yardb_with_db "${target_db}"
+  run_yarsh "$(cat <<EOF
+GET /${coll}?\$filter=name eq 'alpha'
+EXIT
+EOF
+)"
+  assert_contains "alpha@example.com" "force_overwrite_readable"
+
+  stop_yardb_keep_db
+  rm -f "${YARDB_DB}" "${YARDB_DB}.pid" "${YARDB_DB}.log" "${live_jsonl}"
+  cleanup_yardb_files
+  end_case force_overwrite_ok
+}
+
 test_missing_file() {
   should_run missing_file || return 0
   begin_case missing_file
@@ -277,6 +379,8 @@ main() {
   test_export_seeded
   test_export_live
   test_compact_roundtrip
+  test_force_preserves_on_bad_input
+  test_force_overwrite_ok
   test_missing_file
   test_help
 

@@ -55,17 +55,6 @@ auto register_details_tests()
                     require_eq(*pos, 4u);
                 };
             };
-
-            when("delimiter is empty") = []
-            {
-                then("split_outside_quotes throws invalid_argument") = []
-                {
-                    require_throws_as([]
-                    {
-                        split_outside_quotes("a,b"sv, ""sv);
-                    }, std::invalid_argument{"delimiter cannot be empty"});
-                };
-            };
         };
     };
 

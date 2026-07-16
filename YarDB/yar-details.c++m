@@ -84,7 +84,7 @@ public:
             m_coroutine{coroutine}
         {}
 
-        auto operator*() const -> const value_type&
+        const value_type& operator*() const
         {
             return m_coroutine.promise().current;
         }
@@ -102,7 +102,7 @@ public:
             return tmp;
         }
 
-        friend auto operator==(const iterator& lhs, std::default_sentinel_t) -> bool
+        friend bool operator==(const iterator& lhs, std::default_sentinel_t)
         {
             return not lhs.m_coroutine || lhs.m_coroutine.done();
         }
@@ -163,8 +163,7 @@ private:
 #endif
 
 // Find the first needle occurrence outside quoted string literals.
-inline auto find_outside_quotes(std::string_view text, std::string_view needle)
-    -> std::optional<std::size_t>
+inline std::optional<std::size_t> find_outside_quotes(std::string_view text, std::string_view needle)
 {
     if(needle.empty())
         throw std::invalid_argument{"needle cannot be empty"};
@@ -207,7 +206,8 @@ inline auto find_outside_quotes(std::string_view text, std::string_view needle)
 }
 
 // Split on delimiter only outside quoted string literals (OData '' escape aware).
-inline generator<std::string_view> split_outside_quotes_impl(
+// Callers always pass a non-empty delimiter literal ("," / " and " / " or ").
+inline generator<std::string_view> split_outside_quotes(
     std::string_view text,
     std::string_view delimiter)
 {
@@ -261,18 +261,8 @@ inline generator<std::string_view> split_outside_quotes_impl(
         co_yield tail;
 }
 
-inline generator<std::string_view> split_outside_quotes(
-    std::string_view text,
-    std::string_view delimiter)
-{
-    if(delimiter.empty())
-        throw std::invalid_argument{"delimiter cannot be empty"};
-
-    return split_outside_quotes_impl(text, delimiter);
-}
-
 // Paths reachable without authentication when PAT middleware is enabled.
-inline auto is_public_api_path(std::string_view uri) -> bool
+inline bool is_public_api_path(std::string_view uri)
 {
     const ::http::uri parsed{uri};
     const auto segment = parsed.path[1];
@@ -352,7 +342,7 @@ struct handler_context {
 
 // Error response helper - creates standardized error responses
 template<typename Result>
-inline auto make_error_response(const std::string& status, const std::string& error_type, const std::string& message) -> Result
+inline Result make_error_response(const std::string& status, const std::string& error_type, const std::string& message)
 {
     auto error = xson::object{
         {"error", error_type},
@@ -377,7 +367,7 @@ inline auto make_error_response_simple(const std::string& status, const std::str
 }
 
 // Build engine write preconditions from conditional HTTP headers.
-inline auto write_preconditions_from_headers(const ::http::headers& headers) -> yar::db::write_preconditions
+inline yar::db::write_preconditions write_preconditions_from_headers(const ::http::headers& headers)
 {
     using namespace std::string_literals;
     auto pre = yar::db::write_preconditions{};

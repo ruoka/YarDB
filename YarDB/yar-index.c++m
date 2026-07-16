@@ -31,6 +31,10 @@ class secondary_position_iterator
 {
 public:
 
+    using difference_type = std::ptrdiff_t;
+    using value_type = position_type;
+    using iterator_concept = std::forward_iterator_tag;
+
     secondary_position_iterator() = default;
 
     secondary_position_iterator(
@@ -54,6 +58,13 @@ public:
         return *this;
     }
 
+    auto operator++(int)
+    {
+        auto tmp = *this;
+        ++*this;
+        return tmp;
+    }
+
     friend auto operator==(const secondary_position_iterator&, const secondary_position_iterator&) -> bool = default;
 
 private:
@@ -75,6 +86,10 @@ private:
 class reverse_secondary_position_iterator
 {
 public:
+
+    using difference_type = std::ptrdiff_t;
+    using value_type = position_type;
+    using iterator_concept = std::forward_iterator_tag;
 
     reverse_secondary_position_iterator() = default;
 
@@ -108,6 +123,13 @@ public:
         return *this;
     }
 
+    auto operator++(int)
+    {
+        auto tmp = *this;
+        ++*this;
+        return tmp;
+    }
+
     friend auto operator==(const reverse_secondary_position_iterator&, const reverse_secondary_position_iterator&) -> bool = default;
 
 private:
@@ -131,17 +153,28 @@ class index_iterator
 {
 public:
 
+    using difference_type = std::ptrdiff_t;
+    using value_type = position_type;
+    using iterator_concept = std::forward_iterator_tag;
+
     enum class kind {primary, secondary, reverse_primary, reverse_secondary};
 
     using primary_iterator = primary_index_type::const_iterator;
 
     using reverse_primary_iterator = std::reverse_iterator<primary_iterator>;
 
-    index_iterator() = delete;
+    index_iterator() :
+        m_state{secondary_position_iterator{}},
+        m_kind{kind::secondary}
+    {}
 
     index_iterator(const index_iterator&) = default;
 
-    index_iterator& operator=(const index_iterator&) = delete;
+    index_iterator(index_iterator&&) = default;
+
+    index_iterator& operator=(const index_iterator&) = default;
+
+    index_iterator& operator=(index_iterator&&) = default;
 
     index_iterator(primary_iterator current) :
         m_state{current},
@@ -163,7 +196,7 @@ public:
         m_kind{kind::reverse_secondary}
     {}
 
-    auto operator*() -> position_type
+    auto operator*() const -> position_type
     {
         switch(m_kind)
         {
@@ -199,23 +232,35 @@ public:
         return *this;
     }
 
-    auto operator!=(const index_iterator& itr) const -> bool
+    auto operator++(int)
     {
-        if(m_kind != itr.m_kind)
-            return true;
+        auto tmp = *this;
+        ++*this;
+        return tmp;
+    }
 
-        switch(m_kind)
+    friend auto operator==(const index_iterator& lhs, const index_iterator& rhs) -> bool
+    {
+        if(lhs.m_kind != rhs.m_kind)
+            return false;
+
+        switch(lhs.m_kind)
         {
         case kind::primary:
-            return std::get<primary_iterator>(m_state) != std::get<primary_iterator>(itr.m_state);
+            return std::get<primary_iterator>(lhs.m_state) == std::get<primary_iterator>(rhs.m_state);
         case kind::secondary:
-            return std::get<secondary_position_iterator>(m_state) != std::get<secondary_position_iterator>(itr.m_state);
+            return std::get<secondary_position_iterator>(lhs.m_state) == std::get<secondary_position_iterator>(rhs.m_state);
         case kind::reverse_primary:
-            return std::get<reverse_primary_iterator>(m_state) != std::get<reverse_primary_iterator>(itr.m_state);
+            return std::get<reverse_primary_iterator>(lhs.m_state) == std::get<reverse_primary_iterator>(rhs.m_state);
         case kind::reverse_secondary:
-            return std::get<reverse_secondary_position_iterator>(m_state) != std::get<reverse_secondary_position_iterator>(itr.m_state);
+            return std::get<reverse_secondary_position_iterator>(lhs.m_state) == std::get<reverse_secondary_position_iterator>(rhs.m_state);
         }
         std::unreachable();
+    }
+
+    auto operator!=(const index_iterator& itr) const -> bool
+    {
+        return not(*this == itr);
     }
 
 private:
@@ -234,9 +279,10 @@ class index_view : public std::ranges::view_interface<index_view>
 public:
 
     template<typename T>
-    index_view(T begin, T end) :
+    index_view(T begin, T end, std::optional<std::size_t> known_size = std::nullopt) :
         m_begin{begin},
-        m_end{end}
+        m_end{end},
+        m_known_size{known_size}
     {}
 
     auto begin() const
@@ -249,9 +295,22 @@ public:
         return m_end;
     }
 
+    // sized_range when known_size is set at construction; otherwise walks iterators
+    constexpr auto size() const
+    {
+        if(m_known_size)
+            return *m_known_size;
+
+        auto count = std::size_t{0};
+        for(auto it = m_begin; it != m_end; ++it)
+            ++count;
+        return count;
+    }
+
 private:
 
     index_iterator m_begin, m_end;
+    std::optional<std::size_t> m_known_size;
 };
 
 // Index for fast document lookup by primary key (_id) and secondary keys

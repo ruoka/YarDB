@@ -61,22 +61,32 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
         std::tie(begin, end) = keys.equal_range(key);
     }
 
+    const auto known_size = static_cast<std::size_t>(std::ranges::distance(begin, end));
+
     if(!selector.has("$desc"s))
-        return {begin, end};
+        return {begin, end, known_size};
 
     return {
         std::make_reverse_iterator(end),
-        std::make_reverse_iterator(begin)};
+        std::make_reverse_iterator(begin),
+        known_size};
+}
+
+auto sum_secondary_positions(
+    yar::db::secondary_index_type::const_iterator key_begin,
+    yar::db::secondary_index_type::const_iterator key_end)
+{
+    auto total = std::size_t{0};
+    for(auto it = key_begin; it != key_end; ++it)
+        total += it->second.size();
+    return total;
 }
 
 auto count_positions(
     const yar::db::secondary_position_iterator& begin,
     const yar::db::secondary_position_iterator& end)
 {
-    auto count = std::size_t{0};
-    for(auto it = begin; it != end; ++it)
-        ++count;
-    return count;
+    return static_cast<std::size_t>(std::ranges::distance(begin, end));
 }
 
 void advance_positions(
@@ -133,6 +143,10 @@ yar::db::index_view query_analysis_secondary(
 
     auto pos_begin = yar::db::secondary_position_iterator{key_begin, key_end};
     auto pos_end = yar::db::secondary_position_iterator{key_end, key_end};
+    auto known_size = std::optional<std::size_t>{};
+
+    if(not selector.has("$head"s) && not selector.has("$tail"s))
+        known_size = sum_secondary_positions(key_begin, key_end);
 
     if(selector.has("$head"s))
     {
@@ -150,7 +164,7 @@ yar::db::index_view query_analysis_secondary(
     }
 
     if(!selector.has("$desc"s))
-        return {pos_begin, pos_end};
+        return {pos_begin, pos_end, known_size};
 
     return {
         yar::db::reverse_secondary_position_iterator{
@@ -158,7 +172,8 @@ yar::db::index_view query_analysis_secondary(
             yar::db::secondary_index_type::const_reverse_iterator{key_begin}},
         yar::db::reverse_secondary_position_iterator{
             yar::db::secondary_index_type::const_reverse_iterator{key_begin},
-            yar::db::secondary_index_type::const_reverse_iterator{key_begin}}};
+            yar::db::secondary_index_type::const_reverse_iterator{key_begin}},
+        known_size};
 }
 
 void remove_position(yar::db::positions_type& positions, yar::db::position_type position)
@@ -175,16 +190,13 @@ bool is_pagination_key(const std::string& key)
 
 auto selector_count_keys(const yar::db::object& selector)
 {
-    auto keys = std::vector<std::string>{};
     if(not selector.has_objects())
-        return keys;
+        return std::vector<std::string>{};
 
-    for(const auto& entry : selector.get<yar::db::object::map>())
-    {
-        if(not is_pagination_key(entry.first))
-            keys.push_back(entry.first);
-    }
-    return keys;
+    return selector.get<yar::db::object::map>()
+        | std::views::transform([](const auto& entry) { return entry.first; })
+        | std::views::filter([](const std::string& key) { return not is_pagination_key(key); })
+        | std::ranges::to<std::vector<std::string>>();
 }
 
 bool index_only_field_selector(const yar::db::object& field_selector)
@@ -195,22 +207,18 @@ bool index_only_field_selector(const yar::db::object& field_selector)
     if(not field_selector.has_objects())
         return false;
 
-    for(const auto& entry : field_selector.get<yar::db::object::map>())
-    {
-        const auto& op = entry.first;
-        if(op != "$eq"s && op != "$gt"s && op != "$gte"s && op != "$lt"s && op != "$lte"s)
-            return false;
-    }
-
-    return true;
+    return std::ranges::all_of(
+        field_selector.get<yar::db::object::map>(),
+        [](const auto& entry)
+        {
+            const auto& op = entry.first;
+            return op == "$eq"s || op == "$gt"s || op == "$gte"s || op == "$lt"s || op == "$lte"s;
+        });
 }
 
 std::size_t count_index_view(const yar::db::index_view& view)
 {
-    auto count = std::size_t{0};
-    for(auto it = view.begin(); it != view.end(); ++it)
-        ++count;
-    return count;
+    return std::ranges::distance(view);
 }
 
 std::optional<std::size_t> try_index_only_count(
@@ -268,17 +276,12 @@ void yar::db::index::add(const std::string& key)
 
 void yar::db::index::add(std::vector<std::string> keys)
 {
-    for(const std::string& key : keys)
-        add(key);
+    std::ranges::for_each(keys, [this](const std::string& key) { add(key); });
 }
 
 std::vector<std::string> yar::db::index::keys() const
 {
-    auto result = std::vector<std::string>{};
-    result.reserve(m_secondary_keys.size());
-    for(const auto& field_name : m_secondary_keys.keys())
-        result.push_back(field_name);
-    return result;
+    return m_secondary_keys.keys() | std::ranges::to<std::vector<std::string>>();
 }
 
 bool yar::db::index::primary_key(const yar::db::object& selector) const
@@ -288,10 +291,9 @@ bool yar::db::index::primary_key(const yar::db::object& selector) const
 
 bool yar::db::index::secondary_key(const yar::db::object& selector) const
 {
-    for(const auto& field_name : m_secondary_keys.keys())
-        if(selector.has(field_name))
-            return true;
-    return false;
+    return std::ranges::any_of(
+        m_secondary_keys.keys(),
+        [&](const std::string& field_name) { return selector.has(field_name); });
 }
 
 std::size_t yar::db::index::count(std::istream& storage, const yar::db::object& selector) const

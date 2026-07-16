@@ -57,10 +57,7 @@ public:
 
     std::size_t view_count(const object& selector)
     {
-        auto n = std::size_t{0};
-        for(auto it = m_index.view(selector).begin(); it != m_index.view(selector).end(); ++it)
-            ++n;
-        return n;
+        return std::ranges::distance(m_index.view(selector));
     }
 
 private:

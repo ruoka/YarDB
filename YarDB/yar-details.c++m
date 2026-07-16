@@ -15,6 +15,109 @@ using namespace std::string_view_literals;
 using namespace net;
 using namespace ::http;  // HTTP constants and types from net::http
 
+// Find the first needle occurrence outside quoted string literals.
+inline auto find_outside_quotes(std::string_view text, std::string_view needle)
+    -> std::optional<std::size_t>
+{
+    if(needle.empty())
+        throw std::invalid_argument{"needle cannot be empty"};
+
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+
+    for(auto i = std::size_t{0}; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+
+        if(in_quote)
+        {
+            if(c == quote_char
+                && i + 1 < text.size()
+                && text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' || c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(i + needle.size() <= text.size() && text.substr(i, needle.size()) == needle)
+            return i;
+    }
+
+    return std::nullopt;
+}
+
+// Split on delimiter only outside quoted string literals (OData '' escape aware).
+inline auto split_outside_quotes(std::string_view text, std::string_view delimiter)
+    -> std::vector<std::string_view>
+{
+    if(delimiter.empty())
+        throw std::invalid_argument{"delimiter cannot be empty"};
+    if(text.empty())
+        return {};
+
+    auto parts = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+
+    for(auto i = std::size_t{0}; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+
+        if(in_quote)
+        {
+            if(c == quote_char
+                && i + 1 < text.size()
+                && text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' || c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(i + delimiter.size() <= text.size() && text.substr(i, delimiter.size()) == delimiter)
+        {
+            auto part = utils::trim(text.substr(start, i - start));
+            if(not part.empty())
+                parts.push_back(part);
+
+            i += delimiter.size() - 1;
+            start = i + 1;
+        }
+    }
+
+    auto tail = utils::trim(text.substr(start));
+    if(not tail.empty())
+        parts.push_back(tail);
+
+    return parts;
+}
+
 // Paths reachable without authentication when PAT middleware is enabled.
 inline auto is_public_api_path(std::string_view uri) -> bool
 {
@@ -41,11 +144,13 @@ inline auto validate_collection_name(std::string_view collection_name)
         throw std::invalid_argument{"Collection name must start with a lowercase letter"};
     
     // Must contain only lowercase letters, digits, and underscores
-    for(auto c : collection_name)
+    constexpr auto is_valid_collection_char = [](const char c)
     {
-        if(!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
-            throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
-    }
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+    };
+
+    if(not std::ranges::all_of(collection_name, is_valid_collection_char))
+        throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
     
     return std::string{collection_name};
 }
@@ -71,28 +176,11 @@ inline ::http::response_with_headers not_acceptable_response_with_headers()
 // Query parameter parsing
 inline auto parse_comma_separated_list(std::string_view list_value)
 {
-    auto fields = std::vector<std::string_view>{};
-    auto start = std::size_t{0};
-    
-    while(true)
-    {
-        if(fields.size() >= yar::db::max_query_fields)
-            throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(yar::db::max_query_fields) + ")"};
-        
-        auto pos = list_value.find(',', start);
-        if(pos == std::string_view::npos)
-        {
-            auto field = utils::trim(list_value.substr(start));
-            if(!field.empty())
-                fields.push_back(field);
-            break;
-        }
-        auto field = utils::trim(list_value.substr(start, pos - start));
-        if(!field.empty())
-            fields.push_back(field);
-        start = pos + 1;
-    }
-    
+    auto fields = split_outside_quotes(list_value, ","sv);
+
+    if(fields.size() > yar::db::max_query_fields)
+        throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(yar::db::max_query_fields) + ")"};
+
     return fields;
 }
 
@@ -307,32 +395,21 @@ inline auto parse_query_params(const ::http::uri& uri)
     const auto query_str = static_cast<std::string_view>(uri.query);
     if(query_str.empty())
         return params;
-    
-    // Parse query string: key1=value1&key2=value2
-    auto start = std::size_t{0};
-    while(start < query_str.size())
+
+    for(const auto part : query_str | std::views::split('&'))
     {
-        auto eq_pos = query_str.find('=', start);
+        const auto segment = std::string_view{part};
+        const auto eq_pos = segment.find('=');
         if(eq_pos == std::string_view::npos)
-            break;
-        
-        auto key = utils::trim(query_str.substr(start, eq_pos - start));
-        start = eq_pos + 1;
-        
-        auto amp_pos = query_str.find('&', start);
-        auto value = utils::trim(query_str.substr(start, amp_pos == std::string_view::npos ? query_str.size() - start : amp_pos - start));
-        
-        if(!key.empty())
-        {
-            // URL decode both key and value
+            continue;
+
+        auto key = utils::trim(segment.substr(0, eq_pos));
+        auto value = utils::trim(segment.substr(eq_pos + 1));
+
+        if(not key.empty())
             params[net::url_decode(key)] = net::url_decode(value);
-        }
-        
-        if(amp_pos == std::string_view::npos)
-            break;
-        start = amp_pos + 1;
     }
-    
+
     return params;
 }
 

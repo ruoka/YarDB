@@ -40,9 +40,9 @@ using pat_hash = string;
 
 auto trim(string_view text) -> string
 {
-    while(!text.empty() && isspace(static_cast<unsigned char>(text.front())))
+    while(not text.empty() and isspace(static_cast<unsigned char>(text.front())))
         text.remove_prefix(1);
-    while(!text.empty() && isspace(static_cast<unsigned char>(text.back())))
+    while(not text.empty() and isspace(static_cast<unsigned char>(text.back())))
         text.remove_suffix(1);
     return string{text};
 }
@@ -50,14 +50,14 @@ auto trim(string_view text) -> string
 void load_pat_file(const string& path, vector<string>& tokens)
 {
     auto input = ifstream{path};
-    if(!input.is_open())
+    if(not input.is_open())
         throw runtime_error{"PAT file not found: "s + path};
 
     auto line = ""s;
     while(getline(input, line))
     {
         const auto trimmed = trim(line);
-        if(trimmed.empty() || trimmed.starts_with('#'))
+        if(trimmed.empty() or trimmed.starts_with('#'))
             continue;
         tokens.push_back(trimmed);
     }
@@ -72,9 +72,9 @@ auto normalize_bearer_auth(string_view token) -> string
 
 auto is_hex_digit(char ch) -> bool
 {
-    return (ch >= '0' && ch <= '9')
-        || (ch >= 'a' && ch <= 'f')
-        || (ch >= 'A' && ch <= 'F');
+    return (ch >= '0' and ch <= '9')
+        or (ch >= 'a' and ch <= 'f')
+        or (ch >= 'A' and ch <= 'F');
 }
 
 auto is_sha256_hex(string_view text) -> bool
@@ -89,7 +89,7 @@ auto to_lower_hex(string_view text) -> string
     auto result = string{text};
     for(auto& ch : result)
     {
-        if(ch >= 'A' && ch <= 'F')
+        if(ch >= 'A' and ch <= 'F')
             ch = static_cast<char>(ch - 'A' + 'a');
     }
     return result;
@@ -108,7 +108,7 @@ auto parse_pat_hash(string_view raw) -> pat_hash
     if(raw.starts_with("sha256:"))
     {
         const auto digest = trim(raw.substr(string_view{"sha256:"}.size()));
-        if(!is_sha256_hex(digest))
+        if(not is_sha256_hex(digest))
             throw runtime_error{"PAT sha256 digest must be 64 hexadecimal characters"};
         return to_lower_hex(digest);
     }
@@ -148,14 +148,14 @@ auto is_public_bind(string_view host) -> bool
 {
     const auto normalized = trim(host);
     return normalized == "0.0.0.0"sv
-        || normalized == "::"sv
-        || normalized == "::0"sv
-        || normalized == "[::]"sv;
+        or normalized == "::"sv
+        or normalized == "::0"sv
+        or normalized == "[::]"sv;
 }
 
 void validate_bind_policy(string_view bind_host, bool has_pat)
 {
-    if(is_public_bind(bind_host) && !has_pat)
+    if(is_public_bind(bind_host) and not has_pat)
         throw runtime_error{
             "refusing to bind to "s + string{bind_host}
             + " without PAT authentication; use --pat or --pat-file, or bind to 127.0.0.1"};
@@ -265,7 +265,7 @@ try
     for(const auto& pat_file : admin_pat_files)
         load_pat_file(pat_file, raw_admin_pats);
 
-    const auto has_pat = !raw_pats.empty();
+    const auto has_pat = not raw_pats.empty();
     validate_bind_policy(bind_host, has_pat);
 
     auto hashed_pats = set<pat_hash>{};
@@ -276,13 +276,13 @@ try
     slog << notice << "Starting up server on " << bind_host << ":" << service_or_port << flush;
     auto server = yar::http::rest_api_server{file, service_or_port, bind_host};
 
-    if(!hashed_pats.empty() || !hashed_admin_pats.empty())
+    if(not hashed_pats.empty() or not hashed_admin_pats.empty())
     {
         auto valid_hashes = make_shared<set<pat_hash>>(std::move(hashed_pats));
         auto valid_admin_hashes = make_shared<set<pat_hash>>(std::move(hashed_admin_pats));
 
         std::function<bool(string_view)> validate_data{};
-        if(!valid_hashes->empty())
+        if(not valid_hashes->empty())
         {
             validate_data = [valid_hashes](string_view authorization) {
                 return validate_hashed_pat(*valid_hashes, authorization);
@@ -290,7 +290,7 @@ try
         }
 
         std::function<bool(string_view)> validate_admin{};
-        if(!valid_admin_hashes->empty())
+        if(not valid_admin_hashes->empty())
         {
             validate_admin = [valid_admin_hashes](string_view authorization) {
                 return validate_hashed_pat(*valid_admin_hashes, authorization);
@@ -304,9 +304,9 @@ try
             std::move(validate_admin)
         );
 
-        if(!valid_hashes->empty())
+        if(not valid_hashes->empty())
             slog << notice << "PAT authentication enabled (" << valid_hashes->size() << " hashed token(s))" << flush;
-        if(!valid_admin_hashes->empty())
+        if(not valid_admin_hashes->empty())
             slog << notice << "Admin PAT authentication enabled (" << valid_admin_hashes->size()
                  << " hashed token(s) for /_* routes)" << flush;
     }
@@ -318,7 +318,7 @@ try
 
     slog << notice << "Server started, waiting for shutdown signal" << flush;
 
-    while(!g_shutdown_requested.load(std::memory_order_acquire))
+    while(not g_shutdown_requested.load(std::memory_order_acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     slog << notice << "Shutdown signal received, draining server" << flush;

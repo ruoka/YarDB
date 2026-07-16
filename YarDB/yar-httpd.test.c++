@@ -93,7 +93,7 @@ auto parse_http_response(net::endpointstream& stream, const string& method = ""s
 
     // Read body if content-length is present and method is not HEAD
     // For HEAD requests, Content-Length is set but body is not sent by framework
-    if(headers.contains("content-length") && method != "HEAD"s)
+    if(headers.contains("content-length") and method != "HEAD"s)
     {
         auto content_length = utils::stoll(headers["content-length"]);
         if(content_length > 0)
@@ -117,7 +117,7 @@ auto make_request(const string& port, const string& method, const string& path, 
            << "Accept: application/json" << crlf
            << "Content-Type: application/json" << crlf;
     
-    if(!body.empty())
+    if(method == "POST"s or method == "PUT"s or method == "PATCH"s or not body.empty())
         stream << "Content-Length: " << body.length() << crlf;
     
     stream << crlf << body << flush;
@@ -134,7 +134,7 @@ auto make_request_with_accept(const string& port, const string& method, const st
            << "Host: localhost:" << port << crlf
            << "Accept: " << accept_header << crlf;
     
-    if(!body.empty())
+    if(method == "POST"s or method == "PUT"s or method == "PATCH"s or not body.empty())
     {
         stream << "Content-Type: application/json" << crlf
                << "Content-Length: " << body.length() << crlf;
@@ -161,13 +161,13 @@ auto make_request_with_headers(const string& port, const string& method, const s
         auto lower_key = key;
         for(auto& c : lower_key)
         {
-            if(c >= 'A' && c <= 'Z')
+            if(c >= 'A' and c <= 'Z')
                 c = c - 'A' + 'a';
         }
         stream << lower_key << ": " << value << crlf;
     }
     
-    if(!body.empty())
+    if(not body.empty())
     {
         stream << "Content-Type: application/json" << crlf
                << "Content-Length: " << body.length() << crlf;
@@ -904,7 +904,7 @@ auto test_set()
             {
                 require_true(item.has("status"s));
                 const string status_value = item["status"s];
-                require_true(status_value == "active"s || status_value == "pending"s);
+                require_true(status_value == "active"s or status_value == "pending"s);
             }
         };
 
@@ -1000,10 +1000,10 @@ auto test_set()
 
             for(const auto& item : items)
             {
-                require_true(item.has("age"s) && item.has("status"s));
+                require_true(item.has("age"s) and item.has("status"s));
                 const auto age = static_cast<xson::integer_type>(item["age"s]);
                 const string status_value = item["status"s];
-                require_true(age > 25 || status_value == "active"s);
+                require_true(age > 25 or status_value == "active"s);
             }
         };
 
@@ -1099,12 +1099,12 @@ auto test_set()
                     
                     // Selected fields should be present if they exist in the document
                     // (they might not exist if document was created without them)
-                    if(item.has("name"s) || item.has("email"s))
+                    if(item.has("name"s) or item.has("email"s))
                     {
                         // If name or email exists, verify projection worked
                         // Other fields should NOT be present
-                        require_true(!item.has("age"s));
-                        require_true(!item.has("status"s));
+                        require_true(not item.has("age"s));
+                        require_true(not item.has("status"s));
                     }
                 }
             }
@@ -1160,8 +1160,8 @@ auto test_set()
                 require_true(item.has("_id"s));
                 // Selected fields should be present if they exist in source documents
                 // Other fields should NOT be present (projected away)
-                require_true(!item.has("email"s));
-                require_true(!item.has("status"s));
+                require_true(not item.has("email"s));
+                require_true(not item.has("status"s));
             }
         };
 
@@ -1922,7 +1922,7 @@ auto test_set()
             require_eq(reason, "OK"s);
             require_true(headers.contains("content-type"s));
             require_eq(headers["content-type"s], "application/json"s);
-            require_true(!response_body.empty());
+            require_true(not response_body.empty());
         };
 
         section("GET with Accept: */* returns 200 OK") = [setup]
@@ -2826,7 +2826,7 @@ auto test_set()
             // Should return 304 if document timestamp <= If-Modified-Since date
             // Note: Exact match might return 304, or if timestamp is slightly newer it returns 200
             // The behavior depends on the exact timestamp comparison
-            require_true(status == "200"s || status == "304"s);
+            require_true(status == "200"s or status == "304"s);
             if(status == "304"s)
             {
                 require_true(body.empty()); // 304 should have no body

@@ -36,7 +36,7 @@ bool rollback(
     auto resize_error = std::error_code{};
     std::filesystem::resize_file(db, original_size, resize_error);
     const auto reopened = reopen(storage, db);
-    return statuses_restored && not resize_error && reopened;
+    return statuses_restored and not resize_error and reopened;
 }
 
 void validate_and_recover_storage(std::fstream& storage, const std::string& db)
@@ -77,8 +77,8 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
         }
 
         if(metadata.status != yar::db::metadata::created
-            && metadata.status != yar::db::metadata::updated
-            && metadata.status != yar::db::metadata::deleted)
+            and metadata.status != yar::db::metadata::updated
+            and metadata.status != yar::db::metadata::deleted)
             throw std::runtime_error{
                 "Invalid database record status at offset "s + std::to_string(record_start)};
 
@@ -86,7 +86,7 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
             throw std::runtime_error{
                 "Invalid database record position at offset "s + std::to_string(record_start)};
 
-        if(metadata.previous >= metadata.position || metadata.previous < -1)
+        if(metadata.previous >= metadata.position or metadata.previous < -1)
             throw std::runtime_error{
                 "Invalid database history link at offset "s + std::to_string(record_start)};
 
@@ -105,7 +105,7 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
     storage.close();
     auto resize_error = std::error_code{};
     std::filesystem::resize_file(db, static_cast<std::uintmax_t>(last_complete), resize_error);
-    if(resize_error || not reopen(storage, db))
+    if(resize_error or not reopen(storage, db))
         throw std::runtime_error{
             "Failed to recover truncated database tail at offset "s + std::to_string(last_complete)};
 }
@@ -159,9 +159,9 @@ yar::db::engine::engine(std::string_view db) :
     m_storage{}
 {
     m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary);
-    if(!m_storage.is_open())
+    if(not m_storage.is_open())
         m_storage.open(m_db, std::ios::out | std::ios::in | std::ios::binary | std::ios::trunc);
-    if(!m_storage.is_open())
+    if(not m_storage.is_open())
         throw std::runtime_error{"Failed to open/create DB "s + m_db};
     validate_and_recover_storage(m_storage, m_db);
     setup_index_structure();
@@ -192,7 +192,7 @@ bool yar::db::engine::preconditions_met(
     const write_preconditions& preconditions) const
 {
     if(preconditions.if_match_position
-        && metadata_record.position != *preconditions.if_match_position)
+        and metadata_record.position != *preconditions.if_match_position)
         return false;
 
     if(preconditions.if_unmodified_since)
@@ -271,7 +271,7 @@ void yar::db::engine::populate_indexes()
         if(m_storage.fail())
             break;
 
-        if(metadata.status == metadata::deleted || metadata.status == metadata::updated)
+        if(metadata.status == metadata::deleted or metadata.status == metadata::updated)
             continue;
 
         auto& index = m_index[metadata.collection];
@@ -313,7 +313,7 @@ yar::db::db_result<> yar::db::engine::reindex()
 
         auto& rebuilt_index = rebuilt[metadata.collection];
         rebuilt_index.update(document);
-        if(metadata.status != metadata::deleted && metadata.status != metadata::updated)
+        if(metadata.status != metadata::deleted and metadata.status != metadata::updated)
             rebuilt_index.insert(document, metadata.position);
     }
     m_storage.clear();

@@ -28,9 +28,9 @@ struct import_row
 
 auto trim(string_view text)
 {
-    while(!text.empty() && isspace(static_cast<unsigned char>(text.front())))
+    while(not text.empty() and isspace(static_cast<unsigned char>(text.front())))
         text.remove_prefix(1);
-    while(!text.empty() && isspace(static_cast<unsigned char>(text.back())))
+    while(not text.empty() and isspace(static_cast<unsigned char>(text.back())))
         text.remove_suffix(1);
     return text;
 }
@@ -38,13 +38,13 @@ auto trim(string_view text)
 auto parse_import_row(string_view line, size_t line_no)
 {
     auto parsed = json::parse(line);
-    if(!parsed.has("collection"s) || !parsed.has("document"s))
+    if(not parsed.has("collection"s) or not parsed.has("document"s))
         throw runtime_error{"line "s + to_string(line_no) + ": expected collection and document fields"s};
 
     if(parsed.has("status"s))
     {
         const auto status = static_cast<string>(parsed["status"s]);
-        if(status == "updated"s || status == "deleted"s)
+        if(status == "updated"s or status == "deleted"s)
             throw runtime_error{
                 "line "s + to_string(line_no)
                 + ": refusing to import status="s + status
@@ -58,7 +58,7 @@ auto parse_import_row(string_view line, size_t line_no)
 
 auto keys_from_db_document(const object& document, size_t line_no)
 {
-    if(!document.has("collection"s) || !document.has("keys"s))
+    if(not document.has("collection"s) or not document.has("keys"s))
         throw runtime_error{
             "line "s + to_string(line_no)
             + ": _db document requires collection and keys fields"s};
@@ -66,7 +66,7 @@ auto keys_from_db_document(const object& document, size_t line_no)
     auto keys = vector<string>{};
     for(const auto& key : document["keys"s].get<object::array>())
     {
-        if(!key.is_string())
+        if(not key.is_string())
             throw runtime_error{"line "s + to_string(line_no) + ": _db keys must be strings"s};
         keys.push_back(static_cast<string>(key));
     }
@@ -122,9 +122,9 @@ try
         throw runtime_error{"--file must not be empty"s};
 
     error_code ec{};
-    if(filesystem::exists(file, ec) && filesystem::file_size(file, ec) > 0)
+    if(filesystem::exists(file, ec) and filesystem::file_size(file, ec) > 0)
     {
-        if(!force)
+        if(not force)
             throw runtime_error{
                 "output file already exists: "s + file + "; use --force to overwrite"s};
         filesystem::remove(file, ec);
@@ -133,10 +133,10 @@ try
 
     auto input_file = ifstream{};
     istream* input = &cin;
-    if(!input_path.empty())
+    if(not input_path.empty())
     {
         input_file.open(input_path);
-        if(!input_file.is_open())
+        if(not input_file.is_open())
             throw runtime_error{"input file not found: "s + input_path};
         input = &input_file;
     }

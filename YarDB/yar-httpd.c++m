@@ -138,7 +138,7 @@ public:
     {
         std::lock_guard<std::mutex> lock{m_start_mutex};
         const auto state = m_state.load();
-        if(state == server_state::ready || state == server_state::starting)
+        if(state == server_state::ready or state == server_state::starting)
             m_state.store(server_state::draining);
     }
 
@@ -146,7 +146,7 @@ public:
     {
         std::lock_guard<std::mutex> lock{m_start_mutex};
         const auto state = m_state.load();
-        if(state == server_state::ready || state == server_state::starting)
+        if(state == server_state::ready or state == server_state::starting)
             m_state.store(server_state::draining);
         m_server.stop();
         if(m_listen_thread.joinable())
@@ -258,7 +258,7 @@ public:
         m_validate_admin_token = std::move(validate_admin_token);
         m_auth_realm = std::string{realm};
         m_authentication_enabled = static_cast<bool>(m_validate_token)
-            || static_cast<bool>(m_validate_admin_token);
+            or static_cast<bool>(m_validate_admin_token);
         rebuild_routes();
     }
 
@@ -323,7 +323,7 @@ private:
         {
             return [requires_headers, next = std::move(next)](auto req, auto body, auto hdr) mutable
             {
-                if(!accepts_json(hdr))
+                if(not accepts_json(hdr))
                 {
                     if(requires_headers)
                         return not_acceptable_response_with_headers();
@@ -421,7 +421,7 @@ private:
     // Returns middleware factory if rate limiting is enabled, otherwise returns empty optional
     std::optional<middleware_factory> rate_limiting_middleware() const
     {
-        if(!m_rate_limiting_enabled)
+        if(not m_rate_limiting_enabled)
             return std::nullopt;
         
         return ::http::middleware::rate_limiting_middleware(
@@ -435,7 +435,7 @@ private:
     // Returns middleware factory if CORS is enabled, otherwise returns empty optional
     std::optional<middleware_factory> cors_middleware() const
     {
-        if(!m_cors_enabled)
+        if(not m_cors_enabled)
             return std::nullopt;
         
         return ::http::middleware::cors_middleware(
@@ -450,7 +450,7 @@ private:
     // Path-aware PAT middleware: public paths skip auth; `/_*` uses admin validator when set.
     std::optional<middleware_factory> authentication_middleware() const
     {
-        if(!m_authentication_enabled)
+        if(not m_authentication_enabled)
             return std::nullopt;
 
         return [is_public_path = m_is_public_path,
@@ -461,22 +461,22 @@ private:
             return [is_public_path, validate_token, validate_admin_token, realm, next = std::move(next)](
                        auto req, auto body, auto hdr) mutable
             {
-                if(is_public_path && is_public_path(req))
+                if(is_public_path and is_public_path(req))
                     return next(req, body, hdr);
 
                 const auto admin_path = is_admin_api_path(req);
-                const auto& validator = (admin_path && validate_admin_token)
+                const auto& validator = (admin_path and validate_admin_token)
                     ? validate_admin_token
                     : validate_token;
 
-                if(!validator)
+                if(not validator)
                     return next(req, body, hdr);
 
                 std::string_view authorization{};
                 if(hdr.contains("authorization"s))
                     authorization = hdr["authorization"s];
 
-                if(authorization.empty() || !validator(authorization))
+                if(authorization.empty() or not validator(authorization))
                 {
                     auto error_headers = ::http::headers{};
                     error_headers.set("www-authenticate"s, "Basic realm=\""s + realm + "\""s);
@@ -697,7 +697,7 @@ private:
             const auto found = m_engine.read(ctx.collection, selector, documents);
 
             // Check if document was found
-            if(!found || documents.get<xson::object::array>().empty())
+            if(not found or documents.get<xson::object::array>().empty())
             {
                 auto error = xson::object{
                     {"error", "Not Found"s},
@@ -727,7 +727,7 @@ private:
                 
                 // Check If-None-Match conditional request (for GET/HEAD)
                 const auto none_match_check = check_if_none_match(headers, etag);
-                if(none_match_check.has_value() && !none_match_check.value())
+                if(none_match_check.has_value() and not none_match_check.value())
                 {
                     // ETag matches - resource not modified, return 304 Not Modified
                     if(metadata_timestamp.has_value())
@@ -746,7 +746,7 @@ private:
                 
                 // Check If-Modified-Since conditional request
                 const auto modified_check = check_if_modified_since(headers, metadata_timestamp.value());
-                if(modified_check.has_value() && !modified_check.value())
+                if(modified_check.has_value() and not modified_check.value())
                 {
                     // Document not modified since client's date - return 304 Not Modified
                     return response_with_headers{status_not_modified, ""s, std::make_optional(response_headers)};
@@ -774,7 +774,7 @@ private:
             auto params = parse_query_params(uri);
             
             // Handle $count (OData: $count=true) - return count only
-            if(params.contains("$count"s) && params["$count"s] == "true"s)
+            if(params.contains("$count"s) and params["$count"s] == "true"s)
             {
                 // Build selector for counting (without $top/$skip to get full count)
                 auto count_selector = xson::object{};
@@ -920,7 +920,7 @@ private:
             auto request_body = xson::json::parse(body);
             
             // Validate request body has "keys" field
-            if(!request_body.has("keys"s))
+            if(not request_body.has("keys"s))
             {
                 auto error = xson::object{
                     {"error", "Bad Request"s},
@@ -931,7 +931,7 @@ private:
             
             // Extract and validate keys
             auto keys_value = request_body["keys"s];
-            if(!keys_value.is_array())
+            if(not keys_value.is_array())
             {
                 auto error = xson::object{
                     {"error", "Bad Request"s},
@@ -954,7 +954,7 @@ private:
             auto keys = std::vector<std::string>{};
             for(const auto& key : keys_array)
             {
-                if(!key.is_string())
+                if(not key.is_string())
                 {
                     auto error = xson::object{
                         {"error", "Bad Request"s},
@@ -965,7 +965,7 @@ private:
                 
                 auto key_str = static_cast<std::string>(key);
                 // Validate key name (basic validation)
-                if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
+                if(key_str.empty() or key_str.size() > yar::db::max_field_name_length)
                 {
                     auto error = xson::object{
                         {"error", "Bad Request"s},
@@ -1005,7 +1005,7 @@ private:
             auto db_documents = xson::object{};
             auto found = m_engine.read("_db"s, selector, db_documents);
             
-            if(!found || db_documents.get<xson::object::array>().empty())
+            if(not found or db_documents.get<xson::object::array>().empty())
             {
                 // This shouldn't happen, but handle it gracefully
                 auto error = xson::object{
@@ -1056,7 +1056,7 @@ private:
             auto request_body = xson::json::parse(body);
             
             // Validate request body has "keys" field
-            if(!request_body.has("keys"s))
+            if(not request_body.has("keys"s))
             {
                 auto error = xson::object{
                     {"error", "Bad Request"s},
@@ -1067,7 +1067,7 @@ private:
             
             // Extract and validate keys
             const auto keys_value = request_body["keys"s];
-            if(!keys_value.is_array())
+            if(not keys_value.is_array())
             {
                 auto error = xson::object{
                     {"error", "Bad Request"s},
@@ -1096,7 +1096,7 @@ private:
             
             // Build set of existing keys to avoid duplicates
             auto existing_keys_set = std::set<std::string>{};
-            if(has_existing && !existing_docs.get<xson::object::array>().empty())
+            if(has_existing and not existing_docs.get<xson::object::array>().empty())
             {
                 const auto existing_doc = existing_docs.get<xson::object::array>()[0];
                 if(existing_doc.has("keys"s))
@@ -1114,7 +1114,7 @@ private:
             auto new_keys = std::vector<std::string>{};
             for(const auto& key : keys_array)
             {
-                if(!key.is_string())
+                if(not key.is_string())
                 {
                     auto error = xson::object{
                         {"error", "Bad Request"s},
@@ -1126,7 +1126,7 @@ private:
                 auto key_str = static_cast<std::string>(key);
                 
                 // Validate key name
-                if(key_str.empty() || key_str.size() > yar::db::max_field_name_length)
+                if(key_str.empty() or key_str.size() > yar::db::max_field_name_length)
                 {
                     auto error = xson::object{
                         {"error", "Bad Request"s},
@@ -1156,7 +1156,7 @@ private:
             // If no new keys to add, return existing document
             if(new_keys.empty())
             {
-                if(has_existing && !existing_docs.get<xson::object::array>().empty())
+                if(has_existing and not existing_docs.get<xson::object::array>().empty())
                 {
                     auto result_document = existing_docs.get<xson::object::array>()[0];
                     
@@ -1197,7 +1197,7 @@ private:
             auto db_documents = xson::object{};
             auto found = m_engine.read("_db"s, selector, db_documents);
             
-            if(!found || db_documents.get<xson::object::array>().empty())
+            if(not found or db_documents.get<xson::object::array>().empty())
             {
                 auto error = xson::object{
                     {"error", "Internal Server Error"s},
@@ -1258,7 +1258,7 @@ private:
             const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
             const auto preconditions = write_preconditions_from_headers(headers);
 
-            if(exists && !existing_docs.get<xson::object::array>().empty())
+            if(exists and not existing_docs.get<xson::object::array>().empty())
             {
                 auto metadata_level = yar::http::odata::parse_metadata_level(headers);
                 if(metadata_level != yar::http::odata::metadata_level::none)
@@ -1329,7 +1329,7 @@ private:
             const auto collection = validate_collection_name(uri.path[1]);
             auto existing_docs = xson::object{};
             const auto exists = m_engine.read(collection, selector, existing_docs);
-            if(not exists || existing_docs.get<xson::object::array>().empty())
+            if(not exists or existing_docs.get<xson::object::array>().empty())
             {
                 auto error = xson::object{
                     {"error", "Not Found"s},
@@ -1352,7 +1352,7 @@ private:
             auto metadata_level = yar::http::odata::parse_metadata_level(headers);
             if(metadata_level != yar::http::odata::metadata_level::none)
             {
-                if(documents.is_array() && !documents.get<xson::object::array>().empty())
+                if(documents.is_array() and not documents.get<xson::object::array>().empty())
                 {
                     // PATCH returns array with updated document(s)
                     auto& items = documents.get<xson::object::array>();
@@ -1361,7 +1361,7 @@ private:
                         item = yar::http::odata::add_metadata(item, metadata_level, collection, id);
                     }
                 }
-                else if(!documents.is_array())
+                else if(not documents.is_array())
                 {
                     // Single object
                     documents = yar::http::odata::add_metadata(documents, metadata_level, collection, id);

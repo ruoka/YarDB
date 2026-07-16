@@ -63,7 +63,7 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
 
     const auto known_size = static_cast<std::size_t>(std::ranges::distance(begin, end));
 
-    if(!selector.has("$desc"s))
+    if(not selector.has("$desc"s))
         return {begin, end, known_size};
 
     return {
@@ -94,7 +94,7 @@ void advance_positions(
     const yar::db::secondary_position_iterator& end,
     xson::integer_type steps)
 {
-    while(steps > 0 && it != end)
+    while(steps > 0 and it != end)
     {
         ++it;
         --steps;
@@ -145,7 +145,7 @@ yar::db::index_view query_analysis_secondary(
     auto pos_end = yar::db::secondary_position_iterator{key_end, key_end};
     auto known_size = std::optional<std::size_t>{};
 
-    if(not selector.has("$head"s) && not selector.has("$tail"s))
+    if(not selector.has("$head"s) and not selector.has("$tail"s))
         known_size = sum_secondary_positions(key_begin, key_end);
 
     if(selector.has("$head"s))
@@ -163,7 +163,7 @@ yar::db::index_view query_analysis_secondary(
             advance_positions(pos_begin, pos_end, total - n);
     }
 
-    if(!selector.has("$desc"s))
+    if(not selector.has("$desc"s))
         return {pos_begin, pos_end, known_size};
 
     return {
@@ -185,7 +185,7 @@ void remove_position(yar::db::positions_type& positions, yar::db::position_type 
 
 bool is_pagination_key(const std::string& key)
 {
-    return key == "$top"s || key == "$skip"s || key == "$desc"s;
+    return key == "$top"s or key == "$skip"s or key == "$desc"s;
 }
 
 auto selector_count_keys(const yar::db::object& selector)
@@ -212,7 +212,7 @@ bool index_only_field_selector(const yar::db::object& field_selector)
         [](const auto& entry)
         {
             const auto& op = entry.first;
-            return op == "$eq"s || op == "$gt"s || op == "$gte"s || op == "$lt"s || op == "$lte"s;
+            return op == "$eq"s or op == "$gt"s or op == "$gte"s or op == "$lt"s or op == "$lte"s;
         });
 }
 
@@ -239,7 +239,7 @@ std::optional<std::size_t> try_index_only_count(
         return count_index_view(index.view(selector));
     }
 
-    if(not index.secondary_key(selector) || not index_only_field_selector(selector[keys[0]]))
+    if(not index.secondary_key(selector) or not index_only_field_selector(selector[keys[0]]))
         return std::nullopt;
 
     return count_index_view(index.view(selector));
@@ -314,7 +314,7 @@ yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
             if(selector.has(entry.first))
                 return query_analysis_secondary(selector[entry.first], entry.second);
 
-    if(!selector.has("$desc"s))
+    if(not selector.has("$desc"s))
         return {std::ranges::cbegin(m_primary_keys), std::ranges::cend(m_primary_keys)};
 
     return {

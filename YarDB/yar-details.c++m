@@ -22,7 +22,7 @@ using namespace ::http;  // HTTP constants and types from net::http
 // (__cpp_lib_generator >= 202207L). Until then, a simplified local stand-in:
 // non-recursive, no custom Allocator — enough for co_yield pipelines and
 // ranges::to (see P2502R2 / [coro.generator]).
-#if defined(__cpp_lib_generator) && __cpp_lib_generator >= 202207L
+#if defined(__cpp_lib_generator) and __cpp_lib_generator >= 202207L
 
 template<typename Ref, typename V = void>
 using generator = std::generator<Ref, V>;
@@ -104,7 +104,7 @@ public:
 
         friend bool operator==(const iterator& lhs, std::default_sentinel_t)
         {
-            return not lhs.m_coroutine || lhs.m_coroutine.done();
+            return not lhs.m_coroutine or lhs.m_coroutine.done();
         }
 
     private:
@@ -178,8 +178,8 @@ inline std::optional<std::size_t> find_outside_quotes(std::string_view text, std
         if(in_quote)
         {
             if(c == quote_char
-                && i + 1 < text.size()
-                && text[i + 1] == quote_char)
+                and i + 1 < text.size()
+                and text[i + 1] == quote_char)
             {
                 ++i;
                 continue;
@@ -191,14 +191,14 @@ inline std::optional<std::size_t> find_outside_quotes(std::string_view text, std
             continue;
         }
 
-        if(c == '\'' || c == '"')
+        if(c == '\'' or c == '"')
         {
             in_quote = true;
             quote_char = c;
             continue;
         }
 
-        if(i + needle.size() <= text.size() && text.substr(i, needle.size()) == needle)
+        if(i + needle.size() <= text.size() and text.substr(i, needle.size()) == needle)
             return i;
     }
 
@@ -225,8 +225,8 @@ inline generator<std::string_view> split_outside_quotes(
         if(in_quote)
         {
             if(c == quote_char
-                && i + 1 < text.size()
-                && text[i + 1] == quote_char)
+                and i + 1 < text.size()
+                and text[i + 1] == quote_char)
             {
                 ++i;
                 continue;
@@ -238,14 +238,14 @@ inline generator<std::string_view> split_outside_quotes(
             continue;
         }
 
-        if(c == '\'' || c == '"')
+        if(c == '\'' or c == '"')
         {
             in_quote = true;
             quote_char = c;
             continue;
         }
 
-        if(i + delimiter.size() <= text.size() && text.substr(i, delimiter.size()) == delimiter)
+        if(i + delimiter.size() <= text.size() and text.substr(i, delimiter.size()) == delimiter)
         {
             auto part = utils::trim(text.substr(start, i - start));
             if(not part.empty())
@@ -266,8 +266,8 @@ inline bool is_public_api_path(std::string_view uri)
 {
     const ::http::uri parsed{uri};
     const auto segment = parsed.path[1];
-    return (segment == "health"sv || segment == "ready"sv || segment == "metrics"sv)
-        && parsed.path[2].empty();
+    return (segment == "health"sv or segment == "ready"sv or segment == "metrics"sv)
+        and parsed.path[2].empty();
 }
 
 // Maintenance paths (`/_db/...`, `/_reindex`, …) — require admin PAT when configured.
@@ -275,7 +275,7 @@ inline bool is_admin_api_path(std::string_view uri)
 {
     const ::http::uri parsed{uri};
     const auto segment = parsed.path[1];
-    return !segment.empty() && segment.starts_with('_');
+    return not segment.empty() and segment.starts_with('_');
 }
 
 // Collection name validation
@@ -285,21 +285,21 @@ inline auto validate_collection_name(std::string_view collection_name)
         throw std::invalid_argument{"Collection name cannot be empty"};
 
     if(collection_name == yar::db::reserved_collection_health
-        || collection_name == yar::db::reserved_collection_ready
-        || collection_name == yar::db::reserved_collection_metrics)
+        or collection_name == yar::db::reserved_collection_ready
+        or collection_name == yar::db::reserved_collection_metrics)
         throw std::invalid_argument{"Collection name is reserved"};
     
     if(collection_name.size() > yar::db::max_collection_name_length)
         throw std::invalid_argument{"Collection name too long (max "s + std::to_string(yar::db::max_collection_name_length) + " chars)"};
     
     // Must start with a letter
-    if(collection_name[0] < 'a' || collection_name[0] > 'z')
+    if(collection_name[0] < 'a' or collection_name[0] > 'z')
         throw std::invalid_argument{"Collection name must start with a lowercase letter"};
     
     // Must contain only lowercase letters, digits, and underscores
     constexpr auto is_valid_collection_char = [](const char c)
     {
-        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+        return (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
     };
 
     if(not std::ranges::all_of(collection_name, is_valid_collection_char))
@@ -388,9 +388,9 @@ inline yar::db::write_preconditions write_preconditions_from_headers(const ::htt
         if(value != "*")
         {
             auto etag = value;
-            if(not etag.empty() && etag.front() == '"')
+            if(not etag.empty() and etag.front() == '"')
                 etag.erase(0, 1);
-            if(not etag.empty() && etag.back() == '"')
+            if(not etag.empty() and etag.back() == '"')
                 etag.pop_back();
             try
             {
@@ -436,7 +436,7 @@ inline auto check_if_modified_since(const ::http::headers& headers, const std::c
 {
     using namespace std::string_literals;
     using namespace std::chrono;
-    if(!headers.contains("if-modified-since"s))
+    if(not headers.contains("if-modified-since"s))
         return std::optional<bool>{};
     
     try
@@ -464,7 +464,7 @@ inline auto check_if_unmodified_since(const ::http::headers& headers, const std:
 {
     using namespace std::string_literals;
     using namespace std::chrono;
-    if(!headers.contains("if-unmodified-since"s))
+    if(not headers.contains("if-unmodified-since"s))
         return std::optional<bool>{};
     
     try
@@ -491,7 +491,7 @@ inline auto check_if_unmodified_since(const ::http::headers& headers, const std:
 inline auto check_if_match(const ::http::headers& headers, const std::string& etag)
 {
     using namespace std::string_literals;
-    if(!headers.contains("if-match"s))
+    if(not headers.contains("if-match"s))
         return std::optional<bool>{};
     
     const auto if_match_value = headers["if-match"s];
@@ -504,9 +504,9 @@ inline auto check_if_match(const ::http::headers& headers, const std::string& et
     auto client_etag = std::string{if_match_value};
     
     // Remove quotes for comparison
-    if(server_etag.size() >= 2 && server_etag.front() == '"' && server_etag.back() == '"')
+    if(server_etag.size() >= 2 and server_etag.front() == '"' and server_etag.back() == '"')
         server_etag = server_etag.substr(1, server_etag.size() - 2);
-    if(client_etag.size() >= 2 && client_etag.front() == '"' && client_etag.back() == '"')
+    if(client_etag.size() >= 2 and client_etag.front() == '"' and client_etag.back() == '"')
         client_etag = client_etag.substr(1, client_etag.size() - 2);
     
     return std::make_optional(server_etag == client_etag);
@@ -517,7 +517,7 @@ inline auto check_if_match(const ::http::headers& headers, const std::string& et
 inline auto check_if_none_match(const ::http::headers& headers, const std::string& etag)
 {
     using namespace std::string_literals;
-    if(!headers.contains("if-none-match"s))
+    if(not headers.contains("if-none-match"s))
         return std::optional<bool>{};
     
     const auto if_none_match_value = headers["if-none-match"s];
@@ -530,9 +530,9 @@ inline auto check_if_none_match(const ::http::headers& headers, const std::strin
     auto client_etag = std::string{if_none_match_value};
     
     // Remove quotes for comparison
-    if(server_etag.size() >= 2 && server_etag.front() == '"' && server_etag.back() == '"')
+    if(server_etag.size() >= 2 and server_etag.front() == '"' and server_etag.back() == '"')
         server_etag = server_etag.substr(1, server_etag.size() - 2);
-    if(client_etag.size() >= 2 && client_etag.front() == '"' && client_etag.back() == '"')
+    if(client_etag.size() >= 2 and client_etag.front() == '"' and client_etag.back() == '"')
         client_etag = client_etag.substr(1, client_etag.size() - 2);
     
     // If-None-Match: return true if NOT matching (document is modified)

@@ -34,7 +34,7 @@ inline auto host_header_from_url(string_view replica_url) -> string
     const auto url = uri{replica_url};
     auto host = string{url.host};
     const auto port = url.port == ""sv ? string{url.scheme} : string{url.port};
-    if(!port.empty())
+    if(not port.empty())
         host += ':' + port;
     return host;
 }
@@ -43,7 +43,7 @@ inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs)
 {
     auto content_length = hdrs.contains("content-length"s) ? stoll(hdrs["content-length"s]) : 0ll;
 
-    while(content_length > 0 && is && os)
+    while(content_length > 0 and is and os)
     {
         os.put(is.get());
         --content_length;
@@ -73,7 +73,7 @@ inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
     const auto strip_names = flat_set<string>{hop_by_hop.begin(), hop_by_hop.end()};
     auto out = http::headers{};
     for(const auto& [name, value] : hdrs)
-        if(!strip_names.contains(name))
+        if(not strip_names.contains(name))
             out.set(name, value);
     return out;
 }
@@ -120,7 +120,7 @@ inline void handle(auto& client, auto& replicas)
         return not replica.connection.good();
     };
 
-    while(stream.good() && stream.peek() != char_traits<char>::eof())
+    while(stream.good() and stream.peek() != char_traits<char>::eof())
     {
         buffer.str(""s);
         buffer.clear();
@@ -129,7 +129,7 @@ inline void handle(auto& client, auto& replicas)
         auto method = ""s;
         buffer.seekg(0) >> method;
 
-        if(method == "GET"s || method == "HEAD"s)
+        if(method == "GET"s or method == "HEAD"s)
         {
             const auto guard = std::lock_guard{replicas};
             [[maybe_unused]] auto r1 = ranges::any_of(replicas, request_and_response);

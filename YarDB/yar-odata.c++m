@@ -29,7 +29,7 @@ enum class metadata_level
 // Note: Header values are already normalized (lowercase) by the http::headers class
 inline auto parse_metadata_level(const ::http::headers& headers)
 {
-    if(!headers.contains("accept"s))
+    if(not headers.contains("accept"s))
         return metadata_level::none;
     
     const auto accept_value = headers["accept"s];
@@ -96,7 +96,7 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
     if(level == metadata_level::none)
         return document; // No metadata needed
     
-    if(!document.is_array())
+    if(not document.is_array())
         return document; // Not an array, return as-is
     
     // Wrap array in object with @odata.context and value
@@ -127,8 +127,8 @@ inline auto strip_quoted_literal(std::string_view value)
     auto trimmed = utils::trim(value);
 
     if(trimmed.size() >= 2
-        && ((trimmed.front() == '\'' && trimmed.back() == '\'')
-            || (trimmed.front() == '"' && trimmed.back() == '"')))
+        and ((trimmed.front() == '\'' and trimmed.back() == '\'')
+            or (trimmed.front() == '"' and trimmed.back() == '"')))
         return trimmed.substr(1, trimmed.size() - 2);
 
     return trimmed;
@@ -191,9 +191,9 @@ inline auto parse_in_value_list(std::string_view list_content)
         auto is_string = false;
         auto raw = std::string_view{token};
 
-        if(raw.size() >= 2 &&
-           ((raw.front() == '\'' && raw.back() == '\'') ||
-            (raw.front() == '"' && raw.back() == '"')))
+        if(raw.size() >= 2 and
+           ((raw.front() == '\'' and raw.back() == '\'') or
+            (raw.front() == '"' and raw.back() == '"')))
         {
             raw = raw.substr(1, raw.size() - 2);
             is_string = true;
@@ -201,7 +201,7 @@ inline auto parse_in_value_list(std::string_view list_content)
 
         if(is_string)
         {
-            if(kind && *kind != value_kind::string)
+            if(kind and *kind != value_kind::string)
                 throw std::invalid_argument{"'in' operator values must be all strings or all numbers"};
             kind = value_kind::string;
             values.emplace_back(utils::trim_end_to_string(raw));
@@ -210,7 +210,7 @@ inline auto parse_in_value_list(std::string_view list_content)
         {
             try
             {
-                if(kind && *kind != value_kind::integer)
+                if(kind and *kind != value_kind::integer)
                     throw std::invalid_argument{"'in' operator values must be all strings or all numbers"};
                 kind = value_kind::integer;
                 values.emplace_back(utils::stoll(std::string{raw}));
@@ -257,7 +257,7 @@ inline void merge_selector_into(xson::object& target, const xson::object& source
 {
     for(const auto& [key, value] : source.get<db::object::map>())
     {
-        if(target.has(key) && target[key].has_objects() && value.has_objects())
+        if(target.has(key) and target[key].has_objects() and value.has_objects())
         {
             auto nested = target[key];
             merge_selector_into(nested, value);
@@ -275,7 +275,7 @@ inline void set_nested_selector_leaf(xson::object& selector, std::string_view pa
 
     if(segments.size() == 1)
     {
-        if(selector.has(segments[0]) && selector[segments[0]].has_objects() && leaf.has_objects())
+        if(selector.has(segments[0]) and selector[segments[0]].has_objects() and leaf.has_objects())
         {
             auto nested = selector[segments[0]];
             merge_selector_into(nested, leaf);
@@ -297,7 +297,7 @@ inline void set_nested_selector_leaf(xson::object& selector, std::string_view pa
     auto top = xson::object{};
     top[segments[0]] = std::move(nested);
 
-    if(selector.has(segments[0]) && selector[segments[0]].has_objects())
+    if(selector.has(segments[0]) and selector[segments[0]].has_objects())
         merge_selector_into(selector[segments[0]], top[segments[0]]);
     else
         selector[segments[0]] = std::move(top[segments[0]]);
@@ -370,21 +370,21 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     constexpr auto contains_prefix = "contains("sv;
     constexpr auto endswith_prefix = "endswith("sv;
     
-    if(expr.starts_with(startswith_prefix) && expr.back() == ')')
+    if(expr.starts_with(startswith_prefix) and expr.back() == ')')
     {
         auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
         const auto [field, value] = parse_string_function_args(inner);
         string_filters.push_back({"startswith", field, value});
         return std::make_pair(selector, string_filters);
     }
-    else if(expr.starts_with(contains_prefix) && expr.back() == ')')
+    else if(expr.starts_with(contains_prefix) and expr.back() == ')')
     {
         auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
         const auto [field, value] = parse_string_function_args(inner);
         string_filters.push_back({"contains", field, value});
         return std::make_pair(selector, string_filters);
     }
-    else if(expr.starts_with(endswith_prefix) && expr.back() == ')')
+    else if(expr.starts_with(endswith_prefix) and expr.back() == ')')
     {
         auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
         const auto [field, value] = parse_string_function_args(inner);
@@ -404,7 +404,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     {
         if(const auto pos = find_outside_quotes(expr, op_token))
         {
-            if(not op_pos || *pos < *op_pos)
+            if(not op_pos or *pos < *op_pos)
             {
                 op_pos = pos;
                 op = op_name;
@@ -424,19 +424,19 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     
     // Remove quotes from string values first
     auto is_string = false;
-    if(value.size() >= 2 && value[0] == '\'' && value.back() == '\'')
+    if(value.size() >= 2 and value[0] == '\'' and value.back() == '\'')
     {
         value = value.substr(1, value.size() - 2);
         is_string = true;
     }
-    else if(value.size() >= 2 && value[0] == '"' && value.back() == '"')
+    else if(value.size() >= 2 and value[0] == '"' and value.back() == '"')
     {
         value = value.substr(1, value.size() - 2);
         is_string = true;
     }
     
     // Validate value is not empty (empty strings are allowed for string comparisons)
-    if(value.empty() && !is_string)
+    if(value.empty() and not is_string)
         throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
     
     // Convert to selector format (supports nested paths: Customer/Country)
@@ -645,14 +645,14 @@ export inline void lower_startswith_filters(
 
     for(const auto& filter : string_filters)
     {
-        if(filter.function != "startswith"sv || filter.field.contains('/'))
+        if(filter.function != "startswith"sv or filter.field.contains('/'))
         {
             remaining.push_back(filter);
             continue;
         }
 
         const auto field = std::string{filter.field};
-        if(not indexed.contains(field) || selector.has(field))
+        if(not indexed.contains(field) or selector.has(field))
         {
             remaining.push_back(filter);
             continue;
@@ -683,7 +683,7 @@ inline auto document_matches_string_filters(
     return std::ranges::all_of(filters, [&](const string_filter& filter)
     {
         const auto* field_value = get_field_by_path(doc, filter.field);
-        if(field_value == nullptr || not field_value->is_string())
+        if(field_value == nullptr or not field_value->is_string())
             return false;
 
         const auto field = field_value->get<std::string>();
@@ -702,7 +702,7 @@ inline auto document_matches_string_filters(
 // Helper function to apply string filters to documents (post-processing)
 inline auto apply_string_filters(const xson::object& documents, const std::vector<string_filter>& filters)
 {
-    if(filters.empty() || not documents.is_array())
+    if(filters.empty() or not documents.is_array())
         return documents;
 
     const auto& docs = documents.get<xson::object::array>();
@@ -773,7 +773,7 @@ export inline auto apply_top_skip(
         items.erase(items.begin(), items.begin() + static_cast<std::ptrdiff_t>(skip));
     }
 
-    if(top >= 0 && static_cast<std::size_t>(top) < items.size())
+    if(top >= 0 and static_cast<std::size_t>(top) < items.size())
         items.resize(static_cast<std::size_t>(top));
 
     return documents;
@@ -995,7 +995,7 @@ inline auto parse_orderby(std::string_view orderby_value)
         throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"};
     
     // Check if it ends with " desc" or is just "desc"
-    const auto descending = orderby.ends_with(" desc"sv) || orderby == "desc"sv;
+    const auto descending = orderby.ends_with(" desc"sv) or orderby == "desc"sv;
     
     return orderby_result{std::string{field_name}, descending};
 }
@@ -1017,7 +1017,7 @@ inline auto infer_edm_type(const xson::object& value) -> std::string
         return "Edm.Double"s;
     if(value.is_boolean())
         return "Edm.Boolean"s;
-    if(value.is_object() || value.is_array())
+    if(value.is_object() or value.is_array())
         return "Edm.String"s; // Serialize complex types as JSON string
     
     // Fallback to String
@@ -1060,7 +1060,7 @@ inline auto infer_collection_schema(yar::db::engine& engine, std::string_view co
     auto selector = xson::object{"$top"s, 1ll};
     auto documents = xson::object{};
 
-    if(engine.read(collection, selector, documents) && documents.is_array() && !documents.get<xson::object::array>().empty())
+    if(engine.read(collection, selector, documents) and documents.is_array() and not documents.get<xson::object::array>().empty())
     {
         const auto& doc = documents.get<xson::object::array>()[0];
         return infer_document_schema(doc);

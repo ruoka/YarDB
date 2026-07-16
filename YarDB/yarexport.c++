@@ -54,7 +54,7 @@ try
 
     auto storage = ifstream{file, ios::binary};
 
-    if(!storage.is_open())
+    if(not storage.is_open())
         throw runtime_error{"file "s + file + " not found"s};
 
     while(storage)
@@ -62,7 +62,7 @@ try
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};
         storage >> metadata >> document;
-        if(!storage)
+        if(not storage)
             break;
 
         if(live_only)

@@ -59,7 +59,7 @@ void header_name_to_lower(string& name)
 {
     for(auto& c : name)
     {
-        if(c >= 'A' && c <= 'Z')
+        if(c >= 'A' and c <= 'Z')
             c = static_cast<char>(c - 'A' + 'a');
     }
 }
@@ -171,7 +171,7 @@ try
 
     clog << help << endl;
 
-    while(cin && server)
+    while(cin and server)
     {
         auto method = ""s, uri_path = ""s, version = "HTTP/1.1"s, content = ""s, reason = ""s;
         auto headers = http::headers{};
@@ -196,12 +196,12 @@ try
 
         cin >> ws;
         getline(cin, uri_path);
-        while(!uri_path.empty() && (uri_path.back() == ' ' || uri_path.back() == '\t' || uri_path.back() == '\r' || uri_path.back() == '\n'))
+        while(not uri_path.empty() and (uri_path.back() == ' ' or uri_path.back() == '\t' or uri_path.back() == '\r' or uri_path.back() == '\n'))
             uri_path.pop_back();
 
         auto [accept_header, extra_headers] = read_optional_headers();
 
-        if(method == "POST" || method == "PUT" || method == "PATCH")
+        if(method == "POST" or method == "PUT" or method == "PATCH")
         {
             try
             {
@@ -225,14 +225,14 @@ try
         for(const auto& [name, value] : extra_headers)
             clog << name << ": " << value << newl;
 
-        if(method == "POST" || method == "PUT" || method == "PATCH")
+        if(method == "POST" or method == "PUT" or method == "PATCH")
         {
             clog << "Content-Type: application/json" << newl
                  << "Content-Length: " << content.length() << newl;
         }
 
         clog << newl;
-        if(!content.empty())
+        if(not content.empty())
             clog << content << newl;
         clog << endl;
 
@@ -243,14 +243,14 @@ try
         for(const auto& [name, value] : extra_headers)
             server << name << ": " << value << crlf;
 
-        if(method == "POST" || method == "PUT" || method == "PATCH")
+        if(method == "POST" or method == "PUT" or method == "PATCH")
         {
             server << "Content-Type: application/json" << crlf
                    << "Content-Length: " << content.length() << crlf;
         }
 
         server << crlf;
-        if(!content.empty())
+        if(not content.empty())
             server << content;
         server << flush;
 

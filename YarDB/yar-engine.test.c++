@@ -417,8 +417,8 @@ auto test_set()
             require_true(engine.create("ReadByIndexedDuplicateKey"s, document3).has_value());
             require_true(engine.read("ReadByIndexedDuplicateKey"s, selector, documents));
             require_eq(2u, documents.size());
-            require_true(documents[0].match(document1) || documents[0].match(document2));
-            require_true(documents[1].match(document1) || documents[1].match(document2));
+            require_true(documents[0].match(document1) or documents[0].match(document2));
+            require_true(documents[1].match(document1) or documents[1].match(document2));
             require_false(documents[0].match(documents[1]));
         };
 

@@ -71,7 +71,7 @@ private:
 
     void skip_empty()
     {
-        while(m_key_it != m_key_end && m_pos_idx >= m_key_it->second.size())
+        while(m_key_it != m_key_end and m_pos_idx >= m_key_it->second.size())
         {
             m_pos_idx = 0;
             ++m_key_it;
@@ -136,7 +136,7 @@ private:
 
     void skip_empty()
     {
-        while(m_key_it != m_key_end && m_key_it->second.empty())
+        while(m_key_it != m_key_end and m_key_it->second.empty())
         {
             ++m_key_it;
             if(m_key_it != m_key_end)

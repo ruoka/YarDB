@@ -287,11 +287,10 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Current State**: ✅ Structured logging with JSONL (default) and syslog (RFC 5424) formats, structured fields support, RFC 5424 message IDs
 - **Shipped** (see [changelog.md](changelog.md)):
   - `GET /health` liveness probe (`{}`; public with PAT auth)
-  - `GET /ready` readiness probe (`{}`; public with PAT auth)
+  - `GET /ready` readiness probe — `200` + `{}` when `ready`; otherwise `503` + `{"status":...}`; public with PAT auth
   - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
 - **Remaining** (near-term):
   - **Prometheus `/metrics`** — request latency, throughput, errors
-- **Shipped** (Jul 2026 follow-up): `GET /ready` returns `503` with `{"status":...}` when not accepting traffic (`starting`, `draining`, `stopped`, `failed`); `GET /health` remains liveness-only (`200` + `{}`)
 - **Planned Implementation** (longer-term):
   - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)
 - **Timeline**: 1-2 months

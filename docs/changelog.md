@@ -8,6 +8,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Platform & tooling
+
+| Item | Summary |
+|------|---------|
+| **`deps/tester` on `main`** | Submodule pinned to `23f77d7` — unified `--jsonl=failures|summary|trace` modes and observer-owned output filtering |
+
 ### Safe bind defaults
 
 | Item | Summary |
@@ -33,7 +39,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Explicit collection API** | Removed mutable `m_collection`; every engine operation takes `collection` explicitly (`b5cd61d`) |
 | **Reader/writer locking** | `std::shared_mutex` with independent `std::ifstream` per read; HTTP layer no longer wraps `lockable<engine>` |
 | **Atomic conditional writes** | `write_preconditions` (`If-Match`, `If-Unmodified-Since`) checked under the same exclusive lock as create/update/replace/destroy |
-| **Tests** | Concurrent reader and stale-precondition engine tests; `[yardb]` suite at **320 tests and 1172 assertions** |
+| **Tests** | Concurrent reader and stale-precondition engine tests; `[yardb]` suite at **322 tests and 1178 assertions** |
 
 ### Storage, engine & HTTP hardening
 
@@ -65,7 +71,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | Item | Summary |
 |------|---------|
 | **`GET /health` liveness probe** | Public when PAT is enabled; reserved collection name; initial `{"status":"ok"}` (`48a4ac0`); body changed to `{}` (`d1bab4b`) |
-| **`GET /ready` readiness probe** | Returns `{}`; public when PAT is enabled; reserved collection name; engine not-ready `503` deferred (`d1bab4b`) |
+| **`GET /ready` readiness probe** | Initial `{}` stub (`d1bab4b`); superseded by lifecycle-aware `503` + `{"status":...}` when not `ready` (see **Server readiness probes** above) |
 | **`correlation_id` request tracing** | `X-Correlation-ID` middleware; logged on handler entry (`POST_DOCUMENT`, etc.), `HTTP_RESPONSE`, and error paths in `yar-httpd.c++m` |
 | **Transport `request_id`** | `net::http::server` per-connection counter on `HTTP_REQUEST` / net `HTTP_RESPONSE` (complements `correlation_id`) |
 

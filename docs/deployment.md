@@ -11,7 +11,7 @@
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
 - 🔐 **Security & Authentication** (scoped PATs, JWT, RBAC, TLS at reverse proxy; safe bind defaults shipped)
-- 📊 **Monitoring & Observability** (Prometheus `/metrics`; probes shipped — engine-backed `/ready` 503 deferred)
+- 📊 **Monitoring & Observability** (Prometheus `/metrics`; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
 
 ## 🏗️ Building for Production
@@ -123,7 +123,7 @@ server {
 
 ### Current Capabilities
 - **Optional Bearer PAT** — `yardb --pat` / `--pat-file` (SHA-256 hashed in memory; `sha256:` lines in pat-file). When configured, all routes require `Authorization: Bearer <token>` except **`GET /health`** and **`GET /ready`**.
-- **Public probes** — `GET /health` and `GET /ready` return `{}` even when PAT auth is enabled.
+- **Public probes** — `GET /health` and `GET /ready` are PAT-exempt. `GET /health` always returns `200` + `{}` while the HTTP stack responds. `GET /ready` returns `200` + `{}` only when the server is `ready`; otherwise `503` + `{"status":"starting|draining|stopped|failed"}`.
 
 ### Current Limitations
 - **No TLS/HTTPS** — All traffic is plaintext unless terminated at a reverse proxy
@@ -149,7 +149,7 @@ yardb --pat-file=/etc/yardb/pat.txt 2112
 
 ### Current Capabilities
 - **Liveness probe** — `GET /health` returns `{}` (public when PAT auth is enabled)
-- **Readiness probe** — `GET /ready` returns `{}` (public when PAT auth is enabled; `503` when not ready not yet implemented)
+- **Readiness probe** — `GET /ready` returns `200` + `{}` when `ready`; otherwise `503` + `{"status":...}` (`starting`, `draining`, `stopped`, or `failed`). Public when PAT auth is enabled.
 - **Request tracing** — `X-Correlation-ID` on inbound requests; `correlation_id` on application log lines (`POST_DOCUMENT`, `HTTP_RESPONSE`, errors). Transport layer also logs `request_id` per connection.
 - **JSONL structured logging** — Default format; use `--clog` for console output during development
 - **Syslog Integration** - Structured logging to system logs (`--slog_level`)

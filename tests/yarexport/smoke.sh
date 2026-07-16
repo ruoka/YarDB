@@ -363,8 +363,9 @@ EOF
 
   stop_yardb_keep_db
 
+  # stdout → /dev/full (ENOSPC); keep stderr in the capture for the message assert
   set +e
-  LAST_EXPORT_OUTPUT="$("${YAREXPORT_BIN}" --file="${YARDB_DB}" --live >/dev/full 2>&1)"
+  LAST_EXPORT_OUTPUT="$("${YAREXPORT_BIN}" --file="${YARDB_DB}" --live 2>&1 >/dev/full)"
   LAST_EXPORT_STATUS=$?
   set -e
 

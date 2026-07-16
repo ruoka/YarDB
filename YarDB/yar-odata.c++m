@@ -337,26 +337,19 @@ inline auto parse_in_value_list(std::string_view list_content)
 // Split OData property path: Customer/Country -> ["Customer", "Country"]
 inline auto split_property_path(std::string_view path)
 {
-    auto segments = std::vector<std::string>{};
-    auto start = std::size_t{0};
-
-    while(start <= path.size())
-    {
-        const auto slash = path.find('/', start);
-        const auto end = slash == std::string_view::npos ? path.size() : slash;
-        const auto segment = utils::trim(path.substr(start, end - start));
-
-        if(segment.empty())
-            throw std::invalid_argument{"Invalid property path: "s + std::string{path}};
-
-        segments.emplace_back(segment);
-        if(slash == std::string_view::npos)
-            break;
-        start = slash + 1;
-    }
+    auto segments = path
+        | std::views::split('/')
+        | std::views::transform([](const auto part)
+        {
+            return utils::trim_end_to_string(std::string_view{part});
+        })
+        | std::ranges::to<std::vector<std::string>>();
 
     if(segments.empty())
         throw std::invalid_argument{"Property path cannot be empty"};
+
+    if(std::ranges::any_of(segments, [](const auto& segment) { return segment.empty(); }))
+        throw std::invalid_argument{"Invalid property path: "s + std::string{path}};
 
     return segments;
 }
@@ -440,8 +433,8 @@ inline const xson::object* get_field_by_path(const xson::object& document, std::
 inline auto make_in_selector(std::string_view field, const std::vector<xson::object>& values)
 {
     auto in_map = xson::object{};
-    for(std::size_t i = 0; i < values.size(); ++i)
-        in_map[std::to_string(i)] = values[i];
+    for(const auto& value : values)
+        in_map[std::to_string(in_map.size())] = value;
 
     auto selector = xson::object{};
     set_nested_selector_leaf(selector, field, xson::object{{"$in"s, std::move(in_map)}});
@@ -509,14 +502,14 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     auto op_pos = std::optional<std::size_t>{};
     std::string_view op;
 
-    for(std::size_t i = 0; i < std::size(operators); ++i)
+    for(const auto [op_token, op_name] : std::views::zip(operators, op_names))
     {
-        if(const auto pos = find_outside_quotes(expr, operators[i]))
+        if(const auto pos = find_outside_quotes(expr, op_token))
         {
             if(not op_pos || *pos < *op_pos)
             {
                 op_pos = pos;
-                op = op_names[i];
+                op = op_name;
             }
         }
     }
@@ -644,17 +637,19 @@ inline filter_clause parse_filter_and_group(std::string_view filter_expr)
     if(parts.size() == 1)
         return parse_filter_leaf(parts[0]);
 
-    auto selector = xson::object{};
-    auto string_filters = std::vector<string_filter>{};
-
-    for(const auto part : parts)
-    {
-        auto [part_selector, part_string_filters] = parse_filter_leaf(part);
-        merge_selector_into(selector, part_selector);
-        string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
-    }
-
-    return std::make_pair(selector, string_filters);
+    return std::ranges::fold_left(
+        parts,
+        filter_clause{xson::object{}, std::vector<string_filter>{}},
+        [](filter_clause merged, const std::string_view part)
+        {
+            auto [part_selector, part_string_filters] = parse_filter_leaf(part);
+            merge_selector_into(merged.first, part_selector);
+            merged.second.insert(
+                merged.second.end(),
+                part_string_filters.begin(),
+                part_string_filters.end());
+            return merged;
+        });
 }
 
 // Parse OData $filter expression
@@ -666,14 +661,13 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
 
     if(or_parts.size() > 1)
     {
-        auto branches = std::vector<filter_branch>{};
-        branches.reserve(or_parts.size());
-
-        for(const auto part : or_parts)
-        {
-            auto [branch_selector, branch_string_filters] = parse_filter_and_group(part);
-            branches.push_back({std::move(branch_selector), std::move(branch_string_filters)});
-        }
+        auto branches = or_parts
+            | std::views::transform([](const std::string_view part)
+            {
+                auto [branch_selector, branch_string_filters] = parse_filter_and_group(part);
+                return filter_branch{std::move(branch_selector), std::move(branch_string_filters)};
+            })
+            | std::ranges::to<std::vector<filter_branch>>();
 
         return parsed_filter{{}, {}, std::move(branches)};
     }
@@ -685,37 +679,35 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
 // Helper function to apply $select projection to documents
 inline auto apply_select(const xson::object& documents, std::string_view select_value)
 {
-    // Parse comma-separated field list: "name,email,age"
-    auto fields = parse_comma_separated_list(select_value);
-    
+    auto fields = split_outside_quotes(select_value, ","sv);
+
     if(fields.empty())
-        return documents; // No fields specified, return as-is
-    
-    // Apply projection
-    if(!documents.is_array())
-        return documents; // Not an array, return as-is
-    
-    auto result = xson::object{xson::object::array{}};
+        return documents;
+
+    if(not documents.is_array())
+        return documents;
+
     const auto& docs = documents.get<xson::object::array>();
-    
-    for(const auto& doc : docs)
+
+    auto project = [&fields](const xson::object& doc)
     {
         auto projected = xson::object{};
-        // Always include _id if present
         if(doc.has("_id"s))
             projected["_id"s] = doc["_id"s];
-        
-        // Include requested fields
-        for(const auto& field : fields)
+
+        for(const auto field : fields)
         {
             if(doc.has(field))
                 projected[field] = doc[field];
         }
-        
-        result += std::move(projected);
-    }
-    
-    return result;
+
+        return projected;
+    };
+
+    return xson::object{
+        docs
+            | std::views::transform(project)
+            | std::ranges::to<xson::object::array>()};
 }
 
 // Smallest string strictly greater than all strings with the given prefix (for index range scans)
@@ -750,10 +742,7 @@ export inline void lower_startswith_filters(
         return;
 
     const auto indexed_keys = engine.indexed_keys(collection);
-    auto indexed = std::unordered_set<std::string>{};
-    indexed.reserve(indexed_keys.size());
-    for(const auto& key : indexed_keys)
-        indexed.insert(key);
+    const auto indexed = std::unordered_set<std::string>{std::from_range, indexed_keys};
 
     auto remaining = std::vector<string_filter>{};
     remaining.reserve(string_filters.size());
@@ -790,66 +779,45 @@ export inline void lower_startswith_filters(
     string_filters = std::move(remaining);
 }
 
+// True when a document satisfies every post-filter string function
+inline auto document_matches_string_filters(
+    const xson::object& doc,
+    const std::vector<string_filter>& filters)
+{
+    return std::ranges::all_of(filters, [&](const string_filter& filter)
+    {
+        const auto* field_value = get_field_by_path(doc, filter.field);
+        if(field_value == nullptr || not field_value->is_string())
+            return false;
+
+        const auto field = field_value->get<std::string>();
+
+        if(filter.function == "startswith"sv)
+            return field.starts_with(filter.value);
+        if(filter.function == "contains"sv)
+            return field.contains(filter.value);
+        if(filter.function == "endswith"sv)
+            return field.ends_with(filter.value);
+
+        throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+    });
+}
+
 // Helper function to apply string filters to documents (post-processing)
 inline auto apply_string_filters(const xson::object& documents, const std::vector<string_filter>& filters)
 {
-    if(filters.empty() || !documents.is_array())
+    if(filters.empty() || not documents.is_array())
         return documents;
-    
-    auto result = xson::object{xson::object::array{}};
-    const auto& docs = documents.get<xson::object::array>();
-    
-    for(const auto& doc : docs)
-    {
-        auto matches = true;
-        
-        for(const auto& filter : filters)
-        {
-            const auto* field_value = get_field_by_path(doc, filter.field);
-            if(field_value == nullptr || not field_value->is_string())
-            {
-                matches = false;
-                break;
-            }
 
-            const std::string_view field = field_value->get<std::string>();
-            
-            if(filter.function == "startswith")
+    const auto& docs = documents.get<xson::object::array>();
+
+    return xson::object{
+        docs
+            | std::views::filter([&](const xson::object& doc)
             {
-                if(!field.starts_with(filter.value))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            else if(filter.function == "contains")
-            {
-                if(!field.contains(filter.value))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            else if(filter.function == "endswith")
-            {
-                if(!field.ends_with(filter.value))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-            else
-            {
-                // Unknown filter function - reject document to be safe
-                throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
-            }
-        }
-        
-        if(matches)
-            result += doc;
-    }
-    
-    return result;
+                return document_matches_string_filters(doc, filters);
+            })
+            | std::ranges::to<xson::object::array>()};
 }
 
 // True when a document matches one OR branch (selector AND branch string filters)
@@ -928,20 +896,20 @@ export inline auto filter_documents_by_or(
 
     for(const auto& doc : documents.get<xson::object::array>())
     {
-        for(const auto& branch : branches)
+        if(not std::ranges::any_of(branches, [&](const filter_branch& branch)
         {
-            if(document_matches_branch(doc, branch))
-            {
-                if(doc.has("_id"s))
-                {
-                    const auto id = static_cast<xson::integer_type>(doc["_id"s]);
-                    if(not seen_ids.insert(id).second)
-                        break;
-                }
-                result += doc;
-                break;
-            }
+            return document_matches_branch(doc, branch);
+        }))
+            continue;
+
+        if(doc.has("_id"s))
+        {
+            const auto id = static_cast<xson::integer_type>(doc["_id"s]);
+            if(not seen_ids.insert(id).second)
+                continue;
         }
+
+        result += doc;
     }
 
     return result;

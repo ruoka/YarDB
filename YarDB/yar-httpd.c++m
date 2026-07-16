@@ -58,6 +58,35 @@ inline auto database_error_response(const yar::db::db_error& error)
         std::optional<::http::headers>{}};
 }
 
+enum class server_state
+{
+    stopped,
+    starting,
+    ready,
+    draining,
+    failed
+};
+
+inline auto server_state_label(server_state state) -> std::string_view
+{
+    switch(state)
+    {
+        case server_state::stopped: return "stopped"sv;
+        case server_state::starting: return "starting"sv;
+        case server_state::ready: return "ready"sv;
+        case server_state::draining: return "draining"sv;
+        case server_state::failed: return "failed"sv;
+    }
+    return "unknown"sv;
+}
+
+inline auto ready_probe_body(server_state state) -> std::string
+{
+    return xson::json::stringify(xson::object{
+        {"status"s, std::string{server_state_label(state)}}
+    }, 0);
+}
+
 export class rest_api_server
 {
 public:
@@ -77,8 +106,9 @@ public:
     {
         std::lock_guard<std::mutex> lock{m_start_mutex};
         if(m_listen_thread.joinable())
-            return; // Already started
-        
+            return;
+
+        m_state.store(server_state::starting);
         m_listen_thread = std::thread{[this]()
         {
             try
@@ -87,12 +117,16 @@ public:
                       << std::pair{"addr"sv, m_bind_host}
                       << std::pair{"port"sv, m_port_or_service}
                       << flush;
-                m_server.listen(m_bind_host, m_port_or_service);
+                m_server.listen(m_bind_host, m_port_or_service, [this]()
+                {
+                    m_state.store(server_state::ready);
+                });
+                if(m_state.load() != server_state::draining)
+                    m_state.store(server_state::stopped);
             }
             catch(const std::exception& e)
             {
-                // Log error if possible, but don't crash
-                // The server will remain stopped if listen fails
+                m_state.store(server_state::failed);
                 slog << error("SERVER_START_ERROR") << "Failed to start server: " << e.what()
                       << std::pair{"port"sv, m_port_or_service}
                       << flush;
@@ -100,12 +134,21 @@ public:
         }};
     }
 
+    void drain()
+    {
+        std::lock_guard<std::mutex> lock{m_start_mutex};
+        const auto state = m_state.load();
+        if(state == server_state::ready || state == server_state::starting)
+            m_state.store(server_state::draining);
+    }
+
     void stop()
     {
         std::lock_guard<std::mutex> lock{m_start_mutex};
-        // Signal the server to stop
+        const auto state = m_state.load();
+        if(state == server_state::ready || state == server_state::starting)
+            m_state.store(server_state::draining);
         m_server.stop();
-        // Wait for the listen thread to finish
         if(m_listen_thread.joinable())
         {
             try
@@ -114,15 +157,34 @@ public:
             }
             catch(const std::system_error&)
             {
-                // Thread may have already terminated - ignore
             }
         }
+        m_state.store(server_state::stopped);
+    }
+
+    auto server_lifecycle_state() const
+    {
+        return m_state.load();
     }
 
     // For backward compatibility - blocks forever
     void listen()
     {
-        m_server.listen(m_bind_host, m_port_or_service);
+        m_state.store(server_state::starting);
+        try
+        {
+            m_server.listen(m_bind_host, m_port_or_service, [this]()
+            {
+                m_state.store(server_state::ready);
+            });
+            if(m_state.load() != server_state::draining)
+                m_state.store(server_state::stopped);
+        }
+        catch(const std::exception&)
+        {
+            m_state.store(server_state::failed);
+            throw;
+        }
     }
 
     ~rest_api_server()
@@ -501,9 +563,9 @@ private:
             "application/json"sv,
             ::http::middleware::wrap(list_collections_handler, list_middlewares));
 
-        auto probe_handler = []([[maybe_unused]] ::http::request_view request,
-                                [[maybe_unused]] ::http::body_view body,
-                                [[maybe_unused]] ::http::headers& headers)
+        auto health_handler = []([[maybe_unused]] ::http::request_view request,
+                                 [[maybe_unused]] ::http::body_view body,
+                                 [[maybe_unused]] ::http::headers& headers)
         {
             return response_with_headers{
                 status_ok,
@@ -512,15 +574,36 @@ private:
             };
         };
 
+        auto ready_handler = [this]([[maybe_unused]] ::http::request_view request,
+                                    [[maybe_unused]] ::http::body_view body,
+                                    [[maybe_unused]] ::http::headers& headers)
+        {
+            const auto state = m_state.load();
+            if(state == server_state::ready)
+            {
+                return response_with_headers{
+                    status_ok,
+                    "{}"s,
+                    std::optional<::http::headers>{}
+                };
+            }
+
+            return response_with_headers{
+                status_service_unavailable,
+                ready_probe_body(state),
+                std::optional<::http::headers>{}
+            };
+        };
+
         auto health_middlewares = build_middleware_chain(method_get, "HEALTH_CHECK"sv, "HEALTH_CHECK_ERROR"sv, false);
         m_server.get("/health"s).response_with_headers(
             "application/json"sv,
-            ::http::middleware::wrap(probe_handler, health_middlewares));
+            ::http::middleware::wrap(health_handler, health_middlewares));
 
         auto ready_middlewares = build_middleware_chain(method_get, "READY_CHECK"sv, "READY_CHECK_ERROR"sv, false);
         m_server.get("/ready"s).response_with_headers(
             "application/json"sv,
-            ::http::middleware::wrap(probe_handler, ready_middlewares));
+            ::http::middleware::wrap(ready_handler, ready_middlewares));
 
         // GET /$metadata - OData 4.01 JSON CSDL metadata endpoint
         auto metadata_handler = [this]([[maybe_unused]] ::http::request_view request, 
@@ -1340,6 +1423,7 @@ private:
     std::string m_port_or_service;
     yar::db::engine m_engine;
     ::http::server m_server;
+    std::atomic<server_state> m_state{server_state::stopped};
     std::thread m_listen_thread;
     mutable std::mutex m_start_mutex;
     

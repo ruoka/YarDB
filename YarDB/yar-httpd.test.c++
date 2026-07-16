@@ -3347,10 +3347,31 @@ auto test_set()
         const auto test_file = "./httpd_ready_test.db";
         auto setup = std::make_shared<fixture>(test_file);
 
-        section("GET /ready returns 200 OK with empty JSON object") = [setup]
+        section("GET /ready returns 200 OK with empty JSON object when ready") = [setup]
         {
             auto [status, reason, headers, body] = make_request(
                 setup->port(), "GET"s, "/ready"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_eq(body, "{}"s);
+        };
+
+        section("GET /ready returns 503 while draining") = [setup]
+        {
+            setup->get_server().drain();
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/ready"s, ""s
+            );
+            require_eq(status, "503"s);
+            require_eq(reason, "Service Unavailable"s);
+            require_eq(body, R"({"status":"draining"})"s);
+        };
+
+        section("GET /health stays 200 while draining") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/health"s, ""s
             );
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);

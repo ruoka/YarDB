@@ -17,6 +17,15 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Public bind policy** | Refuses `0.0.0.0` and `::` without `--pat` / `--pat-file` |
 | **Tests** | `tests/yardb/smoke.sh` bind-policy smoke harness |
 
+### Server readiness probes
+
+| Item | Summary |
+|------|---------|
+| **Lifecycle state** | `rest_api_server` tracks `stopped`, `starting`, `ready`, `draining`, `failed` |
+| **`GET /ready`** | `200` + `{}` only when `ready`; otherwise `503` + `{"status":...}` |
+| **`GET /health`** | Liveness-only `200` + `{}` while the HTTP stack can respond |
+| **Tests** | Readiness and draining probe cases in `yar-httpd.test.c++` |
+
 ### Engine reader/writer concurrency
 
 | Item | Summary |

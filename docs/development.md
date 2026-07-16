@@ -291,7 +291,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
   - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
 - **Remaining** (near-term):
   - **Prometheus `/metrics`** — request latency, throughput, errors
-  - Engine readiness state so `GET /ready` returns `503` when starting, locked, or shutting down
+- **Shipped** (Jul 2026 follow-up): `GET /ready` returns `503` with `{"status":...}` when not accepting traffic (`starting`, `draining`, `stopped`, `failed`); `GET /health` remains liveness-only (`200` + `{}`)
 - **Planned Implementation** (longer-term):
   - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)
 - **Timeline**: 1-2 months

@@ -89,7 +89,7 @@ yardb --clog --file=test.db 2112
 Once running, `yardb` provides the following REST endpoints:
 
 - `GET /health` - Liveness probe (`{}`); public even when PAT auth is enabled
-- `GET /ready` - Readiness probe (`{}`); public even when PAT auth is enabled (engine readiness checks not yet distinguished)
+- `GET /ready` - Readiness probe (`{}` when ready; `503` + `{"status":"starting|draining|stopped|failed"}` otherwise); public even when PAT auth is enabled
 - `GET /` - List all collections
 - `POST /{collection}` - Create a new document
 - `GET /{collection}` - Read all documents in collection
@@ -339,7 +339,7 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 #### Administrative Commands
 
 - `GET /health` - Liveness probe (`{}`); public even when PAT auth is enabled
-- `GET /ready` - Readiness probe (`{}`); public even when PAT auth is enabled (engine readiness checks not yet distinguished)
+- `GET /ready` - Readiness probe (`{}` when ready; `503` + `{"status":"starting|draining|stopped|failed"}` otherwise); public even when PAT auth is enabled
 - `GET /` - List all collections
 - `GET /$metadata` - OData JSON CSDL metadata
 - `GET /_reindex` - Reindex all collections

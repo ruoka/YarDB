@@ -277,7 +277,8 @@ try
     while(!g_shutdown_requested.load(std::memory_order_acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    slog << notice << "Shutdown signal received, stopping server" << flush;
+    slog << notice << "Shutdown signal received, draining server" << flush;
+    server.drain();
     server.stop();
 
     slog << notice << "Server stopped, exiting" << flush;

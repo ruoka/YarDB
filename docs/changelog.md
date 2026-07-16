@@ -13,6 +13,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | Item | Summary |
 |------|---------|
 | **Offline compaction** | `yarexport --live` exports current documents only; new `yarimport` rebuilds a FSON file (preserves `_id` and `_db` indexes). Workflow: stop yardb → live export → import → swap |
+| **Safe `yarimport --force`** | Validate JSONL and build a staging sidecar before replacing `--file`; failed `--force` imports no longer delete the existing database |
 
 ### Security
 

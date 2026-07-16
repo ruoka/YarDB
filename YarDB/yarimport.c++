@@ -18,6 +18,10 @@ Stop yardb before compacting; write to a new file, then swap.
 Each input line must be JSON with "collection" and "document".
 Lines with status "updated" or "deleted" are rejected.
 Secondary indexes are restored from live "_db" rows via engine.index().
+
+Import always builds a temporary sidecar first and only replaces --file
+after a successful create/index/reindex pass, so a failed --force run
+leaves any existing database intact.
 )";
 
 struct import_row
@@ -76,6 +80,37 @@ auto keys_from_db_document(const object& document, size_t line_no)
     return pair{static_cast<string>(document["collection"s]), std::move(keys)};
 }
 
+struct temporary_database
+{
+    filesystem::path path;
+
+    explicit temporary_database(filesystem::path target)
+        : path{std::move(target)}
+    {
+        error_code ec{};
+        filesystem::remove(path, ec);
+        filesystem::remove(path.string() + ".pid"s, ec);
+    }
+
+    temporary_database(const temporary_database&) = delete;
+    temporary_database& operator=(const temporary_database&) = delete;
+
+    ~temporary_database()
+    {
+        if(path.empty())
+            return;
+
+        error_code ec{};
+        filesystem::remove(path, ec);
+        filesystem::remove(path.string() + ".pid"s, ec);
+    }
+
+    void release()
+    {
+        path.clear();
+    }
+};
+
 int main(int argc, char** argv)
 try
 {
@@ -121,16 +156,6 @@ try
     if(file.empty())
         throw runtime_error{"--file must not be empty"s};
 
-    error_code ec{};
-    if(filesystem::exists(file, ec) and filesystem::file_size(file, ec) > 0)
-    {
-        if(not force)
-            throw runtime_error{
-                "output file already exists: "s + file + "; use --force to overwrite"s};
-        filesystem::remove(file, ec);
-        filesystem::remove(file + ".pid"s, ec);
-    }
-
     auto input_file = ifstream{};
     istream* input = &cin;
     if(not input_path.empty())
@@ -157,29 +182,49 @@ try
         else
             data_rows.push_back(std::move(row));
     }
+    if(input->bad() or (input->fail() and not input->eof()))
+        throw runtime_error{"failed reading import input"s};
 
-    auto engine = yar::db::engine{file};
+    error_code ec{};
+    const auto target_exists =
+        filesystem::exists(file, ec) and filesystem::file_size(file, ec) > 0;
+    if(target_exists and not force)
+        throw runtime_error{
+            "output file already exists: "s + file + "; use --force to overwrite"s};
 
-    for(auto& row : data_rows)
+    auto staging = temporary_database{filesystem::path{file + ".yarimport.tmp"s}};
     {
-        const auto created = engine.create(row.collection, row.document);
-        if(not created)
-            throw runtime_error{
-                "create failed for collection "s + row.collection + ": "s + created.error().message};
+        auto engine = yar::db::engine{staging.path.string()};
+
+        for(auto& row : data_rows)
+        {
+            const auto created = engine.create(row.collection, row.document);
+            if(not created)
+                throw runtime_error{
+                    "create failed for collection "s + row.collection + ": "s + created.error().message};
+        }
+
+        for(auto& [source_line, row] : db_rows)
+        {
+            auto [collection_name, keys] = keys_from_db_document(row.document, source_line);
+            const auto indexed = engine.index(collection_name, std::move(keys));
+            if(not indexed)
+                throw runtime_error{
+                    "index failed for collection "s + collection_name + ": "s + indexed.error().message};
+        }
+
+        const auto reindexed = engine.reindex();
+        if(not reindexed)
+            throw runtime_error{"reindex failed: "s + reindexed.error().message};
     }
 
-    for(auto& [source_line, row] : db_rows)
-    {
-        auto [collection_name, keys] = keys_from_db_document(row.document, source_line);
-        const auto indexed = engine.index(collection_name, std::move(keys));
-        if(not indexed)
-            throw runtime_error{
-                "index failed for collection "s + collection_name + ": "s + indexed.error().message};
-    }
+    filesystem::rename(staging.path, file, ec);
+    if(ec)
+        throw system_error{ec, "failed to replace output database "s + file};
+    staging.release();
 
-    const auto reindexed = engine.reindex();
-    if(not reindexed)
-        throw runtime_error{"reindex failed: "s + reindexed.error().message};
+    // Drop a stale lock file from a previous yardb instance on this path.
+    filesystem::remove(file + ".pid"s, ec);
 
     clog << "Imported " << data_rows.size() << " document(s) and "
          << db_rows.size() << " index configuration(s) into " << file << endl;

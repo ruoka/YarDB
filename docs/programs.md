@@ -576,7 +576,7 @@ yarimport [--help] [--file=<name>] [--input=<path>] [--force]
 
 - `--file=<name>` - Output database path (default: `yar.db`)
 - `--input=<path>` - JSONL input (default: stdin)
-- `--force` - Overwrite an existing non-empty output file
+- `--force` - Replace an existing non-empty output file after a successful import
 - `--help` - Display usage information
 
 ### Compaction workflow
@@ -595,5 +595,5 @@ mv production.db.new production.db
 # start yardb --file=production.db
 ```
 
-`yarimport` refuses `status=updated` / `status=deleted` rows (use `--live` export). Secondary indexes are restored from live `_db` rows via `engine.index()`, then `reindex()`.
+`yarimport` validates the full JSONL input first, builds a temporary sidecar (`*.yarimport.tmp`), then renames it over `--file` only after create/index/reindex succeed. A failed `--force` run therefore leaves any existing database intact. It refuses `status=updated` / `status=deleted` rows (use `--live` export). Secondary indexes are restored from live `_db` rows via `engine.index()`, then `reindex()`.
 

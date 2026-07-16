@@ -1419,21 +1419,79 @@ auto test_set()
             }
         };
 
-        section("GET with $expand (placeholder - should return as-is)") = [setup]
+        section("GET with $expand nests related document via singular_id") = [setup]
         {
-            // $expand is a placeholder, should return documents unchanged
+            auto [c_status, c_reason, c_headers, c_body] = make_request(
+                setup->port(), "POST"s, "/customers"s,
+                R"({"name":"Ada"})"s
+            );
+            require_eq(c_status, "201"s);
+            const auto customer = json::parse(c_body);
+            require_true(customer.has("_id"s));
+            const auto customer_id = static_cast<long long>(customer["_id"s]);
+
+            auto order_json = R"({"customer_id":)"s + std::to_string(customer_id) + R"(,"total":19})"s;
+            auto [o_status, o_reason, o_headers, o_body] = make_request(
+                setup->port(), "POST"s, "/orders"s, order_json
+            );
+            require_eq(o_status, "201"s);
+
             auto [status, reason, headers, response_body] = make_request(
-                setup->port(), "GET"s, "/users?$expand=orders"s, ""s
+                setup->port(), "GET"s, "/orders?$expand=customer"s, ""s
             );
 
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
-            
+
             auto documents = json::parse(response_body);
             require_true(documents.is_array());
-            
-            // Should return documents (expand is placeholder, doesn't modify)
+            require_true(documents.get<object::array>().size() >= 1u);
+
+            auto found_expanded = false;
+            for(const auto& item : documents.get<object::array>())
+            {
+                if(not item.has("customer_id"s))
+                    continue;
+                if(static_cast<long long>(item["customer_id"s]) != customer_id)
+                    continue;
+                require_true(item.has("customer"s));
+                require_true(item["customer"s].is_object());
+                require_eq(static_cast<long long>(item["customer"s]["_id"s]), customer_id);
+                require_eq(static_cast<string>(item["customer"s]["name"s]), "Ada"s);
+                found_expanded = true;
+            }
+            require_true(found_expanded);
+        };
+
+        section("GET with $expand missing related document nests null") = [setup]
+        {
+            auto [o_status, o_reason, o_headers, o_body] = make_request(
+                setup->port(), "POST"s, "/orphans"s,
+                R"({"customer_id":999999,"total":1})"s
+            );
+            require_eq(o_status, "201"s);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/orphans?$expand=customer"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto documents = json::parse(response_body);
             require_true(documents.is_array());
+            require_true(documents.get<object::array>().size() >= 1u);
+
+            auto found_null = false;
+            for(const auto& item : documents.get<object::array>())
+            {
+                if(not item.has("customer_id"s))
+                    continue;
+                if(static_cast<long long>(item["customer_id"s]) != 999999)
+                    continue;
+                require_true(item.has("customer"s));
+                require_true(item["customer"s].is_null());
+                found_null = true;
+            }
+            require_true(found_null);
         };
 
         section("GET with invalid $filter returns 400 Bad Request") = [setup]

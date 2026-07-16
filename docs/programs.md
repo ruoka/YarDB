@@ -189,7 +189,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
   - Uses index-only counting when the filter is a single indexed constraint with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`; otherwise scans candidates and applies `document.match`
   - Example: `GET /users?$count=true`, `GET /users?$count=true&$filter=age%20gt%2025`
 
-- **`$expand=relatedEntity`** - Expand related entities (parsed only; returns documents unchanged until a relationship model exists)
+- **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.
 
 ### OData Metadata
 

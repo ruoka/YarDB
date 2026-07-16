@@ -42,7 +42,7 @@ OData query parameters:
   $filter=expr   Filter (eq, ne, gt, ge, lt, le, and, or, in, startswith, contains, endswith)
   $select=fields Project fields (e.g. ?$select=name,email)
   $count=true    Return count only (e.g. ?$count=true&$filter=age%20gt%2025)
-  $expand=rel    Placeholder — returned as-is until relationship model lands
+  $expand=rel    Nest related docs via {singular}_id → plural collection _id
 
 Examples:
   GET /users?$top=10&$filter=age%20gt%2025

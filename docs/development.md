@@ -268,7 +268,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Completed**:
   - ✅ `in`, `or`, nested paths, `ne`, index-backed `startswith`
   - ✅ Multivalue secondary indexes and `std::flat_map` collection map (engine/index layer)
-- **Recommended next (API)**: Relationship / navigation model for `$expand` and `$apply`
+- **Recommended next (API)**: `$apply` aggregation; deepen `$expand` (overrides, multi-valued refs) beyond v1 `{singular}_id` convention
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

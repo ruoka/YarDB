@@ -1112,6 +1112,89 @@ auto register_odata_tests()
         };
     };
 
+    scenario("relationship naming helpers for $expand, [yardb]") = []
+    {
+        given("Plural collection names") = []
+        {
+            when("Singularizing common plurals") = []
+            {
+                then("ies and trailing s rules apply") = []
+                {
+                    check_eq(singularize_collection_name("customers"sv), "customer"s);
+                    check_eq(singularize_collection_name("orders"sv), "order"s);
+                    check_eq(singularize_collection_name("categories"sv), "category"s);
+                    check_eq(singularize_collection_name("address"sv), "address"s);
+                };
+            };
+
+            when("Pluralizing singular navigation names") = []
+            {
+                then("y→ies and append-s rules apply") = []
+                {
+                    check_eq(pluralize_collection_name("customer"sv), "customers"s);
+                    check_eq(pluralize_collection_name("order"sv), "orders"s);
+                    check_eq(pluralize_collection_name("category"sv), "categories"s);
+                    check_eq(pluralize_collection_name("key"sv), "keys"s);
+                };
+            };
+
+            when("Parsing $expand lists") = []
+            {
+                then("Comma-separated snake_case names are kept") = []
+                {
+                    const auto navs = parse_expand_navigations("customer, product"sv);
+                    require_eq(navs.size(), 2u);
+                    check_eq(navs[0], "customer"s);
+                    check_eq(navs[1], "product"s);
+                };
+            };
+        };
+    };
+
+    scenario("apply_expand nests related documents by singular_id, [yardb]") = []
+    {
+        given("An engine with customers and orders") = []
+        {
+            const auto test_file = "./odata_expand_test.db"s;
+
+            when("Expanding customer on orders") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto customer = xson::object{{"name"s, "Ada"s}};
+                require_true(engine.create("customers"s, customer).has_value());
+                const auto customer_id = static_cast<xson::integer_type>(customer["_id"s]);
+
+                auto order = xson::object{
+                    {"customer_id"s, customer_id},
+                    {"total"s, 19}
+                };
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(documents, "customer"sv, "orders"s, engine);
+
+                then("Each order with customer_id nests the customer document") = [expanded, customer_id, test_file]
+                {
+                    require_true(expanded.is_array());
+                    require_true(expanded.get<xson::object::array>().size() >= 1u);
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc.has("customer"s));
+                    require_true(doc["customer"s].is_object());
+                    check_eq(static_cast<xson::integer_type>(doc["customer"s]["_id"s]), customer_id);
+                    check_eq(static_cast<std::string>(doc["customer"s]["name"s]), "Ada"s);
+                    check_eq(static_cast<xson::integer_type>(doc["customer_id"s]), customer_id);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
     return true;
 }
 

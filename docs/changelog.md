@@ -108,6 +108,7 @@ Earlier July commits: piped yarsh harness (`031d52f`), yarexport JSONL fix + smo
 
 | Operator / feature | Notes |
 |--------------------|-------|
+| **`$expand`** | v1 relationship convention: `{singular}_id` → plural collection `_id`; nests related doc or `null` |
 | **`$filter` `in`** | `status in ('active','pending')`; yarsh smoke (`420e31b`) |
 | **`$filter` `or`** | Multi-branch read merged by `_id`; yarsh smoke (`437007b`) |
 | **`$filter` `startswith`** | Index-backed on secondary keys; yarsh smoke (`437007b`) |

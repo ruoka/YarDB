@@ -899,18 +899,122 @@ export inline auto read_with_parsed_filter(
     return apply_string_filters(documents, string_filters);
 }
 
-// Helper function to apply $expand to documents
-// For now, this is a placeholder - YarDB doesn't have explicit relationships
-inline auto apply_expand(const xson::object& documents, [[maybe_unused]] std::string_view expand_value, [[maybe_unused]] const std::string& collection_name, [[maybe_unused]] yar::db::engine& engine)
+// Relationship convention (v1): collection names are plural snake_case; a reference
+// field is {singular}_id pointing at the related collection's _id. $expand=singular
+// loads that document and nests it under the singular navigation name.
+//
+// Singularize: trailing "ies" → "y"; else strip a single trailing "s" (not "ss").
+// Pluralize: consonant+"y" → "ies"; else append "s".
+
+inline auto singularize_collection_name(std::string_view collection)
 {
-    // For now, $expand is a placeholder
-    // In a real implementation, this would:
-    // 1. Parse comma-separated field list: "orders,profile"
-    // 2. Extract IDs from the expand field (e.g., order_ids)
-    // 3. Query the related collection (e.g., orders)
-    // 4. Embed the results
-    
-    // Return documents as-is for now
+    if(collection.size() >= 3 and collection.ends_with("ies"sv))
+        return std::string{collection.substr(0, collection.size() - 3)} + "y";
+    if(collection.size() >= 2 and collection.ends_with('s') and not collection.ends_with("ss"sv))
+        return std::string{collection.substr(0, collection.size() - 1)};
+    return std::string{collection};
+}
+
+inline auto pluralize_collection_name(std::string_view singular)
+{
+    if(singular.size() >= 2 and singular.ends_with('y'))
+    {
+        const auto before = static_cast<char>(std::tolower(static_cast<unsigned char>(singular[singular.size() - 2])));
+        if(before != 'a' and before != 'e' and before != 'i' and before != 'o' and before != 'u')
+            return std::string{singular.substr(0, singular.size() - 1)} + "ies";
+    }
+    return std::string{singular} + "s";
+}
+
+inline auto parse_expand_navigations(std::string_view expand_value)
+{
+    auto navigations = std::vector<std::string>{};
+    for(const auto part : split_outside_quotes(expand_value, ","sv))
+    {
+        auto name = utils::trim(part);
+        if(name.empty())
+            continue;
+        if(name[0] < 'a' or name[0] > 'z')
+            continue;
+        const auto valid = std::ranges::all_of(name, [](char c)
+        {
+            return (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
+        });
+        if(not valid)
+            continue;
+        navigations.emplace_back(name);
+    }
+    return navigations;
+}
+
+inline void expand_document(xson::object& document, std::string_view navigation, yar::db::engine& engine)
+{
+    const auto ref_field = std::string{navigation} + "_id";
+    if(not document.has(ref_field))
+        return;
+
+    const auto& ref = document[ref_field];
+    if(not ref.is_integer())
+    {
+        document[std::string{navigation}] = nullptr;
+        return;
+    }
+
+    const auto related_id = static_cast<xson::integer_type>(ref);
+    const auto related_collection = pluralize_collection_name(navigation);
+
+    try
+    {
+        validate_collection_name(related_collection);
+    }
+    catch(const std::invalid_argument&)
+    {
+        document[std::string{navigation}] = nullptr;
+        return;
+    }
+
+    auto related_docs = xson::object{};
+    const auto selector = xson::object{"_id"s, related_id};
+    const auto found = engine.read(related_collection, selector, related_docs);
+    if(not found or not related_docs.is_array() or related_docs.get<xson::object::array>().empty())
+    {
+        document[std::string{navigation}] = nullptr;
+        return;
+    }
+
+    document[std::string{navigation}] = related_docs.get<xson::object::array>()[0];
+}
+
+// Apply $expand using {singular}_id → plural collection _id.
+inline auto apply_expand(
+    const xson::object& documents,
+    std::string_view expand_value,
+    [[maybe_unused]] const std::string& collection_name,
+    yar::db::engine& engine)
+{
+    const auto navigations = parse_expand_navigations(expand_value);
+    if(navigations.empty())
+        return documents;
+
+    auto expand_one = [&](xson::object doc)
+    {
+        for(const auto& navigation : navigations)
+            expand_document(doc, navigation, engine);
+        return doc;
+    };
+
+    if(documents.is_array())
+    {
+        const auto& docs = documents.get<xson::object::array>();
+        return xson::object{
+            docs
+                | std::views::transform(expand_one)
+                | std::ranges::to<xson::object::array>()};
+    }
+
+    if(documents.is_object())
+        return expand_one(documents);
+
     return documents;
 }
 

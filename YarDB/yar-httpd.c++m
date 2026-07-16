@@ -866,16 +866,15 @@ private:
                 m_engine.read(collection_name, selector, document);
             }
             
-            // Post-process: Apply $select projection (result transformation)
-            if(params.contains("$select"s))
-            {
-                document = yar::http::odata::apply_select(document, params["$select"s]);
-            }
-            
-            // Post-process: Apply $expand expansion (result transformation)
+            // Expand before $select so *_id reference fields are still present.
             if(params.contains("$expand"s))
             {
                 document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
+            }
+
+            if(params.contains("$select"s))
+            {
+                document = yar::http::odata::apply_select(document, params["$select"s]);
             }
             
             // Add OData metadata if requested

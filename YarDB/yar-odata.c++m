@@ -122,28 +122,134 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
     return wrapped;
 }
 
-// Helper function to extract field name from function arguments (e.g., "field, 'value'" -> "field")
-constexpr auto parse_field_from_function_args(std::string_view args, std::size_t comma_pos)
+// Find the first needle occurrence outside quoted string literals.
+export inline auto find_outside_quotes(std::string_view text, std::string_view needle)
+    -> std::optional<std::size_t>
 {
-    return utils::trim_end(args.substr(0, comma_pos));
+    if(needle.empty())
+        throw std::invalid_argument{"needle cannot be empty"};
+
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+
+    for(auto i = std::size_t{0}; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+
+        if(in_quote)
+        {
+            if(c == quote_char
+                && i + 1 < text.size()
+                && text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' || c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(i + needle.size() <= text.size() && text.substr(i, needle.size()) == needle)
+            return i;
+    }
+
+    return std::nullopt;
 }
 
-// Helper function to extract value without quotes from function arguments (e.g., "field, 'value'" -> "value")
-constexpr auto parse_value_from_function_args(std::string_view args, std::size_t comma_pos)
+// Split on delimiter only outside quoted string literals (OData '' escape aware).
+export inline auto split_outside_quotes(std::string_view text, std::string_view delimiter)
+    -> std::vector<std::string_view>
 {
-    auto value_trimmed = utils::trim_start(args.substr(comma_pos + 1));
-    
-    // Remove quotes if present using string_view operations
-    if(value_trimmed.size() >= 2)
+    if(delimiter.empty())
+        throw std::invalid_argument{"delimiter cannot be empty"};
+    if(text.empty())
+        return {};
+
+    auto parts = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+
+    for(auto i = std::size_t{0}; i < text.size(); ++i)
     {
-        if((value_trimmed.starts_with('\'') && value_trimmed.ends_with('\'')) ||
-           (value_trimmed.starts_with('"') && value_trimmed.ends_with('"')))
+        const auto c = text[i];
+
+        if(in_quote)
         {
-            return value_trimmed.substr(1, value_trimmed.size() - 2);
+            if(c == quote_char
+                && i + 1 < text.size()
+                && text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' || c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(i + delimiter.size() <= text.size() && text.substr(i, delimiter.size()) == delimiter)
+        {
+            auto part = utils::trim(text.substr(start, i - start));
+            if(not part.empty())
+                parts.push_back(part);
+
+            i += delimiter.size() - 1;
+            start = i + 1;
         }
     }
-    
-    return value_trimmed;
+
+    auto tail = utils::trim(text.substr(start));
+    if(not tail.empty())
+        parts.push_back(tail);
+
+    return parts;
+}
+
+inline auto strip_quoted_literal(std::string_view value)
+{
+    auto trimmed = utils::trim(value);
+
+    if(trimmed.size() >= 2
+        && ((trimmed.front() == '\'' && trimmed.back() == '\'')
+            || (trimmed.front() == '"' && trimmed.back() == '"')))
+        return trimmed.substr(1, trimmed.size() - 2);
+
+    return trimmed;
+}
+
+inline auto parse_string_function_args(std::string_view inner)
+{
+    auto args = split_outside_quotes(inner, ","sv);
+    if(args.size() != 2)
+        throw std::invalid_argument{"Invalid function arguments: "s + std::string{inner}};
+
+    auto field = utils::trim(args[0]);
+    auto value = strip_quoted_literal(args[1]);
+
+    if(field.empty())
+        throw std::invalid_argument{"Field name cannot be empty in function arguments: "s + std::string{inner}};
+
+    return std::make_pair(field, value);
 }
 
 // String filter function type for post-processing
@@ -174,47 +280,10 @@ export struct parsed_filter
     }
 };
 
-// Split comma-separated OData list values, respecting quoted strings
-inline auto split_comma_separated_values(std::string_view list)
-{
-    auto result = std::vector<std::string_view>{};
-    auto start = std::size_t{0};
-    auto in_quote = false;
-    auto quote_char = char{'\0'};
-
-    for(auto i = std::size_t{0}; i < list.size(); ++i)
-    {
-        const auto c = list[i];
-        if(in_quote)
-        {
-            if(c == quote_char)
-                in_quote = false;
-        }
-        else if(c == '\'' || c == '"')
-        {
-            in_quote = true;
-            quote_char = c;
-        }
-        else if(c == ',')
-        {
-            auto token = utils::trim(list.substr(start, i - start));
-            if(not token.empty())
-                result.push_back(token);
-            start = i + 1;
-        }
-    }
-
-    auto token = utils::trim(list.substr(start));
-    if(not token.empty())
-        result.push_back(token);
-
-    return result;
-}
-
 // Parse OData 'in' list: ('active','pending') or (1, 2, 3)
 inline auto parse_in_value_list(std::string_view list_content)
 {
-    auto tokens = split_comma_separated_values(list_content);
+    auto tokens = split_outside_quotes(list_content, ","sv);
     if(tokens.empty())
         throw std::invalid_argument{"'in' operator requires at least one value"};
 
@@ -379,27 +448,6 @@ inline auto make_in_selector(std::string_view field, const std::vector<xson::obj
     return selector;
 }
 
-// Helper function to split filter expression by operator and process parts
-inline auto split_and_process_filter_parts(std::string_view expr, std::string_view op_str, std::size_t op_len)
-{
-    auto parts = std::vector<std::string_view>{};
-    auto start = std::size_t{0};
-    
-    while(true)
-    {
-        auto pos = expr.find(op_str, start);
-        if(pos == std::string_view::npos)
-        {
-            parts.push_back(expr.substr(start));
-            break;
-        }
-        parts.push_back(expr.substr(start, pos - start));
-        start = pos + op_len;
-    }
-    
-    return parts;
-}
-
 using filter_clause = std::pair<xson::object, std::vector<string_filter>>;
 
 // Parse a single leaf $filter expression (no top-level and/or)
@@ -433,43 +481,22 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     
     if(expr.starts_with(startswith_prefix) && expr.back() == ')')
     {
-        // Parse: startswith(field, 'value')
         auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
-        auto comma_pos = inner.find(',');
-        if(comma_pos == std::string_view::npos)
-            throw std::invalid_argument{"Invalid startswith expression: " + std::string{expr}};
-        
-        auto field = parse_field_from_function_args(inner, comma_pos);
-        auto value = parse_value_from_function_args(inner, comma_pos);
-        
+        const auto [field, value] = parse_string_function_args(inner);
         string_filters.push_back({"startswith", field, value});
         return std::make_pair(selector, string_filters);
     }
     else if(expr.starts_with(contains_prefix) && expr.back() == ')')
     {
-        // Parse: contains(field, 'value')
         auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
-        auto comma_pos = inner.find(',');
-        if(comma_pos == std::string_view::npos)
-            throw std::invalid_argument{"Invalid contains expression: " + std::string{expr}};
-        
-        auto field = parse_field_from_function_args(inner, comma_pos);
-        auto value = parse_value_from_function_args(inner, comma_pos);
-        
+        const auto [field, value] = parse_string_function_args(inner);
         string_filters.push_back({"contains", field, value});
         return std::make_pair(selector, string_filters);
     }
     else if(expr.starts_with(endswith_prefix) && expr.back() == ')')
     {
-        // Parse: endswith(field, 'value')
         auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
-        auto comma_pos = inner.find(',');
-        if(comma_pos == std::string_view::npos)
-            throw std::invalid_argument{"Invalid endswith expression: " + std::string{expr}};
-        
-        auto field = parse_field_from_function_args(inner, comma_pos);
-        auto value = parse_value_from_function_args(inner, comma_pos);
-        
+        const auto [field, value] = parse_string_function_args(inner);
         string_filters.push_back({"endswith", field, value});
         return std::make_pair(selector, string_filters);
     }
@@ -479,26 +506,26 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     constexpr std::string_view operators[] = {" ge ", " le ", " gt ", " lt ", " ne ", " eq "};
     constexpr std::string_view op_names[] = {"ge", "le", "gt", "lt", "ne", "eq"};
     
-    auto op_pos = std::string_view::npos;
+    auto op_pos = std::optional<std::size_t>{};
     std::string_view op;
-    
+
     for(std::size_t i = 0; i < std::size(operators); ++i)
     {
-        // Operators include spaces (" ge ", " eq ", etc.) so find() is safe - won't match partial words
-        // e.g., "age" won't match " ge " because it lacks the leading space
-        if(auto pos = expr.find(operators[i]); pos != std::string_view::npos)
+        if(const auto pos = find_outside_quotes(expr, operators[i]))
         {
-            op_pos = pos;
-            op = op_names[i];
-            break;
+            if(not op_pos || *pos < *op_pos)
+            {
+                op_pos = pos;
+                op = op_names[i];
+            }
         }
     }
-    
-    if(op_pos == std::string_view::npos)
+
+    if(not op_pos)
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
-    
-    auto field = utils::trim_end_to_string(expr.substr(0, op_pos));
-    auto value = utils::trim_start_to_string(expr.substr(op_pos + op.size() + 1));
+
+    auto field = utils::trim_end_to_string(expr.substr(0, *op_pos));
+    auto value = utils::trim_start_to_string(expr.substr(*op_pos + op.size() + 1));
     
     // Validate field name is not empty
     if(field.empty())
@@ -612,25 +639,22 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
 inline filter_clause parse_filter_and_group(std::string_view filter_expr)
 {
     auto expr = utils::trim(filter_expr);
+    auto parts = split_outside_quotes(expr, " and "sv);
 
-    if(expr.contains(" and "))
+    if(parts.size() == 1)
+        return parse_filter_leaf(parts[0]);
+
+    auto selector = xson::object{};
+    auto string_filters = std::vector<string_filter>{};
+
+    for(const auto part : parts)
     {
-        constexpr auto op_str = " and "sv;
-        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
-
-        auto selector = xson::object{};
-        auto string_filters = std::vector<string_filter>{};
-
-        for(const auto& part : parts)
-        {
-            auto [part_selector, part_string_filters] = parse_filter_and_group(part);
-            merge_selector_into(selector, part_selector);
-            string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
-        }
-        return std::make_pair(selector, string_filters);
+        auto [part_selector, part_string_filters] = parse_filter_leaf(part);
+        merge_selector_into(selector, part_selector);
+        string_filters.insert(string_filters.end(), part_string_filters.begin(), part_string_filters.end());
     }
 
-    return parse_filter_leaf(expr);
+    return std::make_pair(selector, string_filters);
 }
 
 // Parse OData $filter expression
@@ -638,16 +662,14 @@ inline filter_clause parse_filter_and_group(std::string_view filter_expr)
 export inline parsed_filter parse_filter(std::string_view filter_expr)
 {
     auto expr = utils::trim(filter_expr);
+    auto or_parts = split_outside_quotes(expr, " or "sv);
 
-    if(expr.contains(" or "))
+    if(or_parts.size() > 1)
     {
-        constexpr auto op_str = " or "sv;
-        auto parts = split_and_process_filter_parts(expr, op_str, op_str.size());
-
         auto branches = std::vector<filter_branch>{};
-        branches.reserve(parts.size());
+        branches.reserve(or_parts.size());
 
-        for(const auto& part : parts)
+        for(const auto part : or_parts)
         {
             auto [branch_selector, branch_string_filters] = parse_filter_and_group(part);
             branches.push_back({std::move(branch_selector), std::move(branch_string_filters)});

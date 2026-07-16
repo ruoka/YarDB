@@ -189,6 +189,86 @@ auto register_odata_tests()
         };
     };
 
+    scenario("quote-aware scan helpers split and find outside literals, [yardb]") = []
+    {
+        given("Text with delimiters inside quoted strings") = []
+        {
+            when("split_outside_quotes splits on and") = []
+            {
+                then("Keeps and inside string literals") = []
+                {
+                    const auto parts = split_outside_quotes(
+                        "name eq 'Smith and Sons' and city eq 'Boston'"sv, " and "sv);
+                    require_eq(parts.size(), 2u);
+                    require_eq(parts[0], "name eq 'Smith and Sons'"sv);
+                    require_eq(parts[1], "city eq 'Boston'"sv);
+                };
+            };
+
+            when("split_outside_quotes splits on or") = []
+            {
+                then("Keeps or inside string literals") = []
+                {
+                    const auto parts = split_outside_quotes(
+                        "contains(msg, 'error or warning') or level eq 'critical'"sv, " or "sv);
+                    require_eq(parts.size(), 2u);
+                    require_eq(parts[0], "contains(msg, 'error or warning')"sv);
+                    require_eq(parts[1], "level eq 'critical'"sv);
+                };
+            };
+
+            when("split_outside_quotes splits on comma") = []
+            {
+                then("Keeps commas inside quoted list values") = []
+                {
+                    const auto parts = split_outside_quotes("'active,pending','done'"sv, ","sv);
+                    require_eq(parts.size(), 2u);
+                    require_eq(parts[0], "'active,pending'"sv);
+                    require_eq(parts[1], "'done'"sv);
+                };
+            };
+
+            when("find_outside_quotes searches for eq") = []
+            {
+                then("Skips operators inside quoted values") = []
+                {
+                    const auto pos = find_outside_quotes("note eq 'a eq b'"sv, " eq "sv);
+                    require_true(pos.has_value());
+                    require_eq(*pos, 4u);
+                };
+            };
+
+            when("split_outside_quotes handles OData doubled quotes") = []
+            {
+                then("Does not end the literal on escaped quote") = []
+                {
+                    const auto parts = split_outside_quotes("name eq 'O''Reilly'"sv, " and "sv);
+                    require_eq(parts.size(), 1u);
+                    require_eq(parts[0], "name eq 'O''Reilly'"sv);
+                };
+            };
+
+            when("delimiter is empty") = []
+            {
+                then("split_outside_quotes throws invalid_argument") = []
+                {
+                    require_throws_as([]
+                    {
+                        split_outside_quotes("a,b"sv, ""sv);
+                    }, std::invalid_argument{"delimiter cannot be empty"});
+                };
+
+                then("find_outside_quotes throws invalid_argument") = []
+                {
+                    require_throws_as([]
+                    {
+                        find_outside_quotes("a eq b"sv, ""sv);
+                    }, std::invalid_argument{"needle cannot be empty"});
+                };
+            };
+        };
+    };
+
     // Test parse_filter
     scenario("parse_filter parses various filter expressions, [yardb]") = []
     {
@@ -476,6 +556,85 @@ auto register_odata_tests()
                     require_eq(filters.size(), 1u);
                     require_eq(filters[0].field, "Customer/Name"sv);
                     require_eq(filters[0].value, "Ac"sv);
+                };
+            };
+
+            when("Filter value contains and inside quotes") = []
+            {
+                then("Parses as a single eq comparison") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("description eq 'rock and roll'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("description"s));
+                    require_eq(selector["description"s].get<string>(), "rock and roll"s);
+                };
+            };
+
+            when("Filter combines quoted and with a second predicate") = []
+            {
+                then("Splits only on top-level and") = []
+                {
+                    const auto [selector, filters] = parse_and_filter(
+                        "name eq 'Smith and Sons' and city eq 'Boston'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("name"s));
+                    require_true(selector.has("city"s));
+                    require_eq(selector["name"s].get<string>(), "Smith and Sons"s);
+                    require_eq(selector["city"s].get<string>(), "Boston"s);
+                };
+            };
+
+            when("Filter uses or with quoted or inside contains") = []
+            {
+                then("Splits only on top-level or") = []
+                {
+                    const auto parsed = parse_filter(
+                        "contains(message, 'error or warning') or level eq 'critical'"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+                    require_eq(parsed.or_branches[0].string_filters.size(), 1u);
+                    require_eq(parsed.or_branches[0].string_filters[0].value, "error or warning"sv);
+                    require_true(parsed.or_branches[1].selector.has("level"s));
+                    require_eq(parsed.or_branches[1].selector["level"s].get<string>(), "critical"s);
+                };
+            };
+
+            when("Filter function argument contains a comma") = []
+            {
+                then("Parses contains value with comma") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("contains(tag, 'a,b')"sv);
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_eq(filters[0].function, "contains"sv);
+                    require_eq(filters[0].field, "tag"sv);
+                    require_eq(filters[0].value, "a,b"sv);
+                };
+            };
+
+            when("Filter in list value contains and") = []
+            {
+                then("Parses both quoted list entries") = []
+                {
+                    const auto [selector, filters] = parse_and_filter(
+                        "status in ('active and pending','done')"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("status"s));
+                    const auto& in_map = selector["status"s]["$in"s];
+                    require_eq(in_map.size(), 2u);
+                    require_eq(in_map["0"s].get<string>(), "active and pending"s);
+                    require_eq(in_map["1"s].get<string>(), "done"s);
+                };
+            };
+
+            when("Filter comparison value contains eq token") = []
+            {
+                then("Finds operator outside quotes") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("note eq 'a eq b'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("note"s));
+                    require_eq(selector["note"s].get<string>(), "a eq b"s);
                 };
             };
         };

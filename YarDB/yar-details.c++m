@@ -1,3 +1,6 @@
+module;
+#include <version> // for __cpp_lib_generator; std::generator itself comes from import std
+
 export module yar:details;
 import :constants;
 import :engine;
@@ -14,6 +17,150 @@ using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace net;
 using namespace ::http;  // HTTP constants and types from net::http
+
+// Prefer std::generator from import std when libc++ provides it
+// (__cpp_lib_generator >= 202207L). Until then, a simplified local stand-in:
+// non-recursive, no custom Allocator — enough for co_yield pipelines and
+// ranges::to (see P2502R2 / [coro.generator]).
+#if defined(__cpp_lib_generator) && __cpp_lib_generator >= 202207L
+
+template<typename Ref, typename V = void>
+using generator = std::generator<Ref, V>;
+
+#else
+
+template<typename Ref, typename V = void>
+class [[nodiscard]] generator
+{
+public:
+
+    using value_type = std::conditional_t<std::is_void_v<V>, std::remove_cvref_t<Ref>, V>;
+
+    struct promise_type
+    {
+        value_type current{};
+
+        auto get_return_object()
+        {
+            return generator{std::coroutine_handle<promise_type>::from_promise(*this)};
+        }
+
+        static auto initial_suspend() noexcept
+        {
+            return std::suspend_always{};
+        }
+
+        static auto final_suspend() noexcept
+        {
+            return std::suspend_always{};
+        }
+
+        static void unhandled_exception()
+        {
+            throw;
+        }
+
+        // Local stand-in copies; std::generator stores a pointer to the yielded object.
+        auto yield_value(const value_type& value)
+        {
+            current = value;
+            return std::suspend_always{};
+        }
+
+        void return_void() {}
+    };
+
+    class iterator
+    {
+    public:
+
+        using difference_type = std::ptrdiff_t;
+        using value_type = generator::value_type;
+        using iterator_concept = std::input_iterator_tag;
+
+        iterator() = default;
+
+        explicit iterator(std::coroutine_handle<promise_type> coroutine) :
+            m_coroutine{coroutine}
+        {}
+
+        auto operator*() const -> const value_type&
+        {
+            return m_coroutine.promise().current;
+        }
+
+        iterator& operator++()
+        {
+            m_coroutine.resume();
+            return *this;
+        }
+
+        auto operator++(int)
+        {
+            auto tmp = *this;
+            ++*this;
+            return tmp;
+        }
+
+        friend auto operator==(const iterator& lhs, std::default_sentinel_t) -> bool
+        {
+            return not lhs.m_coroutine || lhs.m_coroutine.done();
+        }
+
+    private:
+
+        std::coroutine_handle<promise_type> m_coroutine{};
+    };
+
+    generator() = default;
+
+    explicit generator(std::coroutine_handle<promise_type> coroutine) :
+        m_coroutine{coroutine}
+    {}
+
+    generator(generator&& other) noexcept :
+        m_coroutine{std::exchange(other.m_coroutine, {})}
+    {}
+
+    ~generator()
+    {
+        if(m_coroutine)
+            m_coroutine.destroy();
+    }
+
+    generator(const generator&) = delete;
+
+    generator& operator=(const generator&) = delete;
+
+    generator& operator=(generator&& other) noexcept
+    {
+        if(this != &other)
+        {
+            if(m_coroutine)
+                m_coroutine.destroy();
+            m_coroutine = std::exchange(other.m_coroutine, {});
+        }
+        return *this;
+    }
+
+    auto begin()
+    {
+        if(m_coroutine)
+            m_coroutine.resume();
+        return iterator{m_coroutine};
+    }
+
+    static auto end() noexcept
+    {
+        return std::default_sentinel;
+    }
+
+private:
+
+    std::coroutine_handle<promise_type> m_coroutine{};
+};
+
+#endif
 
 // Find the first needle occurrence outside quoted string literals.
 inline auto find_outside_quotes(std::string_view text, std::string_view needle)
@@ -60,15 +207,13 @@ inline auto find_outside_quotes(std::string_view text, std::string_view needle)
 }
 
 // Split on delimiter only outside quoted string literals (OData '' escape aware).
-inline auto split_outside_quotes(std::string_view text, std::string_view delimiter)
-    -> std::vector<std::string_view>
+inline generator<std::string_view> split_outside_quotes_impl(
+    std::string_view text,
+    std::string_view delimiter)
 {
-    if(delimiter.empty())
-        throw std::invalid_argument{"delimiter cannot be empty"};
     if(text.empty())
-        return {};
+        co_return;
 
-    auto parts = std::vector<std::string_view>{};
     auto start = std::size_t{0};
     auto in_quote = false;
     auto quote_char = char{'\0'};
@@ -104,7 +249,7 @@ inline auto split_outside_quotes(std::string_view text, std::string_view delimit
         {
             auto part = utils::trim(text.substr(start, i - start));
             if(not part.empty())
-                parts.push_back(part);
+                co_yield part;
 
             i += delimiter.size() - 1;
             start = i + 1;
@@ -113,9 +258,17 @@ inline auto split_outside_quotes(std::string_view text, std::string_view delimit
 
     auto tail = utils::trim(text.substr(start));
     if(not tail.empty())
-        parts.push_back(tail);
+        co_yield tail;
+}
 
-    return parts;
+inline generator<std::string_view> split_outside_quotes(
+    std::string_view text,
+    std::string_view delimiter)
+{
+    if(delimiter.empty())
+        throw std::invalid_argument{"delimiter cannot be empty"};
+
+    return split_outside_quotes_impl(text, delimiter);
 }
 
 // Paths reachable without authentication when PAT middleware is enabled.
@@ -176,7 +329,7 @@ inline ::http::response_with_headers not_acceptable_response_with_headers()
 // Query parameter parsing
 inline auto parse_comma_separated_list(std::string_view list_value)
 {
-    auto fields = split_outside_quotes(list_value, ","sv);
+    auto fields = split_outside_quotes(list_value, ","sv) | std::ranges::to<std::vector<std::string_view>>();
 
     if(fields.size() > yar::db::max_query_fields)
         throw std::invalid_argument{"Too many fields in list (max "s + std::to_string(yar::db::max_query_fields) + ")"};

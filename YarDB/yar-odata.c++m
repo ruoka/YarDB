@@ -136,7 +136,7 @@ inline auto strip_quoted_literal(std::string_view value)
 
 inline auto parse_string_function_args(std::string_view inner)
 {
-    auto args = split_outside_quotes(inner, ","sv);
+    auto args = split_outside_quotes(inner, ","sv) | std::ranges::to<std::vector<std::string_view>>();
     if(args.size() != 2)
         throw std::invalid_argument{"Invalid function arguments: "s + std::string{inner}};
 
@@ -180,16 +180,14 @@ export struct parsed_filter
 // Parse OData 'in' list: ('active','pending') or (1, 2, 3)
 inline auto parse_in_value_list(std::string_view list_content)
 {
-    auto tokens = split_outside_quotes(list_content, ","sv);
-    if(tokens.empty())
-        throw std::invalid_argument{"'in' operator requires at least one value"};
-
     enum class value_kind { string, integer };
     auto kind = std::optional<value_kind>{};
     auto values = std::vector<xson::object>{};
+    auto saw_token = false;
 
-    for(const auto token : tokens)
+    for(const auto token : split_outside_quotes(list_content, ","sv))
     {
+        saw_token = true;
         auto is_string = false;
         auto raw = std::string_view{token};
 
@@ -227,6 +225,9 @@ inline auto parse_in_value_list(std::string_view list_content)
             }
         }
     }
+
+    if(not saw_token)
+        throw std::invalid_argument{"'in' operator requires at least one value"};
 
     return values;
 }
@@ -529,13 +530,12 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
 inline filter_clause parse_filter_and_group(std::string_view filter_expr)
 {
     auto expr = utils::trim(filter_expr);
-    auto parts = split_outside_quotes(expr, " and "sv);
 
-    if(parts.size() == 1)
-        return parse_filter_leaf(parts[0]);
+    if(not find_outside_quotes(expr, " and "sv))
+        return parse_filter_leaf(expr);
 
     return std::ranges::fold_left(
-        parts,
+        split_outside_quotes(expr, " and "sv),
         filter_clause{xson::object{}, std::vector<string_filter>{}},
         [](filter_clause merged, const std::string_view part)
         {
@@ -554,11 +554,10 @@ inline filter_clause parse_filter_and_group(std::string_view filter_expr)
 export inline parsed_filter parse_filter(std::string_view filter_expr)
 {
     auto expr = utils::trim(filter_expr);
-    auto or_parts = split_outside_quotes(expr, " or "sv);
 
-    if(or_parts.size() > 1)
+    if(find_outside_quotes(expr, " or "sv))
     {
-        auto branches = or_parts
+        auto branches = split_outside_quotes(expr, " or "sv)
             | std::views::transform([](const std::string_view part)
             {
                 auto [branch_selector, branch_string_filters] = parse_filter_and_group(part);
@@ -576,7 +575,7 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
 // Helper function to apply $select projection to documents
 inline auto apply_select(const xson::object& documents, std::string_view select_value)
 {
-    auto fields = split_outside_quotes(select_value, ","sv);
+    auto fields = split_outside_quotes(select_value, ","sv) | std::ranges::to<std::vector<std::string_view>>();
 
     if(fields.empty())
         return documents;

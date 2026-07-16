@@ -26,7 +26,8 @@ auto register_details_tests()
                 then("Keeps and inside string literals") = []
                 {
                     const auto parts = split_outside_quotes(
-                        "name eq 'Smith and Sons' and city eq 'Boston'"sv, " and "sv);
+                        "name eq 'Smith and Sons' and city eq 'Boston'"sv, " and "sv)
+                        | std::ranges::to<std::vector<std::string_view>>();
                     require_eq(parts.size(), 2u);
                     require_eq(parts[0], "name eq 'Smith and Sons'"sv);
                     require_eq(parts[1], "city eq 'Boston'"sv);
@@ -37,7 +38,8 @@ auto register_details_tests()
             {
                 then("Keeps commas inside quoted list values") = []
                 {
-                    const auto parts = split_outside_quotes("'active,pending','done'"sv, ","sv);
+                    const auto parts = split_outside_quotes("'active,pending','done'"sv, ","sv)
+                        | std::ranges::to<std::vector<std::string_view>>();
                     require_eq(parts.size(), 2u);
                     require_eq(parts[0], "'active,pending'"sv);
                     require_eq(parts[1], "'done'"sv);

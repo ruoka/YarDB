@@ -8,17 +8,21 @@ using namespace std;
 using namespace net;
 
 const auto usage = R"(
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [--admin-pat=<token>] [--admin-pat-file=<path>] [service_or_port]
 
 Listen address (default: 127.0.0.1):
   --bind=<host>       Bind host (default 127.0.0.1). Use --bind=0.0.0.0 for Docker/port-forwarding.
                       Binding to 0.0.0.0 or :: requires --pat or --pat-file.
 
 Optional PAT authentication (Bearer token):
-  --pat=<token>       Accept a personal access token (repeatable)
-  --pat-file=<path>   Load tokens from a file (one per line; # comments allowed)
-                      Lines may be plaintext tokens or sha256:<hex> pre-hashed values.
-When any PAT is configured, API routes require Authorization: Bearer <token>, except GET /health and GET /ready.
+  --pat=<token>            Accept a data-API personal access token (repeatable)
+  --pat-file=<path>        Load data-API tokens from a file (one per line; # comments allowed)
+                           Lines may be plaintext tokens or sha256:<hex> pre-hashed values.
+  --admin-pat=<token>      Accept an admin-API token for /_* maintenance routes (repeatable)
+  --admin-pat-file=<path>  Load admin-API tokens from a file (same format as --pat-file)
+When data PATs are configured, ordinary API routes require Authorization: Bearer <token>
+(except GET /health, /ready, /metrics). When admin PATs are configured, /_* routes require an
+admin token; otherwise /_* uses the data PAT.
 )";
 
 // Global atomic flag for shutdown request (async-signal-safe)
@@ -168,6 +172,8 @@ try
     auto service_or_port = "2112"s;
     auto raw_pats = vector<string>{};
     auto pat_files = vector<string>{};
+    auto raw_admin_pats = vector<string>{};
+    auto admin_pat_files = vector<string>{};
 
     slog.app_name("yardb")
         .log_level(net::syslog::severity::debug)
@@ -220,15 +226,27 @@ try
             continue;
         }
 
-        if(option.starts_with("--pat="))
+        if(option.starts_with("--admin-pat-file="))
         {
-            raw_pats.push_back(string{option.substr(string_view{"--pat="}.size())});
+            admin_pat_files.push_back(string{option.substr(string_view{"--admin-pat-file="}.size())});
+            continue;
+        }
+
+        if(option.starts_with("--admin-pat="))
+        {
+            raw_admin_pats.push_back(string{option.substr(string_view{"--admin-pat="}.size())});
             continue;
         }
 
         if(option.starts_with("--pat-file="))
         {
             pat_files.push_back(string{option.substr(string_view{"--pat-file="}.size())});
+            continue;
+        }
+
+        if(option.starts_with("--pat="))
+        {
+            raw_pats.push_back(string{option.substr(string_view{"--pat="}.size())});
             continue;
         }
 
@@ -244,27 +262,53 @@ try
 
     for(const auto& pat_file : pat_files)
         load_pat_file(pat_file, raw_pats);
+    for(const auto& pat_file : admin_pat_files)
+        load_pat_file(pat_file, raw_admin_pats);
 
     const auto has_pat = !raw_pats.empty();
     validate_bind_policy(bind_host, has_pat);
 
     auto hashed_pats = set<pat_hash>{};
+    auto hashed_admin_pats = set<pat_hash>{};
     append_hashed_pats(raw_pats, hashed_pats);
+    append_hashed_pats(raw_admin_pats, hashed_admin_pats);
 
     slog << notice << "Starting up server on " << bind_host << ":" << service_or_port << flush;
     auto server = yar::http::rest_api_server{file, service_or_port, bind_host};
 
-    if(!hashed_pats.empty())
+    if(!hashed_pats.empty() || !hashed_admin_pats.empty())
     {
         auto valid_hashes = make_shared<set<pat_hash>>(std::move(hashed_pats));
+        auto valid_admin_hashes = make_shared<set<pat_hash>>(std::move(hashed_admin_pats));
+
+        std::function<bool(string_view)> validate_data{};
+        if(!valid_hashes->empty())
+        {
+            validate_data = [valid_hashes](string_view authorization) {
+                return validate_hashed_pat(*valid_hashes, authorization);
+            };
+        }
+
+        std::function<bool(string_view)> validate_admin{};
+        if(!valid_admin_hashes->empty())
+        {
+            validate_admin = [valid_admin_hashes](string_view authorization) {
+                return validate_hashed_pat(*valid_admin_hashes, authorization);
+            };
+        }
+
         server.configure_authentication(
             yar::http::details::is_public_api_path,
-            [valid_hashes](string_view authorization) {
-                return validate_hashed_pat(*valid_hashes, authorization);
-            },
-            "YarDB API"sv
+            std::move(validate_data),
+            "YarDB API"sv,
+            std::move(validate_admin)
         );
-        slog << notice << "PAT authentication enabled (" << valid_hashes->size() << " hashed token(s))" << flush;
+
+        if(!valid_hashes->empty())
+            slog << notice << "PAT authentication enabled (" << valid_hashes->size() << " hashed token(s))" << flush;
+        if(!valid_admin_hashes->empty())
+            slog << notice << "Admin PAT authentication enabled (" << valid_admin_hashes->size()
+                 << " hashed token(s) for /_* routes)" << flush;
     }
 
     std::signal(SIGTERM, signal_handler);

@@ -6,11 +6,11 @@
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ⚠️ **Partial**: Bearer PAT MVP, safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
-- ❌ **Missing**: Scoped auth, TLS at reverse proxy, high availability
+- ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
+- ❌ **Missing**: JWT/OAuth2, full RBAC, TLS at reverse proxy, high availability
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
-- 🔐 **Security & Authentication** (scoped PATs, JWT, RBAC, TLS at reverse proxy; safe bind defaults shipped)
+- 🔐 **Security & Authentication** (data + admin PATs shipped; JWT/RBAC and TLS at reverse proxy still planned; safe bind defaults shipped)
 - 📊 **Monitoring & Observability** (minimum Prometheus `/metrics` shipped; richer labels / tracing planned; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
 
@@ -122,24 +122,25 @@ server {
 ## 🔒 Security Considerations
 
 ### Current Capabilities
-- **Optional Bearer PAT** — `yardb --pat` / `--pat-file` (SHA-256 hashed in memory; `sha256:` lines in pat-file). When configured, all routes require `Authorization: Bearer <token>` except **`GET /health`** and **`GET /ready`**.
+- **Optional Bearer PAT** — `yardb --pat` / `--pat-file` (SHA-256 hashed in memory; `sha256:` lines in pat-file). When configured, data routes require `Authorization: Bearer <token>` except **`GET /health`**, **`GET /ready`**, and **`GET /metrics`**.
+- **Admin PAT** — `yardb --admin-pat` / `--admin-pat-file` for `/_*` maintenance routes (`/_reindex`, `/_db/...`). When set, data PATs cannot call those routes.
 - **Public probes** — `GET /health` and `GET /ready` are PAT-exempt. `GET /health` always returns `200` + `{}` while the HTTP stack responds. `GET /ready` returns `200` + `{}` only when the server is `ready`; otherwise `503` + `{"status":"starting|draining|stopped|failed"}`.
 
 ### Current Limitations
 - **No TLS/HTTPS** — All traffic is plaintext unless terminated at a reverse proxy
-- **Single shared token** — No scoped PATs, JWT/OAuth2, or RBAC yet
+- **Coarse scopes only** — data vs admin PAT; no JWT/OAuth2 or full RBAC yet
 
 ### Recommended Security Setup
 ```bash
-# Enable PAT on yardb (or terminate TLS + auth at nginx/Envoy)
-yardb --pat-file=/etc/yardb/pat.txt 2112
+# Enable data + admin PATs on yardb (or terminate TLS + auth at nginx/Envoy)
+yardb --pat-file=/etc/yardb/pat.txt --admin-pat-file=/etc/yardb/admin-pat.txt 2112
 
 # Use reverse proxy for TLS termination
 # Use network security groups/firewalls
 ```
 
 ### Future Security (Roadmap)
-- **Scoped PATs** and token rotation
+- **Finer-grained scopes** and token rotation
 - **JWT Authentication** with refresh tokens
 - **Role-Based Access Control** (RBAC)
 - **TLS Proxy Integration** for HTTPS

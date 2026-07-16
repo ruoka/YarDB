@@ -8,6 +8,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Security
+
+| Item | Summary |
+|------|---------|
+| **Admin PAT for `/_*`** | `--admin-pat` / `--admin-pat-file` protect maintenance routes (`/_reindex`, `/_db/...`); data PATs rejected there when admin PATs are configured; without admin PATs, `/_*` still accepts the data PAT |
+
 ### Observability
 
 | Item | Summary |

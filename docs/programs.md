@@ -18,7 +18,7 @@ The main database server that provides a RESTful HTTP API for document storage a
 ### Usage
 
 ```bash
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [--admin-pat=<token>] [--admin-pat-file=<path>] [service_or_port]
 ```
 
 ### Options
@@ -49,10 +49,12 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [
 
 - `--help` - Display usage information
 
-- `--pat=<token>` - Accept a personal access token (repeatable). Clients send `Authorization: Bearer <token>`.
-- `--pat-file=<path>` - Load PATs from a file (one token per line; `#` comments allowed). Lines may be plaintext tokens or `sha256:<hex>` pre-hashed values.
+- `--pat=<token>` - Accept a data-API personal access token (repeatable). Clients send `Authorization: Bearer <token>`.
+- `--pat-file=<path>` - Load data-API PATs from a file (one token per line; `#` comments allowed). Lines may be plaintext tokens or `sha256:<hex>` pre-hashed values.
+- `--admin-pat=<token>` - Accept an admin-API token for `/_*` maintenance routes (`/_reindex`, `/_db/...`; repeatable).
+- `--admin-pat-file=<path>` - Load admin-API PATs from a file (same format as `--pat-file`).
 
-When any PAT is configured, API routes require a valid Bearer token (via `net` `authentication_middleware`) except **`GET /health`** and **`GET /ready`**, which stay public for load-balancer probes. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
+When data PATs are configured, ordinary API routes require a valid Bearer token except **`GET /health`**, **`GET /ready`**, and **`GET /metrics`**. When admin PATs are configured, `/_*` routes require an admin token (data PATs are rejected there); without admin PATs, `/_*` falls back to the data PAT. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
 
 ### Security Note
 
@@ -62,9 +64,11 @@ When any PAT is configured, API routes require a valid Bearer token (via `net` `
 
 **Default API:** No PAT flags → open API on the bind address (development only).
 
-**With `--pat` / `--pat-file`:** Bearer PAT required on every route. Required for `--bind=0.0.0.0`; recommended for any routable deployment. Use TLS at a reverse proxy in production.
+**With `--pat` / `--pat-file`:** Bearer PAT required on data routes. Required for `--bind=0.0.0.0`; recommended for any routable deployment. Use TLS at a reverse proxy in production.
 
-**Future:** JWT/OAuth2, RBAC, scoped tokens.
+**With `--admin-pat` / `--admin-pat-file`:** Separate tokens for maintenance (`/_reindex`, `/_db/...`). Recommended whenever data PATs are shared with clients that must not reindex or change indexes.
+
+**Future:** JWT/OAuth2, RBAC, finer-grained scopes.
 
 **`yarsh`:** send `@Authorization: Bearer <token>` before the request line.
 

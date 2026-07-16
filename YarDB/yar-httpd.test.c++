@@ -3470,6 +3470,106 @@ auto test_set()
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
         };
+
+        section("Admin /_reindex accepts data PAT when admin PAT is not configured") = [setup, valid_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", valid_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/_reindex"s, auth_headers
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+        };
+    };
+
+    test_case("Admin PAT for /_ maintenance routes, [yardb]") = []
+    {
+        const auto test_file = "./httpd_admin_pat_auth_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto data_pat = "Bearer data-pat"s;
+        const auto admin_pat = "Bearer admin-pat"s;
+        setup->get_server().configure_authentication(
+            yar::http::details::is_public_api_path,
+            [data_pat](string_view authorization) -> bool {
+                return authorization == data_pat;
+            },
+            "YarDB API"sv,
+            [admin_pat](string_view authorization) -> bool {
+                return authorization == admin_pat;
+            }
+        );
+
+        section("GET /_reindex without Authorization returns 401") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/_reindex"s, ""s
+            );
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+            require_true(headers.contains("www-authenticate"s));
+        };
+
+        section("GET /_reindex with data PAT returns 401") = [setup, data_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", data_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/_reindex"s, auth_headers
+            );
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("GET /_reindex with admin PAT returns 200") = [setup, admin_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", admin_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/_reindex"s, auth_headers
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(body.find("reindexing completed") != std::string::npos);
+        };
+
+        section("PUT /_db/{collection} with data PAT returns 401") = [setup, data_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", data_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "PUT"s, "/_db/adminpat"s, auth_headers, R"({"keys":["email"]})"s
+            );
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("PUT /_db/{collection} with admin PAT returns 200") = [setup, admin_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", admin_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "PUT"s, "/_db/adminpat"s, auth_headers, R"({"keys":["email"]})"s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+        };
+
+        section("Data route with admin PAT returns 401") = [setup, admin_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", admin_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, auth_headers
+            );
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("Data route with data PAT returns 200") = [setup, data_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", data_pat}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "GET"s, "/"s, auth_headers
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+        };
     };
 
     // Note: Server runs in infinite loop, so we can't cleanly stop it

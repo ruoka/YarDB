@@ -244,16 +244,21 @@ public:
         m_cors_max_age = std::nullopt;
     }
 
-    // Authentication configuration
+    // Authentication configuration.
+    // validate_token protects ordinary API routes; validate_admin_token (when set) protects `/_*`
+    // maintenance paths. If admin validator is empty, `/_*` falls back to validate_token.
     void configure_authentication(
         std::function<bool(std::string_view path)> is_public_path,
         std::function<bool(std::string_view token)> validate_token,
-        std::string_view realm = "YarDB API"sv)
+        std::string_view realm = "YarDB API"sv,
+        std::function<bool(std::string_view token)> validate_admin_token = {})
     {
-        m_authentication_enabled = true;
         m_is_public_path = std::move(is_public_path);
         m_validate_token = std::move(validate_token);
+        m_validate_admin_token = std::move(validate_admin_token);
         m_auth_realm = std::string{realm};
+        m_authentication_enabled = static_cast<bool>(m_validate_token)
+            || static_cast<bool>(m_validate_admin_token);
         rebuild_routes();
     }
 
@@ -262,6 +267,7 @@ public:
         m_authentication_enabled = false;
         m_is_public_path = nullptr;
         m_validate_token = nullptr;
+        m_validate_admin_token = nullptr;
         m_auth_realm = "YarDB API"s;
         rebuild_routes();
     }
@@ -441,18 +447,46 @@ private:
         );
     }
 
-    // Authentication middleware - optional, uses ::http::authentication_middleware
-    // Returns middleware factory if authentication is enabled, otherwise returns empty optional
+    // Path-aware PAT middleware: public paths skip auth; `/_*` uses admin validator when set.
     std::optional<middleware_factory> authentication_middleware() const
     {
         if(!m_authentication_enabled)
             return std::nullopt;
-        
-        return ::http::middleware::authentication_middleware(
-            m_is_public_path,
-            m_validate_token,
-            m_auth_realm
-        );
+
+        return [is_public_path = m_is_public_path,
+                validate_token = m_validate_token,
+                validate_admin_token = m_validate_admin_token,
+                realm = m_auth_realm](handler next)
+        {
+            return [is_public_path, validate_token, validate_admin_token, realm, next = std::move(next)](
+                       auto req, auto body, auto hdr) mutable
+            {
+                if(is_public_path && is_public_path(req))
+                    return next(req, body, hdr);
+
+                const auto admin_path = is_admin_api_path(req);
+                const auto& validator = (admin_path && validate_admin_token)
+                    ? validate_admin_token
+                    : validate_token;
+
+                if(!validator)
+                    return next(req, body, hdr);
+
+                std::string_view authorization{};
+                if(hdr.contains("authorization"s))
+                    authorization = hdr["authorization"s];
+
+                if(authorization.empty() || !validator(authorization))
+                {
+                    auto error_headers = ::http::headers{};
+                    error_headers.set("www-authenticate"s, "Basic realm=\""s + realm + "\""s);
+                    return make_error_response(
+                        status_unauthorized, "Unauthorized"sv, std::make_optional(error_headers));
+                }
+
+                return next(req, body, hdr);
+            };
+        };
     }
 
     // Build standard middleware chain for handlers
@@ -1462,6 +1496,7 @@ private:
     bool m_authentication_enabled = false;
     std::function<bool(std::string_view path)> m_is_public_path = nullptr;
     std::function<bool(std::string_view token)> m_validate_token = nullptr;
+    std::function<bool(std::string_view token)> m_validate_admin_token = nullptr;
     std::string m_auth_realm = "YarDB API"s;
 };
 

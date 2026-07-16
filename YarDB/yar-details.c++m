@@ -270,6 +270,14 @@ inline bool is_public_api_path(std::string_view uri)
         && parsed.path[2].empty();
 }
 
+// Maintenance paths (`/_db/...`, `/_reindex`, …) — require admin PAT when configured.
+inline bool is_admin_api_path(std::string_view uri)
+{
+    const ::http::uri parsed{uri};
+    const auto segment = parsed.path[1];
+    return !segment.empty() && segment.starts_with('_');
+}
+
 // Collection name validation
 inline auto validate_collection_name(std::string_view collection_name)
 {

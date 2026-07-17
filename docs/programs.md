@@ -595,5 +595,5 @@ mv production.db.new production.db
 # start yardb --file=production.db
 ```
 
-`yarimport` validates the full JSONL input first, builds a temporary sidecar (`*.yarimport.tmp`), then renames it over `--file` only after create/index/reindex succeed. A failed `--force` run therefore leaves any existing database intact. It refuses `status=updated` / `status=deleted` rows (use `--live` export). Secondary indexes are restored from live `_db` rows via `engine.index()`, then `reindex()`.
+`yarimport` validates the full JSONL input first, builds a unique per-pid staging sidecar (`*.yarimport.<pid>.tmp`), then installs it over `--file` only after create/index/reindex succeed (`rename` with `--force`, hard-link otherwise so a newly appearing target is not clobbered). A failed `--force` run therefore leaves any existing database intact. It refuses to run when `{file}.pid` exists (stop yardb first; remove a stale lock only after verifying no live owner). It refuses `status=updated` / `status=deleted` rows (use `--live` export). Secondary indexes are restored from live `_db` rows via `engine.index()`, then `reindex()`.
 

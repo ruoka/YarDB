@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, missing_file, help"
+      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, import_refuses_live_lock, missing_file, help"
       exit 0
       ;;
     *)
@@ -378,6 +378,25 @@ EOF
   end_case export_stdout_full
 }
 
+test_import_refuses_live_lock() {
+  should_run import_refuses_live_lock || return 0
+  begin_case import_refuses_live_lock
+  local target_db live_jsonl
+  target_db="$(mktemp "${TMPDIR:-/tmp}/yarlock.XXXXXX.db")"
+  live_jsonl="$(mktemp "${TMPDIR:-/tmp}/yarlock.XXXXXX.jsonl")"
+  printf '%s\n' '{"collection":"items","document":{"_id":1,"name":"x"}}' >"${live_jsonl}"
+  : >"${target_db}"
+  : >"${target_db}.pid"
+
+  run_yarimport "${target_db}" "${live_jsonl}" --force
+  assert_import_status 1 "import_refuses_live_lock"
+  LAST_OUTPUT="${LAST_IMPORT_OUTPUT}"
+  assert_contains "database lock present" "import_live_lock_message"
+
+  rm -f "${target_db}" "${target_db}.pid" "${live_jsonl}"
+  end_case import_refuses_live_lock
+}
+
 test_missing_file() {
   should_run missing_file || return 0
   begin_case missing_file
@@ -423,6 +442,7 @@ main() {
   test_force_preserves_on_bad_input
   test_force_overwrite_ok
   test_export_stdout_full
+  test_import_refuses_live_lock
   test_missing_file
   test_help
 

@@ -1173,18 +1173,20 @@ auto test_set()
                 storage.flush();
             }
 
-            auto reopened = yar::db::engine{test_file};
-            auto by_id = object{};
-            require_true(reopened.read(collection, object{{"_id"s, prior.second}}, by_id));
-            require_eq(by_id.size(), 1u);
-            require_eq(static_cast<string>(by_id[0]["name"s]), "bob"s);
+            {
+                auto reopened = yar::db::engine{test_file};
+                auto by_id = object{};
+                require_true(reopened.read(collection, object{{"_id"s, prior.second}}, by_id));
+                require_eq(by_id.size(), 1u);
+                require_eq(static_cast<string>(by_id[0]["name"s]), "bob"s);
 
-            auto stale = object{};
-            require_false(reopened.read(collection, object{{"name"s, "alice"s}}, stale));
+                auto stale = object{};
+                require_false(reopened.read(collection, object{{"name"s, "alice"s}}, stale));
 
-            auto current = object{};
-            require_true(reopened.read(collection, object{{"name"s, "bob"s}}, current));
-            require_eq(current.size(), 1u);
+                auto current = object{};
+                require_true(reopened.read(collection, object{{"name"s, "bob"s}}, current));
+                require_eq(current.size(), 1u);
+            }
 
             // Second open must still see one live row after on-disk status heal.
             auto again = yar::db::engine{test_file};

@@ -275,10 +275,11 @@ EOF
   fi
 
   TESTS_RUN=$((TESTS_RUN + 1))
-  if [[ ! -e "${marker_db}.yarimport.tmp" && ! -e "${marker_db}.yarimport.tmp.pid" ]]; then
-    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_cleans_staging\"}"
-  else
+  # Staging names are per-pid: ${file}.yarimport.<pid>.tmp
+  if compgen -G "${marker_db}.yarimport.*.tmp" >/dev/null || compgen -G "${marker_db}.yarimport.*.tmp.pid" >/dev/null; then
     fail "expected failed --force import to remove staging sidecar files"
+  else
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_cleans_staging\"}"
   fi
 
   rm -f "${marker_db}" "${marker_db}.pid" "${bad_jsonl}"

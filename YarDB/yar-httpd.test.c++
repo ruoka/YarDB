@@ -424,6 +424,29 @@ auto test_set()
             require_eq(get_status, "200"s);
         };
 
+        section("PATCH with mutated _id returns 409 Conflict") = [setup]
+        {
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(), "POST"s, "/immutableids"s, R"({"name":"alice"})"s
+            );
+            require_eq(post_status, "201"s);
+            const auto created = json::parse(post_body);
+            const auto id = static_cast<long long>(created["_id"s]);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "PATCH"s, "/immutableids/"s + std::to_string(id),
+                R"({"_id":)"s + std::to_string(id + 1) + R"(,"name":"eve"})"s
+            );
+            require_eq(status, "409"s);
+            require_eq(reason, "Conflict"s);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/immutableids/"s + std::to_string(id), ""s
+            );
+            require_eq(get_status, "200"s);
+            require_eq(static_cast<string>(json::parse(get_body)["name"s]), "alice"s);
+        };
+
         section("PATCH updates document and returns 200 OK with Content-Location header") = [setup]
         {
             // First create a document

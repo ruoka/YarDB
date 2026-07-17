@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 import yar;
 import std;
 import xson;
@@ -19,9 +21,11 @@ Each input line must be JSON with "collection" and "document".
 Lines with status "updated" or "deleted" are rejected.
 Secondary indexes are restored from live "_db" rows via engine.index().
 
-Import always builds a temporary sidecar first and only replaces --file
-after a successful create/index/reindex pass, so a failed --force run
-leaves any existing database intact.
+Import always builds a unique temporary sidecar first and only replaces
+--file after a successful create/index/reindex pass, so a failed --force
+run leaves any existing database intact. Refuses to run when --file.pid
+exists (stop yardb first). Without --force, install uses a hard link so an
+appearing target cannot be clobbered.
 )";
 
 struct import_row
@@ -186,13 +190,21 @@ try
         throw runtime_error{"failed reading import input"s};
 
     error_code ec{};
+    const auto lock_path = file + ".pid"s;
+    if(filesystem::exists(lock_path, ec))
+        throw runtime_error{
+            "database lock present: "s + lock_path
+            + "; stop yardb before importing (remove a stale lock only after verifying no live owner)"s};
+
     const auto target_exists =
         filesystem::exists(file, ec) and filesystem::file_size(file, ec) > 0;
     if(target_exists and not force)
         throw runtime_error{
             "output file already exists: "s + file + "; use --force to overwrite"s};
 
-    auto staging = temporary_database{filesystem::path{file + ".yarimport.tmp"s}};
+    // Per-process staging name avoids concurrent imports deleting each other's sidecar/.pid.
+    auto staging = temporary_database{
+        filesystem::path{file + ".yarimport."s + to_string(getpid()) + ".tmp"s}};
     {
         auto engine = yar::db::engine{staging.path.string()};
 
@@ -218,13 +230,33 @@ try
             throw runtime_error{"reindex failed: "s + reindexed.error().message};
     }
 
-    filesystem::rename(staging.path, file, ec);
-    if(ec)
-        throw system_error{ec, "failed to replace output database "s + file};
-    staging.release();
+    // Re-check lock immediately before install — yardb may have started during import.
+    if(filesystem::exists(lock_path, ec))
+        throw runtime_error{
+            "database lock appeared during import: "s + lock_path
+            + "; stop yardb and retry (staging left uninstalled)"s};
 
-    // Drop a stale lock file from a previous yardb instance on this path.
-    filesystem::remove(file + ".pid"s, ec);
+    if(force)
+    {
+        filesystem::rename(staging.path, file, ec);
+        if(ec)
+            throw system_error{ec, "failed to replace output database "s + file};
+    }
+    else
+    {
+        // Hard-link install refuses to replace a target that appeared after the
+        // earlier exists check (rename would silently clobber it).
+        filesystem::create_hard_link(staging.path, file, ec);
+        if(ec)
+            throw system_error{
+                ec,
+                "failed to install output database "s + file
+                    + " (does the file already exist? use --force to overwrite)"s};
+        filesystem::remove(staging.path, ec);
+        if(ec)
+            throw system_error{ec, "failed to remove staging database "s + staging.path.string()};
+    }
+    staging.release();
 
     clog << "Imported " << data_rows.size() << " document(s) and "
          << db_rows.size() << " index configuration(s) into " << file << endl;

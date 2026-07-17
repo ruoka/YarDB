@@ -781,6 +781,29 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 1u);
             require_eq(static_cast<string>(documents[0]["name"s]), "imported"s);
         };
+
+        section("UpdateRejectsMutableId") = []
+        {
+            const auto test_file = "./engine_immutable_id_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            constexpr auto collection = "ImmutableId"s;
+
+            auto document = object{{"name"s, "alice"s}};
+            require_true(engine.create(collection, document).has_value());
+            const auto id = static_cast<xson::integer_type>(document["_id"s]);
+
+            auto updates = object{{"_id"s, id + 1}, {"name"s, "mutated"s}};
+            auto documents = object{};
+            auto result = engine.update(collection, object{{"_id"s, id}}, updates, documents);
+            require_false(result.has_value());
+            require_eq(result.error().code, yar::db::db_error_code::conflict);
+
+            documents = object{};
+            require_true(engine.read(collection, object{{"_id"s, id}}, documents));
+            require_eq(static_cast<string>(documents[0]["name"s]), "alice"s);
+            require_false(engine.read(collection, object{{"_id"s, id + 1}}, documents));
+        };
     };
     return true;
 }

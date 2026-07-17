@@ -580,6 +580,22 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
 
             auto new_document = old_document;
             new_document += updates;
+            if(new_document.has("_id"s))
+            {
+                if(not new_document["_id"s].is_integer())
+                    return std::unexpected{db_error(
+                        db_error_code::conflict,
+                        db_operation::update,
+                        "Document _id must be an integer"s)};
+
+                const auto new_id = static_cast<sequence_type>(new_document["_id"s]);
+                const auto old_id = static_cast<sequence_type>(old_document["_id"s]);
+                if(new_id != old_id)
+                    return std::unexpected{db_error(
+                        db_error_code::conflict,
+                        db_operation::update,
+                        "Document _id is immutable"s)};
+            }
             pending.push_back({position, metadata, std::move(old_document), std::move(new_document)});
         }
     }

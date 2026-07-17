@@ -91,7 +91,7 @@ If `matcher` is `"require"` or `"check"` on a `require_eq` / `check_eq` line, st
 ## Triage workflow (build failure)
 
 1. Find `command_end` with `"ok": false` — use the `argv` array to rerun without shell parsing.
-2. Check `compile_end` events: `cache_hit: false` means that translation unit recompiled; `cache_hit: true` means incremental skip. When `rebuild_reason` is `flag_change`, read the single `profile_changed` event for `profile_diff` (not repeated on each `compile_end`).
+2. Check `compile_end` events: `cache_hit: false` means that translation unit recompiled; `cache_hit: true` means incremental skip. When `rebuild_reason` is `profile_change`, read the single `profile_changed` event for `profile_diff` (not repeated on each `compile_end`). Prefer `build_end.rebuild_summary` for a per-kind rollup.
 3. Rebuild: `./tools/CB.sh debug build --jsonl=failures`, then re-run tests.
 
 ## Event reference (stdout)
@@ -135,14 +135,14 @@ Filter `run_id=<cb>` or `parent_run_id=<cb>` to correlate `list` → `build` →
 | `list_start` | TU inventory start (`config`, `include_tests`, `include_examples`, `source_dir`) |
 | `unit` | Per translation unit (`path`, `module`, `kind`, `imports[]`, `level`, `has_main`, `is_test`, `is_modular`) |
 | `list_summary` | Inventory totals (`units_total`, `main_count`, `test_count`, `max_level`) |
-| `build_start` / `build_end` | Whole build |
+| `build_start` / `build_end` | Whole build; `rebuild_summary` lists compile rebuilds by kind + `top_modules` |
 | `command_start` / `command_end` | Subprocesses (`cmd` + `argv`) |
 | `profile_changed` | Once per build when object-cache profile mismatches (`reason`, `profile_diff`) |
 | `cache_status` | `cache status` subcommand (`object_cache_path`, `profile_match`, `legacy_header`, entry counts, `current_profile`) |
 | `cache_invalidate_end` | `cache invalidate` subcommand (`object_cache_removed`, `executable_cache_removed`, `compiler_stamp_removed`) |
-| `compile_start` | Per TU before compile or cache skip (`source_path`, optional `rebuild_reason`) |
-| `compile_end` | Per TU (`source_path`, `cache_hit`, `rebuild_reason` when `cache_hit:false`, `duration_ms`, paths) |
-| `link_end` | Per executable (`executable_path`, `cache_hit`, `ok`, `duration_ms`) |
+| `compile_start` | Per TU before compile or cache skip; on rebuild: `rebuild_reason`, structured `rebuild`, `message` |
+| `compile_end` | Per TU (`source_path`, `cache_hit`, short `rebuild_reason` + `rebuild` when `cache_hit:false`, `duration_ms`, paths) |
+| `link_end` | Per executable (`executable_path`, `cache_hit`, `ok`, `duration_ms`; relinks include `rebuild_reason` / `rebuild`) |
 | `cb_error` | CB fatal/diagnostic |
 
 **`unit.is_test`:** `true` for `*.test.c++` / `*.test.c++m`, or when a path segment is exactly `test/` or `tests/`. `false` for sources under a `tester/` framework tree (library modules, not project tests) — including nested paths like `deps/xson/deps/tester/`. Does not match the substring `test` inside names such as `tester` or `test_exception_bug`.

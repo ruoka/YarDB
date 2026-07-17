@@ -18,6 +18,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **UTF-8 document strings in FSON** | Non-ASCII string values/keys use length-prefixed FSON tags so `café` (and similar) no longer corrupt storage or brick reopen; ASCII keeps the legacy terminator codec |
 | **Secondary indexes skip object/array values** | `index::insert`/`erase` ignore non-primitive field values so create/reindex/restart cannot throw `bad_variant_access` and brick the database |
 | **PUT no longer persists OData annotations** | Response-only `@odata.*` fields are added after `replace`/`create`, matching POST/PATCH — they are not written into stored documents |
 | **`replace` preserves history** | Reuses prior metadata so `previous` chains, and marks old live records as `updated` (not `deleted`) |

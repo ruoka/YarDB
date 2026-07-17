@@ -521,6 +521,42 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 2u);
         };
 
+        section("Utf8StringSurvivesRestart") = []
+        {
+            // FSON legacy strings used a 7-bit terminator; UTF-8 values used to
+            // corrupt on disk and fail reopen/validate_and_recover.
+            const auto test_file = "./engine_utf8_restart_test.db";
+            std::remove(test_file);
+            std::remove((std::string{test_file} + ".pid").c_str());
+
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{
+                    {"name"s, "café"s},
+                    {"note"s, "Hello 世界 🌍"s}
+                };
+                require_true(engine.create("Utf8"s, document).has_value());
+
+                auto documents = object{};
+                require_true(engine.read("Utf8"s, object{}, documents));
+                require_eq(documents.get<object::array>().size(), 1u);
+                require_eq(documents[0]["name"s].get<string>(), "café"s);
+                require_eq(documents[0]["note"s].get<string>(), "Hello 世界 🌍"s);
+            }
+
+            {
+                auto engine = yar::db::engine{test_file};
+                auto documents = object{};
+                require_true(engine.read("Utf8"s, object{}, documents));
+                require_eq(documents.get<object::array>().size(), 1u);
+                require_eq(documents[0]["name"s].get<string>(), "café"s);
+                require_eq(documents[0]["note"s].get<string>(), "Hello 世界 🌍"s);
+            }
+
+            std::remove(test_file);
+            std::remove((std::string{test_file} + ".pid").c_str());
+        };
+
         section("TypedNumericIndexSurvivesRestart") = []
         {
             const auto test_file = "./engine_typed_index_restart_test.db";

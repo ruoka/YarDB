@@ -430,6 +430,32 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter is delimiter-only or") = []
+            {
+                then("Throws instead of matching all documents") = []
+                {
+                    require_throws([]
+                    {
+                        parse_filter(" or "sv);
+                    });
+                    require_throws([]
+                    {
+                        parse_filter(" or  or "sv);
+                    });
+                };
+            };
+
+            when("Filter is delimiter-only and") = []
+            {
+                then("Throws instead of matching all documents") = []
+                {
+                    require_throws([]
+                    {
+                        parse_filter(" and "sv);
+                    });
+                };
+            };
+
             when("Filter uses mixed-type 'in' list") = []
             {
                 then("Throws invalid_argument") = []

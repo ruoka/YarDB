@@ -534,8 +534,15 @@ inline filter_clause parse_filter_and_group(std::string_view filter_expr)
     if(not find_outside_quotes(expr, " and "sv))
         return parse_filter_leaf(expr);
 
+    // split_outside_quotes skips empty segments; delimiter-only input must not
+    // collapse to an empty selector (empty match = all documents).
+    auto parts = split_outside_quotes(expr, " and "sv)
+        | std::ranges::to<std::vector<std::string_view>>();
+    if(parts.empty())
+        throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
+
     return std::ranges::fold_left(
-        split_outside_quotes(expr, " and "sv),
+        parts,
         filter_clause{xson::object{}, std::vector<string_filter>{}},
         [](filter_clause merged, const std::string_view part)
         {
@@ -564,6 +571,11 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
                 return filter_branch{std::move(branch_selector), std::move(branch_string_filters)};
             })
             | std::ranges::to<std::vector<filter_branch>>();
+
+        // Delimiter-only " or " yields no branches; has_or() would be false and
+        // the empty and_selector would match every document.
+        if(branches.empty())
+            throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
         return parsed_filter{{}, {}, std::move(branches)};
     }

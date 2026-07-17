@@ -206,8 +206,9 @@ inline std::optional<std::size_t> find_outside_quotes(std::string_view text, std
 }
 
 // Split on delimiter only outside quoted string literals (OData '' escape aware).
-// Callers always pass a non-empty delimiter literal ("," / " and " / " or ").
-inline generator<std::string_view> split_outside_quotes(
+// Empty delimiter would match at every index and spin forever (size_t wrap on
+// `i += delimiter.size() - 1`); reject eagerly before entering the coroutine.
+inline generator<std::string_view> split_outside_quotes_impl(
     std::string_view text,
     std::string_view delimiter)
 {
@@ -259,6 +260,16 @@ inline generator<std::string_view> split_outside_quotes(
     auto tail = utils::trim(text.substr(start));
     if(not tail.empty())
         co_yield tail;
+}
+
+inline generator<std::string_view> split_outside_quotes(
+    std::string_view text,
+    std::string_view delimiter)
+{
+    if(delimiter.empty())
+        throw std::invalid_argument{"delimiter cannot be empty"};
+
+    return split_outside_quotes_impl(text, delimiter);
 }
 
 // Paths reachable without authentication when PAT middleware is enabled.

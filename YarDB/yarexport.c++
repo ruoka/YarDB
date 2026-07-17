@@ -88,6 +88,12 @@ try
                         0)
              << '\n';
     }
+
+    // Compaction/import trusts a successful exit. A full disk or broken pipe
+    // must not look like a complete export.
+    cout.flush();
+    if(not cout)
+        throw runtime_error{"failed writing export to stdout"s};
 }
 catch(const system_error& e)
 {

@@ -9,7 +9,7 @@ const auto usage = R"(
 yarexport [--help] [--file=<name>] [--live]
 
 Export FSON database records to JSONL on stdout (one JSON object per line).
-Stop yardb before exporting the same file to avoid concurrent read issues.
+Refuses to run when --file.pid exists — stop yardb before exporting.
 
   --live   Export only current (status=created) documents for offline compaction.
            Omits history/tombstones and file positions. Pair with yarimport.
@@ -51,6 +51,13 @@ try
             return 1;
         }
     }
+
+    error_code lock_ec{};
+    const auto lock_path = file + ".pid"s;
+    if(filesystem::exists(lock_path, lock_ec))
+        throw runtime_error{
+            "database lock present: "s + lock_path
+            + "; stop yardb before exporting (remove a stale lock only after verifying no live owner)"s};
 
     auto storage = ifstream{file, ios::binary};
 

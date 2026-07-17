@@ -548,6 +548,34 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 0u);
         };
 
+        section("POST/GET preserves UTF-8 string values") = [setup]
+        {
+            // Documents are stored as FSON; UTF-8 must survive escape round-trip.
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(),
+                "POST"s,
+                "/utf8items"s,
+                "{\"name\":\"café\",\"note\":\"Hello 世界\"}"s
+            );
+            require_eq(post_status, "201"s);
+
+            auto created = json::parse(post_body);
+            require_eq(static_cast<std::string>(created["name"s]), "café"s);
+            require_eq(static_cast<std::string>(created["note"s]), "Hello 世界"s);
+
+            const auto id = static_cast<xson::integer_type>(created["_id"s]);
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/utf8items/"s + std::to_string(id),
+                ""s
+            );
+            require_eq(status, "200"s);
+            auto fetched = json::parse(response_body);
+            require_eq(static_cast<std::string>(fetched["name"s]), "café"s);
+            require_eq(static_cast<std::string>(fetched["note"s]), "Hello 世界"s);
+        };
+
         section("GET with $orderby desc query parameter returns descending order") = [setup]
         {
             // Insert out of value order so _id desc ≠ value desc

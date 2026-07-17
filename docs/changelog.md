@@ -18,6 +18,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **Rollback no longer truncates after failed status restore** | If update/replace/destroy cannot restore prior row statuses during rollback, appends are kept so reopen still finds a live version instead of silently dropping tombstoned documents |
 | **UTF-8 document strings in FSON** | json4cpp FAST string codec escapes high-bit bytes so `café` (and similar) no longer corrupt storage or brick reopen; ordinary ASCII stays bit-identical on the wire |
 | **Secondary indexes skip object/array values** | `index::insert`/`erase` ignore non-primitive field values so create/reindex/restart cannot throw `bad_variant_access` and brick the database |
 | **PUT no longer persists OData annotations** | Response-only `@odata.*` fields are added after `replace`/`create`, matching POST/PATCH — they are not written into stored documents |

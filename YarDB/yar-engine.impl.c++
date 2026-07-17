@@ -19,24 +19,46 @@ bool rollback(
     std::fstream& storage,
     const std::string& db,
     std::uintmax_t original_size,
-    const std::vector<yar::db::position_type>& status_positions)
+    const std::vector<yar::db::position_type>& status_positions,
+    bool inject_status_failure = false)
 {
     using xson::fson::operator <<;
 
+    // Restore prior rows to created before truncating appends. If restore fails
+    // (e.g. ENOSPC) and we still truncate, reopen skips updated/deleted rows and
+    // the documents disappear — silent data loss.
     storage.clear();
-    for(const auto position : status_positions)
+    auto statuses_restored = true;
+    if(not status_positions.empty())
     {
-        storage.seekp(position, storage.beg);
-        storage << yar::db::metadata{yar::db::metadata::created};
+        if(inject_status_failure)
+            statuses_restored = false;
+        else
+        {
+            for(const auto position : status_positions)
+            {
+                storage.seekp(position, storage.beg);
+                storage << yar::db::metadata{yar::db::metadata::created};
+                if(storage.fail())
+                    break;
+            }
+            storage.flush();
+            statuses_restored = not storage.fail();
+        }
     }
-    storage.flush();
-    const auto statuses_restored = not storage.fail();
+
+    if(not statuses_restored)
+    {
+        storage.close();
+        reopen(storage, db);
+        return false;
+    }
 
     storage.close();
     auto resize_error = std::error_code{};
     std::filesystem::resize_file(db, original_size, resize_error);
     const auto reopened = reopen(storage, db);
-    return statuses_restored and not resize_error and reopened;
+    return not resize_error and reopened;
 }
 
 void validate_and_recover_storage(std::fstream& storage, const std::string& db)
@@ -174,6 +196,7 @@ yar::db::engine::engine(yar::db::engine&& e) :
     m_index{std::move(e.m_index)},
     m_storage{std::move(e.m_storage)},
     m_writes_until_failure{std::exchange(e.m_writes_until_failure, 0)},
+    m_fail_rollback_status{std::exchange(e.m_fail_rollback_status, false)},
     m_writable{std::exchange(e.m_writable, false)}
 {}
 
@@ -217,11 +240,21 @@ void yar::db::fail_write(yar::db::engine& engine, std::size_t phase)
     engine.m_writes_until_failure = phase;
 }
 
+void yar::db::fail_next_rollback_status(yar::db::engine& engine)
+{
+    engine.m_fail_rollback_status = true;
+}
+
 bool yar::db::engine::consume_write_failure()
 {
     if(m_writes_until_failure == 0)
         return false;
     return --m_writes_until_failure == 0;
+}
+
+bool yar::db::engine::consume_rollback_status_failure()
+{
+    return std::exchange(m_fail_rollback_status, false);
 }
 
 void yar::db::engine::setup_index_structure()
@@ -732,12 +765,19 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         m_storage << yar::db::updated;
         status_positions.push_back(entry.position);
     }
+    // Flush before synthetic failure so rollback exercises restore of on-disk
+    // updated markers (ENOSPC-during-restore), not merely unflushed buffers.
+    m_storage.flush();
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);
-    m_storage.flush();
     if(m_storage.fail())
     {
-        if(not rollback(m_storage, m_db, original_size, status_positions))
+        if(not rollback(
+            m_storage,
+            m_db,
+            original_size,
+            status_positions,
+            consume_rollback_status_failure()))
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -837,12 +877,17 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
         m_storage.seekp(position, m_storage.beg);
         m_storage << yar::db::deleted;
     }
+    m_storage.flush();
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);
-    m_storage.flush();
     if(m_storage.fail())
     {
-        if(not rollback(m_storage, m_db, original_size, positions))
+        if(not rollback(
+            m_storage,
+            m_db,
+            original_size,
+            positions,
+            consume_rollback_status_failure()))
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -961,12 +1006,17 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
         m_storage.seekp(position, m_storage.beg);
         m_storage << yar::db::updated;
     }
+    m_storage.flush();
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);
-    m_storage.flush();
     if(m_storage.fail())
     {
-        if(not rollback(m_storage, m_db, original_size, positions))
+        if(not rollback(
+            m_storage,
+            m_db,
+            original_size,
+            positions,
+            consume_rollback_status_failure()))
         {
             m_writable = false;
             return std::unexpected{db_error(

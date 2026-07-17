@@ -215,7 +215,7 @@ auto test_set()
             require_eq(created_status, "201"s);
             const auto created = json::parse(created_body);
             require_true(created.has("_id"s));
-            const auto id = static_cast<long long>(created["_id"s]);
+            const auto id = static_cast<xson::integer_type>(created["_id"s]);
 
             auto duplicate_body = R"({"_id":)"s + std::to_string(id) + R"(,"name":"eve"})"s;
             auto [status, reason, headers, response_body] = make_request(
@@ -431,7 +431,7 @@ auto test_set()
             );
             require_eq(post_status, "201"s);
             const auto created = json::parse(post_body);
-            const auto id = static_cast<long long>(created["_id"s]);
+            const auto id = static_cast<xson::integer_type>(created["_id"s]);
 
             auto [status, reason, headers, response_body] = make_request(
                 setup->port(), "PATCH"s, "/immutableids/"s + std::to_string(id),
@@ -1478,7 +1478,7 @@ auto test_set()
             require_eq(c_status, "201"s);
             const auto customer = json::parse(c_body);
             require_true(customer.has("_id"s));
-            const auto customer_id = static_cast<long long>(customer["_id"s]);
+            const auto customer_id = static_cast<xson::integer_type>(customer["_id"s]);
 
             auto order_json = R"({"customer_id":)"s + std::to_string(customer_id) + R"(,"total":19})"s;
             auto [o_status, o_reason, o_headers, o_body] = make_request(
@@ -1502,11 +1502,11 @@ auto test_set()
             {
                 if(not item.has("customer_id"s))
                     continue;
-                if(static_cast<long long>(item["customer_id"s]) != customer_id)
+                if(static_cast<xson::integer_type>(item["customer_id"s]) != customer_id)
                     continue;
                 require_true(item.has("customer"s));
                 require_true(item["customer"s].is_object());
-                require_eq(static_cast<long long>(item["customer"s]["_id"s]), customer_id);
+                require_eq(static_cast<xson::integer_type>(item["customer"s]["_id"s]), customer_id);
                 require_eq(static_cast<string>(item["customer"s]["name"s]), "Ada"s);
                 found_expanded = true;
             }
@@ -1535,7 +1535,7 @@ auto test_set()
             {
                 if(not item.has("customer_id"s))
                     continue;
-                if(static_cast<long long>(item["customer_id"s]) != 999999)
+                if(static_cast<xson::integer_type>(item["customer_id"s]) != 999999)
                     continue;
                 require_true(item.has("customer"s));
                 require_true(item["customer"s].is_null());

@@ -818,40 +818,46 @@ auto test_set()
             require_eq(history.size(), 1u);
         };
 
-        section("UpdateStatusRestoreFailurePreservesDataOnReopen") = []
+        section("UpdateStatusRestoreFailureCommitsDurableUpdate") = []
         {
-            // Status-phase failure leaves prior rows marked updated. If rollback
-            // then fails to restore those statuses but still truncates appends,
-            // reopen skips the tombstoned rows and the document is gone.
+            // Successors are flushed, then status restore fails. Reporting
+            // rollback_failure would claim the update failed while live reads
+            // keep serving tombstoned pre-images and reopen flips to the new
+            // value — commit the staged index so API and disk agree.
             const auto test_file = "./engine_update_status_restore_failure_test.db";
             const auto setup = fixture{test_file};
-            const auto original_size = [&]
+            const auto size_before_update = [&]
             {
                 auto engine = yar::db::engine{test_file};
                 auto document = object{{"value"s, 1ll}},
-                    updates = object{{"value"s, 2ll}};
+                    updates = object{{"value"s, 2ll}},
+                    documents = object{};
                 require_true(engine.create("UpdateStatusRestoreFailure"s, document).has_value());
                 const auto selector = object{{"_id"s, document["_id"s]}};
-                const auto size_before_update = std::filesystem::file_size(test_file);
+                const auto size_before = std::filesystem::file_size(test_file);
 
                 fail_write(engine, 2);
                 fail_next_rollback_status(engine);
                 const auto result = engine.update("UpdateStatusRestoreFailure"s, selector, updates);
 
-                require_false(result.has_value());
-                require_true(result.error().code == yar::db::db_error_code::rollback_failure);
-                // Appends must be kept when status restore fails — truncating
-                // would discard the only surviving live version after reopen.
-                require_true(std::filesystem::file_size(test_file) > size_before_update);
-                return size_before_update;
+                require_true(result.has_value());
+                require_eq(result.value(), 1u);
+                require_true(std::filesystem::file_size(test_file) > size_before);
+                require_true(engine.read("UpdateStatusRestoreFailure"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{2});
+                // Writes must remain enabled — durable update won.
+                auto again = object{{"value"s, 3ll}};
+                require_true(engine.update("UpdateStatusRestoreFailure"s, selector, again).has_value());
+                return size_before;
             }();
-            require_true(original_size > 0);
+            require_true(size_before_update > 0);
 
             auto reopened = yar::db::engine{test_file};
             auto documents = object{};
             require_true(reopened.read("UpdateStatusRestoreFailure"s, object{}, documents));
             require_eq(documents.size(), 1u);
-            require_eq(documents[0]["value"s], xson::integer_type{2});
+            require_eq(documents[0]["value"s], xson::integer_type{3});
         };
 
         section("DestroyWriteFailureRollsBack") = []
@@ -871,6 +877,43 @@ auto test_set()
             require_true(result.error().code == yar::db::db_error_code::io_failure);
             require_true(engine.read("DestroyFailure"s, selector, documents));
             require_eq(documents.size(), 1u);
+        };
+
+        section("ReplaceStatusRestoreFailureCommitsDurableReplace") = []
+        {
+            // Replacement is flushed, then status restore fails. Reporting
+            // rollback_failure would claim replace failed while live reads keep
+            // serving the tombstoned pre-image — commit the staged index.
+            const auto test_file = "./engine_replace_status_restore_failure_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    documents = object{};
+                require_true(engine.create("ReplaceStatusRestoreFailure"s, document).has_value());
+                const auto selector = object{{"_id"s, document["_id"s]}};
+                auto replacement = object{{"value"s, 9ll}};
+
+                fail_write(engine, 2);
+                fail_next_rollback_status(engine);
+                const auto result = engine.replace(
+                    "ReplaceStatusRestoreFailure"s,
+                    selector,
+                    replacement);
+
+                require_true(result.has_value());
+                require_eq(result.value(), 1u);
+                require_true(engine.read("ReplaceStatusRestoreFailure"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{9});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("ReplaceStatusRestoreFailure"s, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{9});
         };
 
         section("DestroyStatusRestoreFailureCommitsDurableDelete") = []

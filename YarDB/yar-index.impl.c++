@@ -335,6 +335,14 @@ bool yar::db::index::contains_id(yar::db::primary_key_type id) const
     return m_primary_keys.contains(id);
 }
 
+std::optional<yar::db::position_type> yar::db::index::position(yar::db::primary_key_type id) const
+{
+    const auto it = m_primary_keys.find(id);
+    if(it == m_primary_keys.end())
+        return std::nullopt;
+    return it->second;
+}
+
 void yar::db::index::insert(yar::db::object& document, yar::db::position_type position)
 {
     const auto pk = make_primary_key(document["_id"s]);

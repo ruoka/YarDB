@@ -1,5 +1,6 @@
 module yar;
 import :engine;
+import :metadata;
 import tester;
 import std;
 import xson;
@@ -1134,6 +1135,63 @@ auto test_set()
             require_true(engine.read(collection, object{{"_id"s, id}}, documents));
             require_eq(static_cast<string>(documents[0]["name"s]), "alice"s);
             require_false(engine.read(collection, object{{"_id"s, id + 1}}, documents));
+        };
+
+        section("DualLiveCrashRecoverySupersedesStalePreImage") = []
+        {
+            // Update appends a successor then tombstones the prior row. A crash
+            // between those steps leaves two status=created records for one _id.
+            // Reopen must serve only the later version and drop stale secondary
+            // hits (and heal the prior status so yarexport cannot resurrect it).
+            const auto test_file = "./engine_dual_live_recovery_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "DualLive"s;
+            const auto prior = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index(collection, {"name"s}).has_value());
+                auto document = object{{"name"s, "alice"s}};
+                require_true(engine.create(collection, document).has_value());
+                const auto id = static_cast<xson::integer_type>(document["_id"s]);
+                const auto selector = object{{"_id"s, id}};
+                const auto position = engine.metadata_position(collection, selector);
+                require_true(position.has_value());
+
+                auto updates = object{{"name"s, "bob"s}};
+                require_true(engine.update(collection, selector, updates).has_value());
+                return std::pair{*position, id};
+            }();
+
+            {
+                auto storage = std::fstream{
+                    test_file,
+                    std::ios::out | std::ios::in | std::ios::binary};
+                require_true(storage.is_open());
+                storage.seekp(prior.first, storage.beg);
+                storage << yar::db::metadata{yar::db::metadata::created};
+                require_false(storage.fail());
+                storage.flush();
+            }
+
+            auto reopened = yar::db::engine{test_file};
+            auto by_id = object{};
+            require_true(reopened.read(collection, object{{"_id"s, prior.second}}, by_id));
+            require_eq(by_id.size(), 1u);
+            require_eq(static_cast<string>(by_id[0]["name"s]), "bob"s);
+
+            auto stale = object{};
+            require_false(reopened.read(collection, object{{"name"s, "alice"s}}, stale));
+
+            auto current = object{};
+            require_true(reopened.read(collection, object{{"name"s, "bob"s}}, current));
+            require_eq(current.size(), 1u);
+
+            // Second open must still see one live row after on-disk status heal.
+            auto again = yar::db::engine{test_file};
+            auto all = object{};
+            require_true(again.read(collection, object{}, all));
+            require_eq(all.size(), 1u);
+            require_eq(static_cast<string>(all[0]["name"s]), "bob"s);
         };
     };
     return true;

@@ -481,6 +481,46 @@ auto test_set()
             require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 30);
         };
 
+        section("ReadTopZeroReturnsEmpty") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"name"s, "a"s}},
+                document2 = object{{"name"s, "b"s}},
+                document3 = object{{"name"s, "c"s}},
+                documents = object{};
+            require_true(engine.create("TopZero"s, document1).has_value());
+            require_true(engine.create("TopZero"s, document2).has_value());
+            require_true(engine.create("TopZero"s, document3).has_value());
+
+            auto top_zero = object{{"$top"s, 0ll}};
+            require_false(engine.read("TopZero"s, top_zero, documents));
+            require_true(documents.is_array());
+            require_eq(documents.get<object::array>().size(), 0u);
+
+            // Collection is intact — $top=0 must not dump every row.
+            documents = object{};
+            require_true(engine.read("TopZero"s, object{}, documents));
+            require_eq(documents.get<object::array>().size(), 3u);
+        };
+
+        section("DestroyTopZeroDeletesNothing") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"name"s, "a"s}},
+                document2 = object{{"name"s, "b"s}},
+                documents = object{};
+            require_true(engine.create("DestroyTopZero"s, document1).has_value());
+            require_true(engine.create("DestroyTopZero"s, document2).has_value());
+
+            auto top_zero = object{{"$top"s, 0ll}};
+            require_eq(engine.destroy("DestroyTopZero"s, top_zero, documents).value(), 0u);
+            require_eq(documents.get<object::array>().size(), 0u);
+
+            documents = object{};
+            require_true(engine.read("DestroyTopZero"s, object{}, documents));
+            require_eq(documents.get<object::array>().size(), 2u);
+        };
+
         section("TypedNumericIndexSurvivesRestart") = []
         {
             const auto test_file = "./engine_typed_index_restart_test.db";

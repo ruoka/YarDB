@@ -530,10 +530,15 @@ bool yar::db::engine::read(std::string_view collection, const yar::db::object& s
                     continue;
                 }
 
+                // $top=0 must yield an empty page. Post-decrement (`--top == 0`)
+                // never stops when top starts at 0 (underflow), and would return
+                // every match instead.
+                if(top == 0)
+                    break;
+
                 documents += std::move(document);
                 success = true;
-                if(--top == 0)
-                    break;
+                --top;
                 continue;
             }
 
@@ -799,11 +804,14 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
                     db_operation::destroy,
                     "Write preconditions were not met"s)};
 
+            // Same $top=0 pitfall as read: post-decrement never hits 0 when top
+            // starts at 0, which would delete every matching document.
+            if(top == 0)
+                break;
+
             documents += std::move(document);
             positions.push_back(position);
-
-            if(--top == 0)
-                break;
+            --top;
         }
     }
 

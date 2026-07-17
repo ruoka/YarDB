@@ -318,7 +318,7 @@ EOF
   assert_import_status 0 "force_overwrite_ok"
 
   TESTS_RUN=$((TESTS_RUN + 1))
-  if [[ -s "${target_db}" && ! -e "${target_db}.yarimport.tmp" ]]; then
+  if [[ -s "${target_db}" ]] && ! compgen -G "${target_db}.yarimport.*.tmp" >/dev/null; then
     jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_target_rewritten\"}"
   else
     fail "expected successful --force import to rewrite target and remove staging sidecar"

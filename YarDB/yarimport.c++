@@ -252,9 +252,8 @@ try
                 ec,
                 "failed to install output database "s + file
                     + " (does the file already exist? use --force to overwrite)"s};
+        // Best-effort unlink of the staging path; `file` already links the inode.
         filesystem::remove(staging.path, ec);
-        if(ec)
-            throw system_error{ec, "failed to remove staging database "s + staging.path.string()};
     }
     staging.release();
 

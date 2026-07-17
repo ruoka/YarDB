@@ -893,7 +893,9 @@ auto test_set()
                     documents = object{};
                 require_true(engine.create("ReplaceStatusRestoreFailure"s, document).has_value());
                 const auto selector = object{{"_id"s, document["_id"s]}};
-                auto replacement = object{{"value"s, 9ll}};
+                auto replacement = object{
+                    {"_id"s, document["_id"s]},
+                    {"value"s, 9ll}};
 
                 fail_write(engine, 2);
                 fail_next_rollback_status(engine);

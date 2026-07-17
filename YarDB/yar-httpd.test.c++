@@ -550,7 +550,7 @@ auto test_set()
 
         section("POST/GET preserves UTF-8 string values") = [setup]
         {
-            // Documents are stored as FSON; UTF-8 must survive create + read.
+            // Documents are stored as FSON; UTF-8 must survive escape round-trip.
             auto [post_status, post_reason, post_headers, post_body] = make_request(
                 setup->port(),
                 "POST"s,

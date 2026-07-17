@@ -523,8 +523,8 @@ auto test_set()
 
         section("Utf8StringSurvivesRestart") = []
         {
-            // FSON legacy strings used a 7-bit terminator; UTF-8 values used to
-            // corrupt on disk and fail reopen/validate_and_recover.
+            // FAST string terminator cleared high bits; without escape/unescape,
+            // UTF-8 corrupted on disk and failed reopen/validate_and_recover.
             const auto test_file = "./engine_utf8_restart_test.db";
             std::remove(test_file);
             std::remove((std::string{test_file} + ".pid").c_str());

@@ -345,7 +345,13 @@ void yar::db::index::insert(yar::db::object& document, yar::db::position_type po
         if(not document.has(field_name))
             continue;
 
-        const auto sk = make_secondary_key(document[field_name]);
+        // Secondary keys are primitives only. Object/array fields are skipped so
+        // create/reindex/restart cannot throw bad_variant_access via make_secondary_key.
+        const auto& value = document[field_name];
+        if(not value.has_value())
+            continue;
+
+        const auto sk = make_secondary_key(value);
         auto& positions = m_secondary_keys[field_name][sk];
         if(std::ranges::find(positions, position) == positions.end())
             positions.push_back(position);
@@ -367,7 +373,11 @@ void yar::db::index::erase(const yar::db::object& document)
         if(not document.has(field_name))
             continue;
 
-        const auto sk = make_secondary_key(document[field_name]);
+        const auto& value = document[field_name];
+        if(not value.has_value())
+            continue;
+
+        const auto sk = make_secondary_key(value);
         auto& secondary = m_secondary_keys[field_name];
         const auto secondary_it = secondary.find(sk);
         if(secondary_it == secondary.end())

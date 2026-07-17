@@ -194,6 +194,25 @@ auto test_set()
             };
             require_eq(fixture.count(selector), 1u);
         };
+
+        section("InsertSkipsObjectAndArraySecondaryValues") = []
+        {
+            // Nested values must not throw via make_secondary_key (bad_variant_access).
+            index_fixture fixture{"./index_nested_secondary.db"s};
+            fixture.add_keys({"address"s, "tags"s, "city"s});
+            fixture.insert(object{
+                {"address"s, object{{"city"s, "NYC"s}}},
+                {"tags"s, object{object::array{"a"s, "b"s}}},
+                {"city"s, "NYC"s}
+            });
+            fixture.insert(object{{"city"s, "LA"s}});
+
+            require_eq(fixture.count(object{}), 2u);
+            require_eq(fixture.count(object{{"city"s, "NYC"s}}), 1u);
+            require_eq(fixture.count(object{{"city"s, "LA"s}}), 1u);
+            // Object/array fields are not secondary-indexed; equality falls back to scan.
+            require_eq(fixture.count(object{{"address"s, object{{"city"s, "NYC"s}}}}), 1u);
+        };
     };
 
     return true;

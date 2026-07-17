@@ -184,6 +184,49 @@ yar::db::index* find_index(
     return std::addressof(indexes[std::string{collection}]);
 }
 
+// Crash between appending a successor and tombstoning the prior row can leave
+// two status=created records for one _id. Primary insert would overwrite while
+// secondary entries for the stale pre-image remain. Drop the earlier live row
+// from the index (and heal its on-disk status) before indexing the later one.
+void supersede_prior_live_row(
+    std::fstream& storage,
+    yar::db::index& index,
+    const yar::db::object& document,
+    bool heal_status)
+{
+    using xson::fson::operator >>;
+    using xson::fson::operator <<;
+
+    if(not document.has("_id"s) or not document["_id"s].is_integer())
+        return;
+
+    const auto id = static_cast<yar::db::sequence_type>(document["_id"s]);
+    const auto prior_position = index.position(id);
+    if(not prior_position.has_value())
+        return;
+
+    const auto resume = storage.tellg();
+    auto prior_metadata = yar::db::metadata{};
+    auto prior_document = yar::db::object{};
+    storage.clear();
+    storage.seekg(*prior_position, storage.beg);
+    storage >> prior_metadata >> prior_document;
+    if(not storage.fail())
+    {
+        index.erase(prior_document);
+        if(heal_status and prior_metadata.status == yar::db::metadata::created)
+        {
+            storage.clear();
+            storage.seekp(*prior_position, storage.beg);
+            storage << yar::db::updated;
+            storage.flush();
+        }
+    }
+
+    storage.clear();
+    storage.seekg(resume, storage.beg);
+}
+
 } // namespace
 
 yar::db::engine::engine(std::string_view db) :
@@ -320,6 +363,7 @@ void yar::db::engine::populate_indexes()
             continue;
 
         auto& index = m_index[metadata.collection];
+        supersede_prior_live_row(m_storage, index, document, true);
         index.insert(document, metadata.position);
     }
 }
@@ -359,7 +403,12 @@ yar::db::db_result<> yar::db::engine::reindex()
         auto& rebuilt_index = rebuilt[metadata.collection];
         rebuilt_index.update(document);
         if(metadata.status != metadata::deleted and metadata.status != metadata::updated)
+        {
+            // Rebuilds must not mutate durable statuses; reopen already heals
+            // dual-live rows. Here only the in-memory index is corrected.
+            supersede_prior_live_row(m_storage, rebuilt_index, document, false);
             rebuilt_index.insert(document, metadata.position);
+        }
     }
     m_storage.clear();
     m_index = std::move(rebuilt);

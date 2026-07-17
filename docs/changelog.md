@@ -18,6 +18,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **Dual-live crash recovery** | If a crash leaves two `created` rows for one `_id` (successor appended, prior not yet tombstoned), reopen/reindex supersede the earlier row — drop stale secondary hits and heal the prior status to `updated` |
 | **Update/replace commit when status restore fails** | If successors are durable but rollback cannot restore prior rows to `created`, update/replace publish the staged index (durable write won) instead of returning failure while live reads keep serving tombstoned pre-images |
 | **Destroy commits when status restore fails** | If delete markers are durable but rollback cannot restore `created`, destroy publishes the staged index (durable delete won) instead of returning failure while reopen drops the documents |
 | **`replace` rejects colliding `_id`** | Replacement bodies cannot reuse another live primary key; returns `conflict` like create/update instead of silently orphaning the victim from `_id` lookups |

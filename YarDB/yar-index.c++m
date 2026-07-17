@@ -365,6 +365,9 @@ public:
     // True when a live primary-key entry already exists for id
     bool contains_id(primary_key_type id) const;
 
+    // File position of the live primary-key entry, if present
+    std::optional<position_type> position(primary_key_type id) const;
+
     // Insert document into index with storage position
     // Updates primary key index and all matching secondary key indexes
     // Appends position for duplicate secondary key values

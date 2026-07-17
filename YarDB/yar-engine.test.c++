@@ -616,6 +616,33 @@ auto test_set()
             require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 2ll);
         };
 
+        section("ReplaceRejectsDuplicatePrimaryKey") = []
+        {
+            // replace used to overwrite m_primary_keys[id] and orphan the victim.
+            const auto test_file = "./engine_replace_duplicate_id_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto first = object{{"name"s, "keep"s}},
+                second = object{{"name"s, "victim"s}},
+                documents = object{};
+            require_true(engine.create("ReplaceDupId"s, first).has_value());
+            require_true(engine.create("ReplaceDupId"s, second).has_value());
+
+            auto clobber = object{
+                {"_id"s, second["_id"s]},
+                {"name"s, "clobber"s}};
+            const auto selector = object{{"_id"s, first["_id"s]}};
+            const auto result = engine.replace("ReplaceDupId"s, selector, clobber);
+
+            require_false(result.has_value());
+            require_true(result.error().code == yar::db::db_error_code::conflict);
+            require_true(engine.read("ReplaceDupId"s, object{}, documents));
+            require_eq(documents.size(), 2u);
+            require_true(engine.read("ReplaceDupId"s, object{{"_id"s, second["_id"s]}}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "victim"s);
+        };
+
         section("ReplacePreservesHistoryChain") = [test_file]
         {
             // create → update → replace must keep a walkable history (not sever
@@ -844,6 +871,43 @@ auto test_set()
             require_true(result.error().code == yar::db::db_error_code::io_failure);
             require_true(engine.read("DestroyFailure"s, selector, documents));
             require_eq(documents.size(), 1u);
+        };
+
+        section("DestroyStatusRestoreFailureCommitsDurableDelete") = []
+        {
+            // Delete markers are flushed, then status restore fails. Reporting
+            // rollback_failure would claim the delete failed while reopen skips
+            // tombstones — commit the durable delete instead.
+            const auto test_file = "./engine_destroy_status_restore_failure_test.db";
+            const auto setup = fixture{test_file};
+            const auto deleted_id = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}};
+                require_true(engine.create("DestroyStatusRestoreFailure"s, document).has_value());
+                const auto id = static_cast<xson::integer_type>(document["_id"s]);
+                const auto selector = object{{"_id"s, document["_id"s]}};
+
+                fail_write(engine, 1);
+                fail_next_rollback_status(engine);
+                const auto result = engine.destroy("DestroyStatusRestoreFailure"s, selector);
+
+                require_true(result.has_value());
+                require_eq(result.value(), 1u);
+                auto documents = object{};
+                require_false(engine.read("DestroyStatusRestoreFailure"s, selector, documents));
+                return id;
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_false(reopened.read(
+                "DestroyStatusRestoreFailure"s,
+                object{{"_id"s, deleted_id}},
+                documents));
+            require_true(reopened.create(
+                "DestroyStatusRestoreFailure"s,
+                object{{"value"s, 2ll}}).has_value());
         };
 
         section("ReplaceWriteFailureRollsBack") = []

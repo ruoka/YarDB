@@ -15,7 +15,16 @@ bool reopen(std::fstream& storage, const std::string& db)
     return storage.is_open();
 }
 
-bool rollback(
+// Distinguish status-restore failure from truncate/reopen failure so destroy can
+// commit durable tombstones instead of reporting failure while data vanishes.
+enum class rollback_result
+{
+    ok,
+    status_restore_failed,
+    truncate_failed
+};
+
+rollback_result rollback(
     std::fstream& storage,
     const std::string& db,
     std::uintmax_t original_size,
@@ -51,14 +60,16 @@ bool rollback(
     {
         storage.close();
         reopen(storage, db);
-        return false;
+        return rollback_result::status_restore_failed;
     }
 
     storage.close();
     auto resize_error = std::error_code{};
     std::filesystem::resize_file(db, original_size, resize_error);
     const auto reopened = reopen(storage, db);
-    return not resize_error and reopened;
+    if(not resize_error and reopened)
+        return rollback_result::ok;
+    return rollback_result::truncate_failed;
 }
 
 void validate_and_recover_storage(std::fstream& storage, const std::string& db)
@@ -447,7 +458,7 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
     m_storage.flush();
     if(m_storage.fail())
     {
-        if(not rollback(m_storage, m_db, original_size, {}))
+        if(rollback(m_storage, m_db, original_size, {}) != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -742,7 +753,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
     m_storage.flush();
     if(m_storage.fail())
     {
-        if(not rollback(m_storage, m_db, original_size, {}))
+        if(rollback(m_storage, m_db, original_size, {}) != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -772,12 +783,12 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         m_storage.setstate(std::ios::badbit);
     if(m_storage.fail())
     {
-        if(not rollback(
+        if(rollback(
             m_storage,
             m_db,
             original_size,
             status_positions,
-            consume_rollback_status_failure()))
+            consume_rollback_status_failure()) != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -882,12 +893,21 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
         m_storage.setstate(std::ios::badbit);
     if(m_storage.fail())
     {
-        if(not rollback(
+        // Delete markers were flushed. If undo cannot restore created, durable
+        // tombstones remain and reopen would drop the docs while we reported
+        // failure — commit the staged index so API and disk agree.
+        const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
             positions,
-            consume_rollback_status_failure()))
+            consume_rollback_status_failure());
+        if(rolled_back == rollback_result::status_restore_failed)
+        {
+            m_index = std::move(staged);
+            return positions.size();
+        }
+        if(rolled_back != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -973,6 +993,25 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     auto& staged_index = staged[std::string{collection}];
     for(const auto& old_document : old_documents)
         staged_index.erase(old_document);
+
+    // Mirror create/update: do not let replace clobber another live primary key.
+    // After erasing matched rows, contains_id only sees uninvolved documents.
+    if(document.has("_id"s))
+    {
+        if(not document["_id"s].is_integer())
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::replace,
+                "Document _id must be an integer"s)};
+
+        const auto new_id = static_cast<sequence_type>(document["_id"s]);
+        if(staged_index.contains_id(new_id))
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::replace,
+                "Document with _id "s + std::to_string(new_id) + " already exists"s)};
+    }
+
     staged_index.update(document);
 
     auto metadata = *chain_metadata;
@@ -984,7 +1023,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     m_storage.flush();
     if(m_storage.fail())
     {
-        if(not rollback(m_storage, m_db, original_size, {}))
+        if(rollback(m_storage, m_db, original_size, {}) != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -1011,12 +1050,12 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
         m_storage.setstate(std::ios::badbit);
     if(m_storage.fail())
     {
-        if(not rollback(
+        if(rollback(
             m_storage,
             m_db,
             original_size,
             positions,
-            consume_rollback_status_failure()))
+            consume_rollback_status_failure()) != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(

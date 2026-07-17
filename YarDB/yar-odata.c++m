@@ -252,19 +252,91 @@ inline auto split_property_path(std::string_view path)
     return segments;
 }
 
-// Deep-merge selector maps (needed when AND combines Customer/Country and Customer/Name)
+// True when value is a $op constraint map ($gt/$eq/$in/...). Nested document
+// selectors use ordinary field names instead.
+inline bool is_operator_constraint_map(const xson::object& value)
+{
+    if(not value.has_objects())
+        return false;
+
+    for(const auto& [key, _] : value.get<db::object::map>())
+    {
+        if(not key.empty() and key.front() == '$')
+            return true;
+    }
+    return false;
+}
+
+inline xson::object as_operator_constraint_map(const xson::object& leaf)
+{
+    if(leaf.has_objects())
+        return leaf;
+    // Bare equality from `field eq value` becomes $eq so it can AND with ranges.
+    return xson::object{{"$eq"s, leaf}};
+}
+
+// Merge $op maps on one field. Contradictory equalities become an impossible
+// predicate so `status eq 'a' and status eq 'b'` matches nothing.
+inline void merge_operator_constraint_maps(xson::object& target, const xson::object& source)
+{
+    if(target.has("$eq"s) and source.has("$eq"s) and target["$eq"s] != source["$eq"s])
+    {
+        const auto value = target["$eq"s];
+        target = xson::object{{"$eq"s, value}, {"$ne"s, value}};
+        return;
+    }
+
+    for(const auto& [key, value] : source.get<db::object::map>())
+        target[key] = value;
+}
+
+inline void merge_field_constraints(xson::object& target, const xson::object& source)
+{
+    auto left = as_operator_constraint_map(target);
+    auto right = as_operator_constraint_map(source);
+    merge_operator_constraint_maps(left, right);
+    target = std::move(left);
+}
+
+// Deep-merge selector maps (needed when AND combines Customer/Country and Customer/Name).
+// Same-field constraints (bare eq + $gt, or conflicting eq) are AND-merged instead of
+// last-write-wins, which previously dropped earlier predicates.
 inline void merge_selector_into(xson::object& target, const xson::object& source)
 {
     for(const auto& [key, value] : source.get<db::object::map>())
     {
-        if(target.has(key) and target[key].has_objects() and value.has_objects())
+        if(not target.has(key))
         {
-            auto nested = target[key];
-            merge_selector_into(nested, value);
-            target[key] = std::move(nested);
-        }
-        else
             target[key] = value;
+            continue;
+        }
+
+        auto& dest = target[key];
+        const auto dest_is_nested =
+            dest.has_objects() and not is_operator_constraint_map(dest);
+        const auto source_is_nested =
+            value.has_objects() and not is_operator_constraint_map(value);
+
+        if(dest_is_nested and source_is_nested)
+        {
+            auto nested = dest;
+            merge_selector_into(nested, value);
+            dest = std::move(nested);
+            continue;
+        }
+
+        const auto dest_is_constraint =
+            dest.has_value() or is_operator_constraint_map(dest);
+        const auto source_is_constraint =
+            value.has_value() or is_operator_constraint_map(value);
+
+        if(dest_is_constraint and source_is_constraint)
+        {
+            merge_field_constraints(dest, value);
+            continue;
+        }
+
+        dest = value;
     }
 }
 
@@ -275,11 +347,11 @@ inline void set_nested_selector_leaf(xson::object& selector, std::string_view pa
 
     if(segments.size() == 1)
     {
-        if(selector.has(segments[0]) and selector[segments[0]].has_objects() and leaf.has_objects())
+        if(selector.has(segments[0]))
         {
-            auto nested = selector[segments[0]];
-            merge_selector_into(nested, leaf);
-            selector[segments[0]] = std::move(nested);
+            auto part = xson::object{};
+            part[segments[0]] = std::move(leaf);
+            merge_selector_into(selector, part);
         }
         else
             selector[segments[0]] = std::move(leaf);

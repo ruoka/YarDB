@@ -338,6 +338,46 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter ANDs equality with a range on the same field") = []
+            {
+                then("Keeps both $eq and $gt instead of last-write-wins") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("age eq 10 and age gt 5"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("age"s));
+                    require_true(selector["age"s].has("$eq"s));
+                    require_true(selector["age"s].has("$gt"s));
+                    require_eq(static_cast<xson::integer_type>(selector["age"s]["$eq"s]), 10);
+                    require_eq(static_cast<xson::integer_type>(selector["age"s]["$gt"s]), 5);
+
+                    // Reverse order must also preserve both predicates.
+                    const auto [selector2, filters2] = parse_and_filter("age gt 5 and age eq 10"sv);
+                    require_true(filters2.empty());
+                    require_true(selector2["age"s].has("$eq"s));
+                    require_true(selector2["age"s].has("$gt"s));
+                    require_eq(static_cast<xson::integer_type>(selector2["age"s]["$eq"s]), 10);
+                    require_eq(static_cast<xson::integer_type>(selector2["age"s]["$gt"s]), 5);
+                };
+            };
+
+            when("Filter ANDs contradictory equalities on the same field") = []
+            {
+                then("Builds an impossible predicate that matches nothing") = []
+                {
+                    const auto [selector, filters] = parse_and_filter(
+                        "status eq 'a' and status eq 'b'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("status"s));
+                    require_true(selector["status"s].has("$eq"s));
+                    require_true(selector["status"s].has("$ne"s));
+                    require_eq(selector["status"s]["$eq"s].get<string>(), "a"s);
+                    require_eq(selector["status"s]["$ne"s].get<string>(), "a"s);
+
+                    require_false(object{{"status"s, "a"s}}.match(selector));
+                    require_false(object{{"status"s, "b"s}}.match(selector));
+                };
+            };
+
             when("Filter uses 'or' operator") = []
             {
                 then("Returns two OR branches") = []
@@ -624,6 +664,72 @@ auto register_odata_tests()
                     const auto filtered = apply_string_filters(docs, filters);
                     require_eq(filtered.get<object::array>().size(), 1u);
                     require_eq(filtered[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+        };
+    };
+
+    scenario("parse_filter same-field AND keeps all predicates, [yardb]") = []
+    {
+        given("Documents with overlapping ages and statuses") = []
+        {
+            const auto test_file = "./odata_same_field_and_test.db"s;
+
+            when("Equality is AND-combined with a range on age") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"age"s}).has_value());
+
+                auto young = object{{"name"s, "young"s}, {"age"s, 3ll}};
+                auto exact = object{{"name"s, "exact"s}, {"age"s, 10ll}};
+                auto older = object{{"name"s, "older"s}, {"age"s, 20ll}};
+                require_true(engine.create("users"s, young).has_value());
+                require_true(engine.create("users"s, exact).has_value());
+                require_true(engine.create("users"s, older).has_value());
+
+                // Last-write-wins would keep only age gt 5 and return exact+older.
+                const auto parsed = parse_filter("age eq 10 and age gt 5"sv);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Returns only the equality match") = [docs, test_file]
+                {
+                    require_true(docs.is_array());
+                    const auto& items = docs.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "exact"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Contradictory equalities are AND-combined on status") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"status"s}).has_value());
+
+                auto a = object{{"name"s, "A"s}, {"status"s, "a"s}};
+                auto b = object{{"name"s, "B"s}, {"status"s, "b"s}};
+                require_true(engine.create("users"s, a).has_value());
+                require_true(engine.create("users"s, b).has_value());
+
+                // Last-write-wins would keep only status eq 'b' and return B.
+                const auto parsed = parse_filter("status eq 'a' and status eq 'b'"sv);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Returns no documents") = [docs, test_file]
+                {
+                    require_true(docs.is_array());
+                    require_eq(docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
                 };
             };
         };

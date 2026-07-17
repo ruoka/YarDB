@@ -15,8 +15,9 @@ bool reopen(std::fstream& storage, const std::string& db)
     return storage.is_open();
 }
 
-// Distinguish status-restore failure from truncate/reopen failure so destroy can
-// commit durable tombstones instead of reporting failure while data vanishes.
+// Distinguish status-restore failure from truncate/reopen failure so destroy /
+// update / replace can publish the durable outcome instead of reporting failure
+// while API and disk disagree.
 enum class rollback_result
 {
     ok,
@@ -783,12 +784,23 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         m_storage.setstate(std::ios::badbit);
     if(m_storage.fail())
     {
-        if(rollback(
+        // Successors were flushed. If undo cannot restore created on prior
+        // rows, reopen indexes the new versions while a stale m_index would
+        // keep serving tombstoned pre-images — publish staged instead.
+        const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
             status_positions,
-            consume_rollback_status_failure()) != rollback_result::ok)
+            consume_rollback_status_failure());
+        if(rolled_back == rollback_result::status_restore_failed)
+        {
+            for(auto& entry : pending)
+                documents += std::move(entry.new_document);
+            m_index = std::move(staged);
+            return pending.size();
+        }
+        if(rolled_back != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -1050,12 +1062,21 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
         m_storage.setstate(std::ios::badbit);
     if(m_storage.fail())
     {
-        if(rollback(
+        // Replacement was flushed. If undo cannot restore created on prior
+        // rows, reopen indexes the successor while a stale m_index would keep
+        // serving tombstoned pre-images — publish staged instead.
+        const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
             positions,
-            consume_rollback_status_failure()) != rollback_result::ok)
+            consume_rollback_status_failure());
+        if(rolled_back == rollback_result::status_restore_failed)
+        {
+            m_index = std::move(staged);
+            return positions.size();
+        }
+        if(rolled_back != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(

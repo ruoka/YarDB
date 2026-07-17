@@ -540,6 +540,29 @@ auto test_set()
             require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 2ll);
         };
 
+        section("ReplacePreservesHistoryChain") = [test_file]
+        {
+            // create → update → replace must keep a walkable history (not sever
+            // previous or mark the prior live record as deleted).
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "v1"s}, {"value"s, 1ll}},
+                patch = object{{"name"s, "v2"s}},
+                replacement = object{{"name"s, "v3"s}, {"value"s, 3ll}},
+                selector = object{},
+                history = object{};
+            require_true(engine.create("ReplaceHistory"s, original).has_value());
+            selector = object{{"_id"s, original["_id"s]}};
+            require_true(engine.update("ReplaceHistory"s, selector, patch).value() > 0);
+            replacement["_id"s] = original["_id"s];
+            require_true(engine.replace("ReplaceHistory"s, selector, replacement).value() > 0);
+
+            require_true(engine.history("ReplaceHistory"s, selector, history));
+            require_eq(history.size(), 3u);
+            require_eq(history[0]["name"s].get<string>(), "v3"s);
+            require_eq(history[1]["name"s].get<string>(), "v2"s);
+            require_eq(history[2]["name"s].get<string>(), "v1"s);
+        };
+
         section("ReindexDiscoversExistingDocuments") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

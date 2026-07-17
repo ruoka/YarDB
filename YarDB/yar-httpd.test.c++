@@ -2434,6 +2434,37 @@ auto test_set()
             require_true(document.has("@odata.editLink"s));
         };
 
+        section("PUT with fullmetadata does not persist OData annotations") = [setup]
+        {
+            auto [post_status, __, ___, post_body] = make_request(
+                setup->port(), "POST"s, "/odataputpersist"s, R"({"name":"Persist"})"s
+            );
+            require_eq(post_status, "201"s);
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
+
+            auto [put_status, put_reason, put_headers, put_body] = make_request_with_accept(
+                setup->port(), "PUT"s, "/odataputpersist/"s + std::to_string(doc_id),
+                "application/json;odata=fullmetadata"s,
+                R"({"name":"Persist Updated"})"s
+            );
+            require_eq(put_status, "200"s);
+            auto put_document = json::parse(put_body);
+            require_true(put_document.has("@odata.context"s));
+
+            // Stored document must remain free of response-only OData fields.
+            auto [get_status, get_reason, get_headers, get_body] = make_request_with_accept(
+                setup->port(), "GET"s, "/odataputpersist/"s + std::to_string(doc_id),
+                "application/json;odata=nometadata"s
+            );
+            require_eq(get_status, "200"s);
+            auto stored = json::parse(get_body);
+            require_false(stored.has("@odata.context"s));
+            require_false(stored.has("@odata.id"s));
+            require_false(stored.has("@odata.editLink"s));
+            require_eq(stored["name"s].get<string>(), "Persist Updated"s);
+        };
+
         section("PATCH response includes metadata when requested") = [setup]
         {
             // First create a document

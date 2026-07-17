@@ -871,6 +871,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
 
     auto positions = std::vector<position_type>{};
     auto old_documents = std::vector<object>{};
+    auto chain_metadata = std::optional<yar::db::metadata>{};
     const auto* index = find_index(m_index, collection);
     if(index == nullptr)
         return 0;
@@ -897,6 +898,10 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
 
             positions.push_back(position);
             old_documents.push_back(std::move(old_document));
+            // Reuse the first matched record's metadata so operator<< chains
+            // previous → old position (same as update_impl).
+            if(not chain_metadata.has_value())
+                chain_metadata = metadata;
         }
     }
 
@@ -917,7 +922,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
         staged_index.erase(old_document);
     staged_index.update(document);
 
-    auto metadata = yar::db::metadata{std::string{collection}};
+    auto metadata = *chain_metadata;
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     m_storage << metadata << document;
@@ -941,11 +946,12 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     }
     staged_index.insert(document, metadata.position);
 
+    // Mark prior live versions as updated (not deleted) so history remains walkable.
     for(const auto position : positions)
     {
         m_storage.clear();
         m_storage.seekp(position, m_storage.beg);
-        m_storage << yar::db::deleted;
+        m_storage << yar::db::updated;
     }
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);

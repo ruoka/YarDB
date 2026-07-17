@@ -1271,10 +1271,8 @@ private:
 
             if(exists and not existing_docs.get<xson::object::array>().empty())
             {
-                auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-                if(metadata_level != yar::http::odata::metadata_level::none)
-                    document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
-
+                // Persist the request body only — OData response annotations are
+                // added after replace, matching POST/PATCH.
                 const auto replaced = m_engine.replace(collection, selector, document, preconditions);
                 if(not replaced)
                     return database_error_response(replaced.error());
@@ -1301,16 +1299,12 @@ private:
                 }
 
                 response_headers.set("content-location"s, resource_path);
+                yar::http::odata::add_metadata_if_requested(document, headers, collection, id);
                 return response_with_headers{::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers)};
             }
 
-            // Add OData metadata if requested
-            auto metadata_level = yar::http::odata::parse_metadata_level(headers);
-            if(metadata_level != yar::http::odata::metadata_level::none)
-                document = yar::http::odata::add_metadata(document, metadata_level, collection, id);
-
             {
-                // Document doesn't exist - create it
+                // Document doesn't exist - create it (response metadata only after persist)
                 const auto created = m_engine.create(collection, document);
                 if(not created)
                     return database_error_response(created.error());
@@ -1323,6 +1317,7 @@ private:
                 }
 
                 response_headers.set("location"s, resource_path);
+                yar::http::odata::add_metadata_if_requested(document, headers, collection, id);
                 return response_with_headers{status_created, xson::json::stringify(document), std::make_optional(response_headers)};
             }
         };

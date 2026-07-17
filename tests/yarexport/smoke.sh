@@ -397,6 +397,23 @@ test_import_refuses_live_lock() {
   end_case import_refuses_live_lock
 }
 
+test_export_refuses_live_lock() {
+  should_run export_refuses_live_lock || return 0
+  begin_case export_refuses_live_lock
+  local target_db
+  target_db="$(mktemp "${TMPDIR:-/tmp}/yarexport_lock.XXXXXX.db")"
+  : >"${target_db}"
+  : >"${target_db}.pid"
+
+  run_yarexport "${target_db}"
+  assert_export_status 1 "export_refuses_live_lock"
+  LAST_OUTPUT="${LAST_EXPORT_OUTPUT}"
+  assert_contains "database lock present" "export_live_lock_message"
+
+  rm -f "${target_db}" "${target_db}.pid"
+  end_case export_refuses_live_lock
+}
+
 test_missing_file() {
   should_run missing_file || return 0
   begin_case missing_file
@@ -443,6 +460,7 @@ main() {
   test_force_overwrite_ok
   test_export_stdout_full
   test_import_refuses_live_lock
+  test_export_refuses_live_lock
   test_missing_file
   test_help
 

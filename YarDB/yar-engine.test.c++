@@ -455,30 +455,30 @@ auto test_set()
             auto asc = object{{"$orderby"s, "value"s}};
             require_true(engine.read("OrderByField"s, asc, documents));
             require_eq(documents.size(), 3u);
-            require_eq(documents[0]["value"s], 10ll);
-            require_eq(documents[1]["value"s], 20ll);
-            require_eq(documents[2]["value"s], 30ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 10);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(documents[2]["value"s]), 30);
 
             auto desc = object{{"$orderby"s, "value"s}, {"$desc"s, true}};
             documents = object{};
             require_true(engine.read("OrderByField"s, desc, documents));
-            require_eq(documents[0]["value"s], 30ll);
-            require_eq(documents[1]["value"s], 20ll);
-            require_eq(documents[2]["value"s], 10ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 30);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(documents[2]["value"s]), 10);
 
             auto top_desc = object{{"$orderby"s, "value"s}, {"$desc"s, true}, {"$top"s, 2ll}};
             documents = object{};
             require_true(engine.read("OrderByField"s, top_desc, documents));
             require_eq(documents.size(), 2u);
-            require_eq(documents[0]["value"s], 30ll);
-            require_eq(documents[1]["value"s], 20ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 30);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 20);
 
             auto skip_asc = object{{"$orderby"s, "value"s}, {"$skip"s, 1ll}};
             documents = object{};
             require_true(engine.read("OrderByField"s, skip_asc, documents));
             require_eq(documents.size(), 2u);
-            require_eq(documents[0]["value"s], 20ll);
-            require_eq(documents[1]["value"s], 30ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 30);
         };
 
         section("TypedNumericIndexSurvivesRestart") = []
@@ -538,6 +538,29 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 1u);
             require_eq(documents[0]["name"s].get<string>(), "after"s);
             require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 2ll);
+        };
+
+        section("ReplacePreservesHistoryChain") = [test_file]
+        {
+            // create → update → replace must keep a walkable history (not sever
+            // previous or mark the prior live record as deleted).
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "v1"s}, {"value"s, 1ll}},
+                patch = object{{"name"s, "v2"s}},
+                replacement = object{{"name"s, "v3"s}, {"value"s, 3ll}},
+                selector = object{},
+                history = object{};
+            require_true(engine.create("ReplaceHistory"s, original).has_value());
+            selector = object{{"_id"s, original["_id"s]}};
+            require_true(engine.update("ReplaceHistory"s, selector, patch).value() > 0);
+            replacement["_id"s] = original["_id"s];
+            require_true(engine.replace("ReplaceHistory"s, selector, replacement).value() > 0);
+
+            require_true(engine.history("ReplaceHistory"s, selector, history));
+            require_eq(history.size(), 3u);
+            require_eq(history[0]["name"s].get<string>(), "v3"s);
+            require_eq(history[1]["name"s].get<string>(), "v2"s);
+            require_eq(history[2]["name"s].get<string>(), "v1"s);
         };
 
         section("ReindexDiscoversExistingDocuments") = [test_file]

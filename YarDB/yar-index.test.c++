@@ -202,16 +202,17 @@ auto test_set()
             fixture.add_keys({"address"s, "tags"s, "city"s});
             fixture.insert(object{
                 {"address"s, object{{"city"s, "NYC"s}}},
-                {"tags"s, object{object::array{"a"s, "b"s}}},
+                {"tags"s, object{object::array{object{{"n"s, 1ll}}, object{{"n"s, 2ll}}}}},
                 {"city"s, "NYC"s}
             });
-            fixture.insert(object{{"city"s, "LA"s}});
+            fixture.insert(object{{"address"s, "plain"s}, {"city"s, "LA"s}});
 
             require_eq(fixture.count(object{}), 2u);
             require_eq(fixture.count(object{{"city"s, "NYC"s}}), 1u);
             require_eq(fixture.count(object{{"city"s, "LA"s}}), 1u);
-            // Object/array fields are not secondary-indexed; equality falls back to scan.
-            require_eq(fixture.count(object{{"address"s, object{{"city"s, "NYC"s}}}}), 1u);
+            // Only primitive address values are secondary-indexed.
+            require_eq(fixture.count(object{{"address"s, "plain"s}}), 1u);
+            require_eq(fixture.view_count(object{{"address"s, "plain"s}}), 1u);
         };
     };
 

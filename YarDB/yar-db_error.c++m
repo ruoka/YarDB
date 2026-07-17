@@ -10,7 +10,8 @@ enum class db_error_code
     io_failure,
     rollback_failure,
     corrupt_storage,
-    precondition_failed
+    precondition_failed,
+    conflict
 };
 
 enum class db_operation

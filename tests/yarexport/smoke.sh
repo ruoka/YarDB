@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, missing_file, help"
+      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, import_refuses_live_lock, missing_file, help"
       exit 0
       ;;
     *)
@@ -275,10 +275,11 @@ EOF
   fi
 
   TESTS_RUN=$((TESTS_RUN + 1))
-  if [[ ! -e "${marker_db}.yarimport.tmp" && ! -e "${marker_db}.yarimport.tmp.pid" ]]; then
-    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_cleans_staging\"}"
-  else
+  # Staging names are per-pid: ${file}.yarimport.<pid>.tmp
+  if compgen -G "${marker_db}.yarimport.*.tmp" >/dev/null || compgen -G "${marker_db}.yarimport.*.tmp.pid" >/dev/null; then
     fail "expected failed --force import to remove staging sidecar files"
+  else
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_cleans_staging\"}"
   fi
 
   rm -f "${marker_db}" "${marker_db}.pid" "${bad_jsonl}"
@@ -317,7 +318,7 @@ EOF
   assert_import_status 0 "force_overwrite_ok"
 
   TESTS_RUN=$((TESTS_RUN + 1))
-  if [[ -s "${target_db}" && ! -e "${target_db}.yarimport.tmp" ]]; then
+  if [[ -s "${target_db}" ]] && ! compgen -G "${target_db}.yarimport.*.tmp" >/dev/null; then
     jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"force_target_rewritten\"}"
   else
     fail "expected successful --force import to rewrite target and remove staging sidecar"
@@ -377,6 +378,25 @@ EOF
   end_case export_stdout_full
 }
 
+test_import_refuses_live_lock() {
+  should_run import_refuses_live_lock || return 0
+  begin_case import_refuses_live_lock
+  local target_db live_jsonl
+  target_db="$(mktemp "${TMPDIR:-/tmp}/yarlock.XXXXXX.db")"
+  live_jsonl="$(mktemp "${TMPDIR:-/tmp}/yarlock.XXXXXX.jsonl")"
+  printf '%s\n' '{"collection":"items","document":{"_id":1,"name":"x"}}' >"${live_jsonl}"
+  : >"${target_db}"
+  : >"${target_db}.pid"
+
+  run_yarimport "${target_db}" "${live_jsonl}" --force
+  assert_import_status 1 "import_refuses_live_lock"
+  LAST_OUTPUT="${LAST_IMPORT_OUTPUT}"
+  assert_contains "database lock present" "import_live_lock_message"
+
+  rm -f "${target_db}" "${target_db}.pid" "${live_jsonl}"
+  end_case import_refuses_live_lock
+}
+
 test_missing_file() {
   should_run missing_file || return 0
   begin_case missing_file
@@ -422,6 +442,7 @@ main() {
   test_force_preserves_on_bad_input
   test_force_overwrite_ok
   test_export_stdout_full
+  test_import_refuses_live_lock
   test_missing_file
   test_help
 

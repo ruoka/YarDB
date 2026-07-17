@@ -384,6 +384,26 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
 
     auto staged = m_index;
     auto& index = staged[std::string{collection}];
+
+    // Client-/import-supplied _id must not clobber an existing primary key.
+    // index::insert overwrites m_primary_keys[id], which orphans the prior
+    // live record and can leave secondary indexes pointing at the old position.
+    if(document.has("_id"s))
+    {
+        if(not document["_id"s].is_integer())
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::create,
+                "Document _id must be an integer"s)};
+
+        const auto id = static_cast<yar::db::sequence_type>(document["_id"s]);
+        if(index.contains_id(id))
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::create,
+                "Document with _id "s + std::to_string(id) + " already exists"s)};
+    }
+
     auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
@@ -560,6 +580,22 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
 
             auto new_document = old_document;
             new_document += updates;
+            if(new_document.has("_id"s))
+            {
+                if(not new_document["_id"s].is_integer())
+                    return std::unexpected{db_error(
+                        db_error_code::conflict,
+                        db_operation::update,
+                        "Document _id must be an integer"s)};
+
+                const auto new_id = static_cast<sequence_type>(new_document["_id"s]);
+                const auto old_id = static_cast<sequence_type>(old_document["_id"s]);
+                if(new_id != old_id)
+                    return std::unexpected{db_error(
+                        db_error_code::conflict,
+                        db_operation::update,
+                        "Document _id is immutable"s)};
+            }
             pending.push_back({position, metadata, std::move(old_document), std::move(new_document)});
         }
     }

@@ -330,6 +330,11 @@ void yar::db::index::update(yar::db::object& document)
         document["_id"s] = ++m_sequence;
 }
 
+bool yar::db::index::contains_id(yar::db::primary_key_type id) const
+{
+    return m_primary_keys.contains(id);
+}
+
 void yar::db::index::insert(yar::db::object& document, yar::db::position_type position)
 {
     const auto pk = make_primary_key(document["_id"s]);

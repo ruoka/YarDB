@@ -15,6 +15,10 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Offline compaction** | `yarexport --live` exports current documents only; new `yarimport` rebuilds a FSON file (preserves `_id` and `_db` indexes). Workflow: stop yardb → live export → import → swap |
 | **Safe `yarimport --force`** | Validate JSONL and build a staging sidecar before replacing `--file`; failed `--force` imports no longer delete the existing database |
 | **`yarexport` stdout failures** | Exit non-zero when stdout write/flush fails (full disk, broken pipe) so truncated JSONL is not treated as a successful export |
+| **Reject duplicate create `_id`** | `engine.create` returns `conflict` when a client-/import-supplied `_id` already exists (HTTP `409`); prevents silent primary-index clobber and secondary-index orphans |
+| **Immutable `_id` on update** | `engine.update` rejects `_id` changes (`conflict` / HTTP `409`) |
+| **PUT/PATCH zero-match → 404** | After a lost race with concurrent delete, write handlers no longer return `200` with an unstored body |
+| **Safer `yarimport` install** | Unique per-pid staging name; refuse when `file.pid` exists; non-`--force` install via hard link (no silent clobber); do not delete `.pid` after swap |
 
 ### Security
 

@@ -48,6 +48,18 @@ inline auto database_error_response(const yar::db::db_error& error)
             std::optional<::http::headers>{}};
     }
 
+    if(error.code == yar::db::db_error_code::conflict)
+    {
+        auto body = xson::object{
+            {"error", "Conflict"s},
+            {"message", error.message}
+        };
+        return response_with_headers{
+            status_conflict,
+            xson::json::stringify(body),
+            std::optional<::http::headers>{}};
+    }
+
     auto body = xson::object{
         {"error", "Internal Server Error"s},
         {"message", error.message}
@@ -1266,6 +1278,20 @@ private:
                 const auto replaced = m_engine.replace(collection, selector, document, preconditions);
                 if(not replaced)
                     return database_error_response(replaced.error());
+                if(*replaced == 0)
+                {
+                    // Lost the race with a concurrent delete (or similar): do not report success.
+                    auto error = xson::object{
+                        {"error", "Not Found"s},
+                        {"message", "Document not found"s},
+                        {"collection", collection},
+                        {"id", id}
+                    };
+                    return response_with_headers{
+                        status_not_found,
+                        xson::json::stringify(error),
+                        std::optional<::http::headers>{}};
+                }
 
                 auto new_metadata_position = m_engine.metadata_position(collection, selector);
                 if(new_metadata_position.has_value())
@@ -1346,7 +1372,20 @@ private:
             const auto updated = m_engine.update(collection, selector, updates, documents, preconditions);
             if(not updated)
                 return database_error_response(updated.error());
-            
+            if(*updated == 0)
+            {
+                auto error = xson::object{
+                    {"error", "Not Found"s},
+                    {"message", "Document not found"s},
+                    {"collection", collection},
+                    {"id", id}
+                };
+                return response_with_headers{
+                    status_not_found,
+                    xson::json::stringify(error),
+                    std::optional<::http::headers>{}};
+            }
+
             // Add OData metadata if requested
             auto metadata_level = yar::http::odata::parse_metadata_level(headers);
             if(metadata_level != yar::http::odata::metadata_level::none)

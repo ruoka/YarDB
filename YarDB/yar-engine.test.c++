@@ -791,6 +791,42 @@ auto test_set()
             require_eq(history.size(), 1u);
         };
 
+        section("UpdateStatusRestoreFailurePreservesDataOnReopen") = []
+        {
+            // Status-phase failure leaves prior rows marked updated. If rollback
+            // then fails to restore those statuses but still truncates appends,
+            // reopen skips the tombstoned rows and the document is gone.
+            const auto test_file = "./engine_update_status_restore_failure_test.db";
+            const auto setup = fixture{test_file};
+            const auto original_size = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    updates = object{{"value"s, 2ll}};
+                require_true(engine.create("UpdateStatusRestoreFailure"s, document).has_value());
+                const auto selector = object{{"_id"s, document["_id"s]}};
+                const auto size_before_update = std::filesystem::file_size(test_file);
+
+                fail_write(engine, 2);
+                fail_next_rollback_status(engine);
+                const auto result = engine.update("UpdateStatusRestoreFailure"s, selector, updates);
+
+                require_false(result.has_value());
+                require_true(result.error().code == yar::db::db_error_code::rollback_failure);
+                // Appends must be kept when status restore fails — truncating
+                // would discard the only surviving live version after reopen.
+                require_true(std::filesystem::file_size(test_file) > size_before_update);
+                return size_before_update;
+            }();
+            require_true(original_size > 0);
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("UpdateStatusRestoreFailure"s, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{2});
+        };
+
         section("DestroyWriteFailureRollsBack") = []
         {
             const auto test_file = "./engine_destroy_failure_test.db";

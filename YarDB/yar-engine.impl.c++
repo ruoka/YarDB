@@ -444,6 +444,51 @@ std::size_t yar::db::engine::count(std::string_view collection, const yar::db::o
     return index->count(reader, selector);
 }
 
+void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, bool descending)
+{
+    if(not documents.is_array())
+        return;
+
+    auto& items = documents.get<yar::db::object::array>();
+    const auto field_name = std::string{field};
+
+    const auto sortable = [&](const yar::db::object& doc)
+    {
+        if(not doc.has(field_name))
+            return false;
+        const auto& value = doc[field_name];
+        return value.has_value() and not value.is_null();
+    };
+
+    const auto id_of = [](const yar::db::object& doc) -> std::int64_t
+    {
+        if(doc.has("_id"s) and doc["_id"s].is_integer())
+            return static_cast<std::int64_t>(doc["_id"s]);
+        return 0;
+    };
+
+    std::ranges::sort(items, [&](const yar::db::object& lhs, const yar::db::object& rhs)
+    {
+        const auto lhs_present = sortable(lhs);
+        const auto rhs_present = sortable(rhs);
+        if(lhs_present != rhs_present)
+            return lhs_present and not rhs_present;
+
+        if(lhs_present)
+        {
+            const auto& left = lhs[field_name].get<xson::primitive>();
+            const auto& right = rhs[field_name].get<xson::primitive>();
+            if(left != right)
+            {
+                const auto less = std::less<xson::primitive>{}(left, right);
+                return descending ? not less : less;
+            }
+        }
+
+        return id_of(lhs) < id_of(rhs);
+    });
+}
+
 bool yar::db::engine::read(std::string_view collection, const yar::db::object& selector, yar::db::object& documents)
 {
     using xson::fson::operator >>;
@@ -462,6 +507,9 @@ bool yar::db::engine::read(std::string_view collection, const yar::db::object& s
     if(selector.has("$skip"s))
         skip = selector["$skip"s];
 
+    const auto orderby = selector.has("$orderby"s);
+    const auto descending = selector.has("$desc"s);
+
     auto success = false;
     auto reader = open_reader();
 
@@ -474,17 +522,46 @@ bool yar::db::engine::read(std::string_view collection, const yar::db::object& s
         reader >> metadata >> document;
         if(document.match(selector))
         {
-            if(skip > 0)
+            if(not orderby)
             {
-                --skip;
+                if(skip > 0)
+                {
+                    --skip;
+                    continue;
+                }
+
+                documents += std::move(document);
+                success = true;
+                if(--top == 0)
+                    break;
                 continue;
             }
 
             documents += std::move(document);
             success = true;
-            if(--top == 0)
-                break;
         }
+    }
+
+    if(orderby and success)
+    {
+        apply_orderby(documents, static_cast<std::string>(selector["$orderby"s]), descending);
+
+        auto& items = documents.get<yar::db::object::array>();
+        if(skip > 0)
+        {
+            if(static_cast<std::size_t>(skip) >= items.size())
+            {
+                documents = yar::db::object{yar::db::object::array{}};
+                return false;
+            }
+            items.erase(items.begin(), items.begin() + static_cast<std::ptrdiff_t>(skip));
+        }
+        if(top < std::numeric_limits<yar::db::sequence_type>::max()
+            and static_cast<std::size_t>(top) < items.size())
+        {
+            items.resize(static_cast<std::size_t>(top));
+        }
+        success = not items.empty();
     }
 
     return success;

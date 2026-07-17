@@ -8,6 +8,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## July 2026
 
+### Query
+
+| Item | Summary |
+|------|---------|
+| **`$orderby` field sort** | Results sort by the named field (`asc`/`desc`); was previously only reversing `_id` walk order via `$desc` |
+
 ### Storage & tooling
 
 | Item | Summary |

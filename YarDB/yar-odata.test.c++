@@ -1177,6 +1177,90 @@ auto register_odata_tests()
         };
     };
 
+    scenario("parse_orderby and apply_orderby sort by field name, [yardb]") = []
+    {
+        given("Orderby expressions and an out-of-id document array") = []
+        {
+            when("Parsing field desc and asc") = []
+            {
+                then("Field name and descending flag are extracted") = []
+                {
+                    const auto desc = parse_orderby("value desc"sv);
+                    check_eq(desc.field_name, "value"s);
+                    require_true(desc.descending);
+
+                    const auto asc = parse_orderby("value asc"sv);
+                    check_eq(asc.field_name, "value"s);
+                    require_false(asc.descending);
+
+                    const auto bare = parse_orderby("age"sv);
+                    check_eq(bare.field_name, "age"s);
+                    require_false(bare.descending);
+                };
+            };
+
+            when("Sorting documents whose _id order differs from value order") = []
+            {
+                then("Ascending and descending follow the field") = []
+                {
+                    auto documents = xson::object{xson::object::array{
+                        xson::object{{"_id"s, 1ll}, {"value"s, 30ll}},
+                        xson::object{{"_id"s, 2ll}, {"value"s, 10ll}},
+                        xson::object{{"_id"s, 3ll}, {"value"s, 20ll}}
+                    }};
+
+                    yar::db::apply_orderby(documents, "value"sv, false);
+                    const auto& asc = documents.get<xson::object::array>();
+                    require_eq(asc.size(), 3u);
+                    check_eq(static_cast<xson::integer_type>(asc[0]["value"s]), 10);
+                    check_eq(static_cast<xson::integer_type>(asc[1]["value"s]), 20);
+                    check_eq(static_cast<xson::integer_type>(asc[2]["value"s]), 30);
+
+                    yar::db::apply_orderby(documents, "value"sv, true);
+                    const auto& desc = documents.get<xson::object::array>();
+                    check_eq(static_cast<xson::integer_type>(desc[0]["value"s]), 30);
+                    check_eq(static_cast<xson::integer_type>(desc[1]["value"s]), 20);
+                    check_eq(static_cast<xson::integer_type>(desc[2]["value"s]), 10);
+                };
+            };
+
+            when("OR filter merge applies orderby before top") = []
+            {
+                const auto test_file = "./odata_orderby_or_test.db"s;
+
+                then("Highest value wins with $orderby desc and $top") = [test_file]
+                {
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+
+                    auto engine = yar::db::engine{test_file};
+                    auto a = xson::object{{"status"s, "a"s}, {"value"s, 30ll}};
+                    auto b = xson::object{{"status"s, "b"s}, {"value"s, 10ll}};
+                    auto c = xson::object{{"status"s, "a"s}, {"value"s, 20ll}};
+                    require_true(engine.create("items"s, a).has_value());
+                    require_true(engine.create("items"s, b).has_value());
+                    require_true(engine.create("items"s, c).has_value());
+
+                    const auto parsed = parse_filter("status eq 'a' or status eq 'b'"sv);
+                    auto selector = xson::object{
+                        {"$orderby"s, "value"s},
+                        {"$desc"s, true},
+                        {"$top"s, 2ll}
+                    };
+                    const auto docs = read_with_parsed_filter(engine, "items"s, selector, parsed);
+                    require_true(docs.is_array());
+                    const auto& items = docs.get<xson::object::array>();
+                    require_eq(items.size(), 2u);
+                    check_eq(static_cast<xson::integer_type>(items[0]["value"s]), 30);
+                    check_eq(static_cast<xson::integer_type>(items[1]["value"s]), 20);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
     scenario("apply_expand nests related documents by singular_id, [yardb]") = []
     {
         given("An engine with customers and orders") = []

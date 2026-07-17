@@ -195,13 +195,14 @@ test_orderby() {
   local coll
   coll="$(collection orderby)"
 
+  # Seed so _id order is 30, 10, 20 — first by _id desc would be 20, not 30
   run_yarsh "$(cat <<EOF
+POST /${coll}
+{"name":"high","value":30}
 POST /${coll}
 {"name":"low","value":10}
 POST /${coll}
 {"name":"mid","value":20}
-POST /${coll}
-{"name":"high","value":30}
 GET /${coll}?\$orderby=value%20desc
 EXIT
 EOF

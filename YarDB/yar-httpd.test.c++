@@ -529,71 +529,60 @@ auto test_set()
 
         section("GET with $orderby desc query parameter returns descending order") = [setup]
         {
-            // Create multiple documents
-            for(int i = 1; i <= 3; ++i)
+            // Insert out of value order so _id desc ≠ value desc
+            for(const auto value : {30, 10, 20})
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    setup->port(),
+                    "POST"s,
+                    "/orderbyitems"s,
+                    R"({"name":"v)"s + std::to_string(value) + R"(", "value":)"s + std::to_string(value) + R"(})"s
                 );
                 require_eq(post_status, "201"s);
-                // Small delay to ensure server processes request
-                std::this_thread::sleep_for(50ms);
             }
-            
-            // Get collection with $orderby desc
-            // Note: Space in "field desc" must be URL-encoded as %20
+
             auto [status, reason, headers, response_body] = make_request(
-                setup->port(), "GET"s, "/testitems?$orderby=field%20desc"s, ""s
+                setup->port(), "GET"s, "/orderbyitems?$orderby=value%20desc"s, ""s
             );
 
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
-            
-            // Verify response is valid JSON (array format)
+
             auto documents = json::parse(response_body);
             require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_eq(items.size(), 3u);
+            require_eq(static_cast<xson::integer_type>(items[0]["value"s]), 30);
+            require_eq(static_cast<xson::integer_type>(items[1]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(items[2]["value"s]), 10);
         };
 
         section("GET with $top and $orderby combined") = [setup]
         {
-            // Create multiple documents
-            for(int i = 1; i <= 5; ++i)
+            for(const auto value : {50, 10, 40, 20, 30})
             {
                 auto [post_status, post_reason, post_headers, post_body] = make_request(
-                    setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                    setup->port(),
+                    "POST"s,
+                    "/orderbytop"s,
+                    R"({"name":"v)"s + std::to_string(value) + R"(", "value":)"s + std::to_string(value) + R"(})"s
                 );
-                // Allow retry if server is busy
-                if(post_status != "201"s)
-                {
-                    std::this_thread::sleep_for(100ms);
-                    auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
-                        setup->port(), "POST"s, "/testitems"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
-                    );
-                    require_eq(retry_status, "201"s);
-                }
-                else
-                {
-                    require_eq(post_status, "201"s);
-                }
-                // Small delay to ensure server processes request
-                std::this_thread::sleep_for(100ms);
+                require_eq(post_status, "201"s);
             }
-            
-            // Get collection with $top=2 and $orderby desc
-            // Note: Space in "field desc" needs to be URL-encoded as %20
+
             auto [status, reason, headers, response_body] = make_request(
-                setup->port(), "GET"s, "/testitems?$top=2&$orderby=field%20desc"s, ""s
+                setup->port(), "GET"s, "/orderbytop?$top=2&$orderby=value%20desc"s, ""s
             );
 
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
-            
-            // Verify response contains at most 2 items
-            // Response is an array, not an object with collection name
+
             auto documents = json::parse(response_body);
             require_true(documents.is_array());
             const auto& items = documents.get<object::array>();
-            require_true(items.size() <= 2);
+            require_eq(items.size(), 2u);
+            require_eq(static_cast<xson::integer_type>(items[0]["value"s]), 50);
+            require_eq(static_cast<xson::integer_type>(items[1]["value"s]), 40);
         };
 
         section("GET with $skip query parameter skips first N results") = [setup]

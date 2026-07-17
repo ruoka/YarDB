@@ -440,6 +440,47 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 2u);
         };
 
+        section("ReadOrderByFieldIgnoresIdOrder") = [test_file]
+        {
+            // Insert so _id order is 30, 10, 20 — field order must not follow _id.
+            auto engine = yar::db::engine{test_file};
+            auto high = object{{"value"s, 30ll}, {"name"s, "high"s}},
+                low = object{{"value"s, 10ll}, {"name"s, "low"s}},
+                mid = object{{"value"s, 20ll}, {"name"s, "mid"s}},
+                documents = object{};
+            require_true(engine.create("OrderByField"s, high).has_value());
+            require_true(engine.create("OrderByField"s, low).has_value());
+            require_true(engine.create("OrderByField"s, mid).has_value());
+
+            auto asc = object{{"$orderby"s, "value"s}};
+            require_true(engine.read("OrderByField"s, asc, documents));
+            require_eq(documents.size(), 3u);
+            require_eq(documents[0]["value"s], 10ll);
+            require_eq(documents[1]["value"s], 20ll);
+            require_eq(documents[2]["value"s], 30ll);
+
+            auto desc = object{{"$orderby"s, "value"s}, {"$desc"s, true}};
+            documents = object{};
+            require_true(engine.read("OrderByField"s, desc, documents));
+            require_eq(documents[0]["value"s], 30ll);
+            require_eq(documents[1]["value"s], 20ll);
+            require_eq(documents[2]["value"s], 10ll);
+
+            auto top_desc = object{{"$orderby"s, "value"s}, {"$desc"s, true}, {"$top"s, 2ll}};
+            documents = object{};
+            require_true(engine.read("OrderByField"s, top_desc, documents));
+            require_eq(documents.size(), 2u);
+            require_eq(documents[0]["value"s], 30ll);
+            require_eq(documents[1]["value"s], 20ll);
+
+            auto skip_asc = object{{"$orderby"s, "value"s}, {"$skip"s, 1ll}};
+            documents = object{};
+            require_true(engine.read("OrderByField"s, skip_asc, documents));
+            require_eq(documents.size(), 2u);
+            require_eq(documents[0]["value"s], 20ll);
+            require_eq(documents[1]["value"s], 30ll);
+        };
+
         section("TypedNumericIndexSurvivesRestart") = []
         {
             const auto test_file = "./engine_typed_index_restart_test.db";

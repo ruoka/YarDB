@@ -195,4 +195,9 @@ private:
     bool m_writable = true;
 };
 
+// Sort a document array by a field (OData $orderby). Missing/non-primitive
+// values sort after present ones; ties break on _id ascending. When descending,
+// field order is reversed; missing values stay last.
+void apply_orderby(object& documents, std::string_view field, bool descending);
+
 } // namespace yar::db

@@ -165,7 +165,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$skip=n`** - Skip number of results (pagination)
   - Example: `GET /users?$skip=20`
 
-- **`$orderby=field [desc]`** - Sort results
+- **`$orderby=field [asc|desc]`** - Sort by that field (single field; default ascending). Applied after `$filter`, before `$skip`/`$top`.
   - Example: `GET /users?$orderby=age desc`
 
 - **`$filter=expression`** - Filter documents

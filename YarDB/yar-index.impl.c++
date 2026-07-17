@@ -185,7 +185,7 @@ void remove_position(yar::db::positions_type& positions, yar::db::position_type 
 
 bool is_pagination_key(const std::string& key)
 {
-    return key == "$top"s or key == "$skip"s or key == "$desc"s;
+    return key == "$top"s or key == "$skip"s or key == "$desc"s or key == "$orderby"s;
 }
 
 auto selector_count_keys(const yar::db::object& selector)

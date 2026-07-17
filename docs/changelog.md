@@ -18,6 +18,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **Secondary indexes skip object/array values** | `index::insert`/`erase` ignore non-primitive field values so create/reindex/restart cannot throw `bad_variant_access` and brick the database |
 | **PUT no longer persists OData annotations** | Response-only `@odata.*` fields are added after `replace`/`create`, matching POST/PATCH — they are not written into stored documents |
 | **`replace` preserves history** | Reuses prior metadata so `previous` chains, and marks old live records as `updated` (not `deleted`) |
 | **`yarexport` refuses live lock** | Exits non-zero when `--file.pid` is present, matching `yarimport` |

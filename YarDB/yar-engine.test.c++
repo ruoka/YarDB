@@ -580,6 +580,51 @@ auto test_set()
             require_eq(documents[0]["value"s], xson::integer_type{1});
         };
 
+        section("NestedSecondaryIndexDoesNotBrickRestart") = []
+        {
+            // Indexing an object/array field used to throw bad_variant_access from
+            // make_secondary_key after the create flush — and again in populate_indexes
+            // on reopen, leaving the database unopenable.
+            const auto test_file = "./engine_nested_secondary_restart.db";
+            std::remove(test_file);
+            std::remove((std::string{test_file} + ".pid").c_str());
+
+            {
+                auto engine = yar::db::engine{test_file};
+                auto nested = object{
+                    {"address"s, object{{"city"s, "NYC"s}}},
+                    {"name"s, "nested"s}
+                };
+                auto primitive = object{{"address"s, "plain"s}, {"name"s, "flat"s}};
+                require_true(engine.create("NestedIdx"s, nested).has_value());
+                require_true(engine.index("NestedIdx"s, {"address"s}).has_value());
+                require_true(engine.reindex().has_value());
+                require_true(engine.create("NestedIdx"s, primitive).has_value());
+
+                auto by_plain = object{{"address"s, "plain"s}};
+                auto documents = object{};
+                require_true(engine.read("NestedIdx"s, by_plain, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["name"s].get<string>(), "flat"s);
+            }
+
+            {
+                auto engine = yar::db::engine{test_file};
+                auto all = object{};
+                auto documents = object{};
+                require_true(engine.read("NestedIdx"s, all, documents));
+                require_eq(documents.size(), 2u);
+
+                auto by_plain = object{{"address"s, "plain"s}};
+                documents = object{};
+                require_true(engine.read("NestedIdx"s, by_plain, documents));
+                require_eq(documents.size(), 1u);
+            }
+
+            std::remove(test_file);
+            std::remove((std::string{test_file} + ".pid").c_str());
+        };
+
         section("IndexOnlyCount") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

@@ -905,9 +905,10 @@ auto test_set()
                 "DestroyStatusRestoreFailure"s,
                 object{{"_id"s, deleted_id}},
                 documents));
+            auto successor = object{{"value"s, 2ll}};
             require_true(reopened.create(
                 "DestroyStatusRestoreFailure"s,
-                object{{"value"s, 2ll}}).has_value());
+                successor).has_value());
         };
 
         section("ReplaceWriteFailureRollsBack") = []

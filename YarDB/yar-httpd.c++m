@@ -48,6 +48,18 @@ inline auto database_error_response(const yar::db::db_error& error)
             std::optional<::http::headers>{}};
     }
 
+    if(error.code == yar::db::db_error_code::conflict)
+    {
+        auto body = xson::object{
+            {"error", "Conflict"s},
+            {"message", error.message}
+        };
+        return response_with_headers{
+            status_conflict,
+            xson::json::stringify(body),
+            std::optional<::http::headers>{}};
+    }
+
     auto body = xson::object{
         {"error", "Internal Server Error"s},
         {"message", error.message}

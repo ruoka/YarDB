@@ -384,6 +384,26 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
 
     auto staged = m_index;
     auto& index = staged[std::string{collection}];
+
+    // Client-/import-supplied _id must not clobber an existing primary key.
+    // index::insert overwrites m_primary_keys[id], which orphans the prior
+    // live record and can leave secondary indexes pointing at the old position.
+    if(document.has("_id"s))
+    {
+        if(not document["_id"s].is_integer())
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::create,
+                "Document _id must be an integer"s)};
+
+        const auto id = static_cast<yar::db::sequence_type>(document["_id"s]);
+        if(index.contains_id(id))
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::create,
+                "Document with _id "s + std::to_string(id) + " already exists"s)};
+    }
+
     auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);

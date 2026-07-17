@@ -207,6 +207,33 @@ auto test_set()
             require_eq(name, "Test Item"s);
         };
 
+        section("POST with duplicate _id returns 409 Conflict") = [setup]
+        {
+            auto [created_status, created_reason, created_headers, created_body] = make_request(
+                setup->port(), "POST"s, "/dupids"s, R"({"name":"alice"})"s
+            );
+            require_eq(created_status, "201"s);
+            const auto created = json::parse(created_body);
+            require_true(created.has("_id"s));
+            const auto id = static_cast<long long>(created["_id"s]);
+
+            auto duplicate_body = R"({"_id":)"s + std::to_string(id) + R"(,"name":"eve"})"s;
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/dupids"s, duplicate_body
+            );
+            require_eq(status, "409"s);
+            require_eq(reason, "Conflict"s);
+            auto error = json::parse(response_body);
+            require_eq(static_cast<string>(error["error"s]), "Conflict"s);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/dupids/"s + std::to_string(id), ""s
+            );
+            require_eq(get_status, "200"s);
+            const auto remaining = json::parse(get_body);
+            require_eq(static_cast<string>(remaining["name"s]), "alice"s);
+        };
+
         section("POST storage failure returns 500 Internal Server Error") = [setup]
         {
             fail_next_write(setup->get_server());

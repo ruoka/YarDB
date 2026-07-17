@@ -332,7 +332,7 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 
 #### Data Operations
 
-- `POST /collection` - Create a new document (JSON body follows)
+- `POST /collection` - Create a new document (JSON body follows). Optional integer `_id` is allowed when unused; duplicate `_id` returns `409 Conflict`
 - `PUT /collection/id` - Replace document by ID (JSON body follows)
 - `PATCH /collection/id` - Update an existing document (`404` if missing; JSON body follows)
 - `GET /collection/{id}` - Read document by ID

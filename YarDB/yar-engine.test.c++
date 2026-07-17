@@ -455,30 +455,30 @@ auto test_set()
             auto asc = object{{"$orderby"s, "value"s}};
             require_true(engine.read("OrderByField"s, asc, documents));
             require_eq(documents.size(), 3u);
-            require_eq(documents[0]["value"s], 10ll);
-            require_eq(documents[1]["value"s], 20ll);
-            require_eq(documents[2]["value"s], 30ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 10);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(documents[2]["value"s]), 30);
 
             auto desc = object{{"$orderby"s, "value"s}, {"$desc"s, true}};
             documents = object{};
             require_true(engine.read("OrderByField"s, desc, documents));
-            require_eq(documents[0]["value"s], 30ll);
-            require_eq(documents[1]["value"s], 20ll);
-            require_eq(documents[2]["value"s], 10ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 30);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(documents[2]["value"s]), 10);
 
             auto top_desc = object{{"$orderby"s, "value"s}, {"$desc"s, true}, {"$top"s, 2ll}};
             documents = object{};
             require_true(engine.read("OrderByField"s, top_desc, documents));
             require_eq(documents.size(), 2u);
-            require_eq(documents[0]["value"s], 30ll);
-            require_eq(documents[1]["value"s], 20ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 30);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 20);
 
             auto skip_asc = object{{"$orderby"s, "value"s}, {"$skip"s, 1ll}};
             documents = object{};
             require_true(engine.read("OrderByField"s, skip_asc, documents));
             require_eq(documents.size(), 2u);
-            require_eq(documents[0]["value"s], 20ll);
-            require_eq(documents[1]["value"s], 30ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 20);
+            require_eq(static_cast<xson::integer_type>(documents[1]["value"s]), 30);
         };
 
         section("TypedNumericIndexSurvivesRestart") = []

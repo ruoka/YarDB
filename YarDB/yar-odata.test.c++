@@ -1258,6 +1258,41 @@ auto register_odata_tests()
                     std::remove((test_file + ".pid").c_str());
                 };
             };
+
+            when("contains post-filter runs before $top") = []
+            {
+                const auto test_file = "./odata_contains_top_test.db"s;
+
+                then("Matching rows outside the unfiltered window are not dropped") = [test_file]
+                {
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+
+                    auto engine = yar::db::engine{test_file};
+                    // First two docs do not match contains; later ones do.
+                    // If $top is applied before the string filter, $top=2 yields [].
+                    auto skip1 = xson::object{{"email"s, "a@test.com"s}};
+                    auto skip2 = xson::object{{"email"s, "b@test.com"s}};
+                    auto hit1 = xson::object{{"email"s, "c@example.com"s}};
+                    auto hit2 = xson::object{{"email"s, "d@example.org"s}};
+                    require_true(engine.create("users"s, skip1).has_value());
+                    require_true(engine.create("users"s, skip2).has_value());
+                    require_true(engine.create("users"s, hit1).has_value());
+                    require_true(engine.create("users"s, hit2).has_value());
+
+                    const auto parsed = parse_filter("contains(email, '@example')"sv);
+                    auto selector = xson::object{{"$top"s, 2ll}};
+                    const auto docs = read_with_parsed_filter(engine, "users"s, selector, parsed);
+                    require_true(docs.is_array());
+                    const auto& items = docs.get<xson::object::array>();
+                    require_eq(items.size(), 2u);
+                    check_eq(static_cast<std::string>(items[0]["email"s]), "c@example.com"s);
+                    check_eq(static_cast<std::string>(items[1]["email"s]), "d@example.org"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
         };
     };
 

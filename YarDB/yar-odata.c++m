@@ -791,6 +791,49 @@ export inline auto apply_top_skip(
     return documents;
 }
 
+// Peel OData paging/sort keys from a selector so callers can filter first,
+// then apply $orderby / $skip / $top (OR path and post-filter AND path).
+struct query_paging
+{
+    xson::integer_type top = std::numeric_limits<xson::integer_type>::max();
+    xson::integer_type skip = 0;
+    std::string orderby_field;
+    bool descending = false;
+};
+
+inline auto extract_and_strip_paging(xson::object& selector) -> query_paging
+{
+    auto paging = query_paging{};
+
+    if(not selector.has_objects())
+        return paging;
+
+    auto& keys = selector.get<xson::object::map>();
+
+    if(selector.has("$top"s))
+    {
+        paging.top = selector["$top"s];
+        keys.erase("$top"s);
+    }
+    if(selector.has("$skip"s))
+    {
+        paging.skip = selector["$skip"s];
+        keys.erase("$skip"s);
+    }
+    if(selector.has("$orderby"s))
+    {
+        paging.orderby_field = static_cast<std::string>(selector["$orderby"s]);
+        keys.erase("$orderby"s);
+    }
+    if(selector.has("$desc"s))
+    {
+        paging.descending = true;
+        keys.erase("$desc"s);
+    }
+
+    return paging;
+}
+
 // Filter an in-memory array to documents matching any OR branch (unit tests)
 export inline auto filter_documents_by_or(
     const xson::object& documents,
@@ -857,6 +900,8 @@ export inline auto count_with_parsed_filter(
 
     if(not string_filters.empty())
     {
+        // Count must ignore $top/$skip — strip in case a caller left them in.
+        std::ignore = extract_and_strip_paging(query_selector);
         auto documents = xson::object{};
         engine.read(collection, query_selector, documents);
         documents = apply_string_filters(documents, string_filters);
@@ -878,20 +923,7 @@ export inline auto read_with_parsed_filter(
 {
     if(filter.has_or())
     {
-        auto top = std::numeric_limits<xson::integer_type>::max();
-        auto skip = xson::integer_type{0};
-        auto orderby_field = std::string{};
-        auto descending = false;
-
-        if(query_selector.has("$top"s))
-            top = query_selector["$top"s];
-        if(query_selector.has("$skip"s))
-            skip = query_selector["$skip"s];
-        if(query_selector.has("$orderby"s))
-        {
-            orderby_field = static_cast<std::string>(query_selector["$orderby"s]);
-            descending = query_selector.has("$desc"s);
-        }
+        const auto paging = extract_and_strip_paging(query_selector);
 
         auto merged = xson::object{xson::object::array{}};
         auto seen_ids = std::unordered_set<xson::integer_type>{};
@@ -905,10 +937,10 @@ export inline auto read_with_parsed_filter(
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
 
-        if(not orderby_field.empty())
-            yar::db::apply_orderby(merged, orderby_field, descending);
+        if(not paging.orderby_field.empty())
+            yar::db::apply_orderby(merged, paging.orderby_field, paging.descending);
 
-        return apply_top_skip(merged, skip, top);
+        return apply_top_skip(merged, paging.skip, paging.top);
     }
 
     merge_selector_into(query_selector, filter.and_selector);
@@ -916,9 +948,23 @@ export inline auto read_with_parsed_filter(
     auto string_filters = filter.and_string_filters;
     lower_startswith_filters(engine, collection, query_selector, string_filters);
 
+    // Post-filter functions (contains/endswith/non-indexed startswith) must run
+    // before $top/$skip/$orderby. Otherwise paging is applied to the unfiltered
+    // scan and matching rows outside the window are silently dropped.
+    if(not string_filters.empty())
+    {
+        const auto paging = extract_and_strip_paging(query_selector);
+        auto documents = xson::object{};
+        engine.read(collection, query_selector, documents);
+        documents = apply_string_filters(documents, string_filters);
+        if(not paging.orderby_field.empty())
+            yar::db::apply_orderby(documents, paging.orderby_field, paging.descending);
+        return apply_top_skip(documents, paging.skip, paging.top);
+    }
+
     auto documents = xson::object{};
     engine.read(collection, query_selector, documents);
-    return apply_string_filters(documents, string_filters);
+    return documents;
 }
 
 // Relationship convention (v1): collection names are plural snake_case; a reference

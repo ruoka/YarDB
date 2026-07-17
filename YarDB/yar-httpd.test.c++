@@ -527,6 +527,27 @@ auto test_set()
             require_true(items.size() <= 2);
         };
 
+        section("GET with $top=0 returns an empty array") = [setup]
+        {
+            for(int i = 1; i <= 3; ++i)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/topzero"s, R"({"name":"Item )"s + std::to_string(i) + R"("})"s
+                );
+                require_eq(post_status, "201"s);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/topzero?$top=0"s, ""s
+            );
+
+            // Empty page is still a successful query; body must not dump the collection.
+            require_eq(status, "200"s);
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            require_eq(documents.get<object::array>().size(), 0u);
+        };
+
         section("GET with $orderby desc query parameter returns descending order") = [setup]
         {
             // Insert out of value order so _id desc ≠ value desc

@@ -790,6 +790,36 @@ auto register_odata_tests()
                     require_eq(filtered[0]["name"s].get<string>(), "Alice"s);
                 };
             };
+
+            when("Scalar filter targets an object-valued field") = [docs]
+            {
+                then("Matches nothing and does not throw") = [docs]
+                {
+                    // Customer is a nested object; Customer eq/ne must not
+                    // throw bad_variant_access or falsely match every document.
+                    const auto eq = parse_filter("Customer eq 'Acme'"sv);
+                    require_false(eq.has_or());
+
+                    auto eq_matches = 0u;
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        if(doc.match(eq.and_selector))
+                            ++eq_matches;
+                    }
+                    require_eq(eq_matches, 0u);
+
+                    const auto ne = parse_filter("Customer ne 'Acme'"sv);
+                    require_false(ne.has_or());
+
+                    auto ne_matches = 0u;
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        if(doc.match(ne.and_selector))
+                            ++ne_matches;
+                    }
+                    require_eq(ne_matches, 0u);
+                };
+            };
         };
     };
 

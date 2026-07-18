@@ -18,6 +18,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Same-field `$ne` AND** | `status ne 'a' and status ne 'b'` unions exclusions (`$nin`) instead of last-write-wins keeping only the second inequality |
 | **Multi-op `$count` vs match** | Indexed `$count=true` for AND-merged multi-op field maps (`$eq`+range, `$gt`+`$gte`) falls back to scan+match so count matches GET results |
 | **`$orderby` field sort** | Results sort by the named field (`asc`/`desc`); was previously only reversing `_id` walk order via `$desc` |
+| **Object field vs scalar `$filter`** | Nested object/array fields no longer match scalar `$eq`/`$ne`/`$gt`/`$in`/`$nin` (and bare `eq` no longer throws); use `Customer/Country` paths for nested documents |
 
 ### Storage & tooling
 

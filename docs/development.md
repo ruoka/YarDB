@@ -263,7 +263,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 0. 📊 OData query surface
 - **Checklist**: [odata.md](odata.md) — supported today vs pipeline
-- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`)
+- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`)
 - **`$apply` groupby/aggregate**: ✅ v1 shipped — `groupby((field),aggregate(amount with sum as Total))` (+ `average`/`min`/`max`); optional `$filter` before aggregate
 - **Next**: deeper `$expand` (overrides, multi-valued refs) beyond `{singular}_id`; richer `$apply` (multi-key, transform chains)
 

@@ -1417,6 +1417,67 @@ auto test_set()
             }
         };
 
+        section("GET with $filter - not contains(email, '@example')") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/users3?$filter=not%20contains(email,'@example')"s,
+                ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_true(items.size() >= 1);
+
+            for(const auto& item : items)
+            {
+                if(not item.has("email"s))
+                    continue;
+                const string email = item["email"s];
+                require_true(email.find("@example"s) == std::string::npos);
+            }
+        };
+
+        section("GET with $filter - not status eq 'deleted'") = [setup]
+        {
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(),
+                "POST"s,
+                "/usersnot"s,
+                R"({"name":"Keep","status":"active"})"s
+            );
+            require_eq(post_status, "201"s);
+            std::this_thread::sleep_for(100ms);
+
+            auto [post2_status, post2_reason, post2_headers, post2_body] = make_request(
+                setup->port(),
+                "POST"s,
+                "/usersnot"s,
+                R"({"name":"Drop","status":"deleted"})"s
+            );
+            require_eq(post2_status, "201"s);
+            std::this_thread::sleep_for(100ms);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/usersnot?$filter=not%20status%20eq%20'deleted'"s,
+                ""s
+            );
+
+            require_eq(status, "200"s);
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            const auto& items = documents.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(items[0]["name"s].get<string>(), "Keep"s);
+        };
+
         section("GET with $filter - endswith(path, '.pdf')") = [setup]
         {
             // Create test documents with different file paths

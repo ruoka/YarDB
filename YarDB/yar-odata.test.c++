@@ -23,6 +23,16 @@ inline auto parse_and_filter(std::string_view expr)
     return std::make_pair(parsed.and_selector, parsed.and_string_filters);
 }
 
+inline auto filter_by_parsed(const object& docs, const parsed_filter& parsed)
+{
+    if(parsed.has_or())
+        return filter_documents_by_or(docs, parsed.or_branches);
+
+    const auto branches = std::vector<filter_branch>{
+        filter_branch{parsed.and_selector, parsed.and_string_filters}};
+    return filter_documents_by_or(docs, branches);
+}
+
 auto register_odata_tests()
 {
     using namespace tester::bdd;
@@ -1196,6 +1206,97 @@ auto register_odata_tests()
                     require_eq(items.size(), 2u);
                     require_eq(items[0]["name"s].get<string>(), "Alice"s);
                     require_eq(items[1]["name"s].get<string>(), "Bob"s);
+                };
+            };
+        };
+    };
+
+    scenario("parse_filter not operator matches documents, [yardb]") = []
+    {
+        given("Documents with name, email, and status") = []
+        {
+            auto docs = object{object::array{
+                object{{"_id"s, 1ll}, {"name"s, "Alice"s}, {"email"s, "alice@example.com"s}, {"status"s, "active"s}},
+                object{{"_id"s, 2ll}, {"name"s, "Bob"s}, {"email"s, "bob@test.com"s}, {"status"s, "deleted"s}},
+                object{{"_id"s, 3ll}, {"name"s, "Charlie"s}, {"email"s, "charlie@example.com"s}, {"status"s, "active"s}},
+                object{{"_id"s, 4ll}, {"name"s, "Dana"s}, {"status"s, "active"s}}
+            }};
+
+            when("Filter is not status eq 'deleted'") = [docs]
+            {
+                then("Rewrites to ne and excludes deleted") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("not status eq 'deleted'"sv);
+                    require_true(filters.empty());
+                    require_true(selector["status"s].has("$ne"s));
+
+                    const auto result = filter_by_parsed(docs, parse_filter("not status eq 'deleted'"sv));
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 3u);
+                };
+            };
+
+            when("Filter is not contains(email, '@example')") = [docs]
+            {
+                then("Keeps docs without the substring including missing email") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("not contains(email, '@example')"sv);
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_true(filters[0].negated);
+
+                    const auto result = filter_by_parsed(
+                        docs, parse_filter("not contains(email, '@example')"sv));
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 2u);
+                    require_eq(items[0]["name"s].get<string>(), "Bob"s);
+                    require_eq(items[1]["name"s].get<string>(), "Dana"s);
+                };
+            };
+
+            when("Filter is not (status eq 'active' and contains(email, '@example'))") = [docs]
+            {
+                then("Applies De Morgan across comparison and string filter") = [docs]
+                {
+                    const auto parsed = parse_filter(
+                        "not (status eq 'active' and contains(email, '@example'))"sv);
+                    require_true(parsed.has_or());
+
+                    const auto result = filter_by_parsed(docs, parsed);
+                    const auto& items = result.get<object::array>();
+                    // Alice/Charlie match the inner AND → excluded; Bob and Dana remain.
+                    require_eq(items.size(), 2u);
+                    require_eq(items[0]["name"s].get<string>(), "Bob"s);
+                    require_eq(items[1]["name"s].get<string>(), "Dana"s);
+                };
+            };
+
+            when("Filter is not status eq 'deleted' and contains(email, '@example')") = [docs]
+            {
+                then("not binds tighter than and") = [docs]
+                {
+                    const auto result = filter_by_parsed(
+                        docs,
+                        parse_filter("not status eq 'deleted' and contains(email, '@example')"sv));
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 2u);
+                    require_eq(items[0]["name"s].get<string>(), "Alice"s);
+                    require_eq(items[1]["name"s].get<string>(), "Charlie"s);
+                };
+            };
+
+            when("Filter is not not contains(name, 'li')") = [docs]
+            {
+                then("Double negation restores positive contains") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("not not contains(name, 'li')"sv);
+                    require_eq(filters.size(), 1u);
+                    require_false(filters[0].negated);
+
+                    const auto result = filter_by_parsed(
+                        docs, parse_filter("not not contains(name, 'li')"sv));
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 2u); // Alice, Charlie
                 };
             };
         };

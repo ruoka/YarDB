@@ -21,11 +21,11 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | Feature | Notes |
 |---------|--------|
 | Comparisons | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
-| Logic | `and`, `or` (AND binds tighter than OR) |
+| Logic | `not`, `and`, `or` (precedence: `not` > `and` > `or`) |
 | `in` | Strings or numbers |
 | Nested paths | `Customer/Country eq 'USA'` |
-| `startswith` | Index-backed on top-level secondary keys |
-| `contains` / `endswith` | Post-filter only |
+| `startswith` | Index-backed on top-level secondary keys (not when negated) |
+| `contains` / `endswith` | Post-filter only; `not contains` / `not endswith` supported |
 
 ### Metadata & format
 
@@ -55,7 +55,6 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 | `$search` | `$search=wireless` |
 | `$compute` | `$compute=Price mul Qty as LineTotal` |
 | `$skiptoken` / `@odata.nextLink` | Server-driven paging |
-| Boolean `not` in `$filter` | `not (status eq 'deleted')` |
 | Collection lambdas | `Lines/any(l:l/Qty gt 0)` |
 | Richer string/date functions | `indexof`, `tolower`, `year(...)` |
 | `$batch` | `POST /$batch` |

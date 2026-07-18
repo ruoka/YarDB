@@ -171,13 +171,13 @@ YarDB implements OData-compliant query parameters for advanced querying:
 
 - **`$filter=expression`** - Filter documents
   - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
-  - Logical operators: `and`, `or` (OData precedence: AND before OR)
+  - Logical operators: `not`, `and`, `or` (OData precedence: `not` > `and` > `or`)
   - `in` operator: `status in ('active','pending')` or `id in (1, 2, 3)`
   - Nested paths: `Customer/Country eq 'USA'`, `startswith(Customer/Name, 'Ac')` (nested objects only)
   - String functions:
     - `startswith(field, 'prefix')` — index-backed when `field` is a top-level secondary index key; otherwise post-filter
     - `contains(field, 'substring')`, `endswith(field, 'suffix')` — post-filter only
-  - Example: `GET /users?$filter=status ne 'deleted'`, `GET /users?$filter=startswith(name,'A')` (requires `name` indexed)
+  - Example: `GET /users?$filter=status ne 'deleted'`, `GET /users?$filter=not%20contains(email,'@example')`, `GET /users?$filter=startswith(name,'A')` (requires `name` indexed)
   - Indexed primitive types remain distinct (`1`, `1.0`, `"1"`, and `true` are separate keys); numeric ranges use numeric ordering
 
 - **`$select=field1,field2`** - Project specific fields

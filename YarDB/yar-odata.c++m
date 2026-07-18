@@ -180,6 +180,7 @@ export struct string_filter
     std::string_view function;  // "startswith", "contains", "endswith" (string literals)
     std::string field;          // Field name (copied; may be nested path)
     std::string value;          // Filter value (owned so OData '' escapes can be unescaped)
+    bool negated = false;       // true for `not contains(...)` / `not startswith(...)` / …
 };
 
 // One branch of an OData OR expression (selector AND string filters within the branch)
@@ -602,6 +603,85 @@ inline auto make_in_selector(std::string_view field, std::span<const xson::objec
 
 using filter_clause = std::pair<xson::object, std::vector<string_filter>>;
 
+// Negate one operator-constraint leaf ($eq/$ne/$gt/… or bare equality value).
+inline xson::object negate_constraint_leaf(const xson::object& leaf)
+{
+    if(is_operator_constraint_map(leaf))
+    {
+        if(leaf.has("$eq"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$ne"s, leaf["$eq"s]}};
+        if(leaf.has("$ne"s) and leaf.get<db::object::map>().size() == 1)
+            return leaf["$ne"s]; // bare equality
+        if(leaf.has("$gt"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$lte"s, leaf["$gt"s]}};
+        if(leaf.has("$gte"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$lt"s, leaf["$gte"s]}};
+        if(leaf.has("$lt"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$gte"s, leaf["$lt"s]}};
+        if(leaf.has("$lte"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$gt"s, leaf["$lte"s]}};
+        if(leaf.has("$in"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$nin"s, leaf["$in"s]}};
+        if(leaf.has("$nin"s) and leaf.get<db::object::map>().size() == 1)
+            return xson::object{{"$in"s, leaf["$nin"s]}};
+
+        // Multi-op maps are exploded before negate; fall back to impossible→empty.
+        throw std::invalid_argument{"Cannot negate compound operator map in $filter"};
+    }
+
+    // Bare equality value → $ne
+    return xson::object{{"$ne"s, leaf}};
+}
+
+// Walk a selector into path + leaf atoms (AND conjuncts).
+inline void collect_selector_atoms(
+    const xson::object& node,
+    std::string_view path_prefix,
+    std::vector<std::pair<std::string, xson::object>>& atoms)
+{
+    if(not node.has_objects())
+    {
+        if(path_prefix.empty())
+            return;
+        atoms.emplace_back(std::string{path_prefix}, node);
+        return;
+    }
+
+    if(is_operator_constraint_map(node))
+    {
+        if(path_prefix.empty())
+            throw std::invalid_argument{"Invalid filter selector"};
+
+        for(const auto& [op, value] : node.get<db::object::map>())
+            atoms.emplace_back(std::string{path_prefix}, xson::object{{op, value}});
+        return;
+    }
+
+    for(const auto& [key, value] : node.get<db::object::map>())
+    {
+        const auto path = path_prefix.empty()
+            ? std::string{key}
+            : std::string{path_prefix} + "/"s + key;
+        collect_selector_atoms(value, path, atoms);
+    }
+}
+
+inline filter_branch negate_string_filter(string_filter filter)
+{
+    filter.negated = not filter.negated;
+    return filter_branch{xson::object{}, {std::move(filter)}};
+}
+
+inline filter_branch negate_selector_atom(std::string path, const xson::object& leaf)
+{
+    auto selector = xson::object{};
+    set_nested_selector_leaf(selector, path, negate_constraint_leaf(leaf));
+    return filter_branch{std::move(selector), {}};
+}
+
+// Forward declaration — defined with parse_filter below.
+inline parsed_filter negate_parsed_filter(parsed_filter filter);
+
 // Strip balanced outer parentheses that wrap an entire expression.
 // OData clients commonly group with (name eq 'Alice'); without this, the
 // leaf parser treats the field as "(name" and the value as "'Alice')" and
@@ -889,10 +969,44 @@ inline parsed_filter and_parsed_filters(parsed_filter left, parsed_filter right)
     return parsed_from_branches(std::move(combined));
 }
 
+// Negate a parsed filter via operator rewrites and De Morgan (not (A and B) → not A or not B).
+inline parsed_filter negate_parsed_filter(parsed_filter filter)
+{
+    if(filter.has_or())
+    {
+        // not (A or B) = not A and not B
+        auto merged = negate_parsed_filter(
+            parsed_from_branches({std::move(filter.or_branches.front())}));
+        for(auto& branch : filter.or_branches | std::views::drop(1))
+        {
+            merged = and_parsed_filters(
+                std::move(merged),
+                negate_parsed_filter(parsed_from_branches({std::move(branch)})));
+        }
+        return merged;
+    }
+
+    // not (conjuncts) = OR of negated atoms
+    auto branches = std::vector<filter_branch>{};
+    auto atoms = std::vector<std::pair<std::string, xson::object>>{};
+    collect_selector_atoms(filter.and_selector, ""sv, atoms);
+
+    for(auto& [path, leaf] : atoms)
+        branches.push_back(negate_selector_atom(std::move(path), leaf));
+
+    for(auto& string_filter : filter.and_string_filters)
+        branches.push_back(negate_string_filter(std::move(string_filter)));
+
+    if(branches.empty())
+        throw std::invalid_argument{"Cannot negate empty filter expression"};
+
+    return parsed_from_branches(std::move(branches));
+}
+
 // Parse OData $filter expression
-// Supports: comparisons, in, string functions, and (AND), or (OR — OData precedence: AND before OR)
-// Grouping parentheses are honored: top-level and/or splits ignore nested groups, and
-// `(A or B) and C` is rewritten to `(A and C) or (B and C)` for the flat OR-branch model.
+// Supports: comparisons, in, string functions, not, and (AND), or (OR)
+// Precedence: not > and > or. Grouping parentheses are honored; top-level and/or
+// splits ignore nested groups, and `(A or B) and C` distributes to OR branches.
 export inline parsed_filter parse_filter(std::string_view filter_expr)
 {
     auto expr = strip_outer_parens(filter_expr);
@@ -930,6 +1044,17 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
             merged = and_parsed_filters(std::move(merged), parse_filter(part));
 
         return merged;
+    }
+
+    // Unary not (binds tighter than and/or; handled after those splits).
+    if(expr.starts_with("not "sv) or expr.starts_with("not("sv))
+    {
+        auto rest = expr.substr(3);
+        if(rest.starts_with(' '))
+            rest = utils::trim(rest);
+        if(rest.empty())
+            throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
+        return negate_parsed_filter(parse_filter(rest));
     }
 
     auto [selector, string_filters] = parse_filter_leaf(expr);
@@ -1007,7 +1132,10 @@ export inline void lower_startswith_filters(
 
     for(const auto& filter : string_filters)
     {
-        if(filter.function != "startswith"sv or filter.field.contains('/'))
+        // Negated startswith cannot use a prefix range (would exclude the wrong set).
+        if(filter.function != "startswith"sv
+            or filter.negated
+            or filter.field.contains('/'))
         {
             remaining.push_back(filter);
             continue;
@@ -1044,17 +1172,27 @@ inline auto document_matches_string_filters(
     return std::ranges::all_of(filters, [&](const string_filter& filter)
     {
         const auto field = get_string_field_by_path(doc, filter.field);
-        if(not field)
-            return false;
+        auto matches = false;
+        if(field)
+        {
+            if(filter.function == "startswith"sv)
+                matches = field->starts_with(filter.value);
+            else if(filter.function == "contains"sv)
+                matches = field->contains(filter.value);
+            else if(filter.function == "endswith"sv)
+                matches = field->ends_with(filter.value);
+            else
+                throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+        }
+        else if(filter.function != "startswith"sv
+            and filter.function != "contains"sv
+            and filter.function != "endswith"sv)
+        {
+            throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+        }
 
-        if(filter.function == "startswith"sv)
-            return field->starts_with(filter.value);
-        if(filter.function == "contains"sv)
-            return field->contains(filter.value);
-        if(filter.function == "endswith"sv)
-            return field->ends_with(filter.value);
-
-        throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+        // Missing field → false for positive string ops; not contains(...) → true.
+        return filter.negated ? not matches : matches;
     });
 }
 

@@ -29,7 +29,10 @@ inline auto filter_by_parsed(const object& docs, const parsed_filter& parsed)
         return filter_documents_by_or(docs, parsed.or_branches);
 
     const auto branches = std::vector<filter_branch>{
-        filter_branch{parsed.and_selector, parsed.and_string_filters}};
+        filter_branch{
+            parsed.and_selector,
+            parsed.and_string_filters,
+            parsed.and_negated_selectors}};
     return filter_documents_by_or(docs, branches);
 }
 
@@ -1224,13 +1227,16 @@ auto register_odata_tests()
 
             when("Filter is not status eq 'deleted'") = [docs]
             {
-                then("Rewrites to ne and excludes deleted") = [docs]
+                then("Negates via !match and excludes deleted") = [docs]
                 {
-                    const auto [selector, filters] = parse_and_filter("not status eq 'deleted'"sv);
-                    require_true(filters.empty());
-                    require_true(selector["status"s].has("$ne"s));
+                    const auto parsed = parse_filter("not status eq 'deleted'"sv);
+                    require_false(parsed.has_or());
+                    require_true(parsed.and_selector.empty());
+                    require_true(parsed.and_string_filters.empty());
+                    require_eq(parsed.and_negated_selectors.size(), 1u);
+                    require_true(parsed.and_negated_selectors[0].has("status"s));
 
-                    const auto result = filter_by_parsed(docs, parse_filter("not status eq 'deleted'"sv));
+                    const auto result = filter_by_parsed(docs, parsed);
                     const auto& items = result.get<object::array>();
                     require_eq(items.size(), 3u);
                 };
@@ -1315,6 +1321,39 @@ auto register_odata_tests()
                     const auto& items = result.get<object::array>();
                     // Only Charlie/Dana fail the inner AND (status/name pairs).
                     require_eq(items.size(), 2u);
+                };
+            };
+
+            when("Filter is not Customer eq against nested objects") = []
+            {
+                then("Includes object-valued and missing Customer fields") = []
+                {
+                    // $eq→$ne rewrite matches nothing for object/array Customer
+                    // (same as bare ne); logical not must use !match instead.
+                    auto nested_docs = object{object::array{
+                        object{
+                            {"_id"s, 1ll},
+                            {"name"s, "Alice"s},
+                            {"Customer"s, object{{"Country"s, "USA"s}, {"Name"s, "Acme"s}}}},
+                        object{
+                            {"_id"s, 2ll},
+                            {"name"s, "Bob"s},
+                            {"Customer"s, object{{"Country"s, "UK"s}, {"Name"s, "Beta"s}}}},
+                        object{{"_id"s, 3ll}, {"name"s, "Charlie"s}}
+                    }};
+
+                    const auto parsed = parse_filter("not Customer eq 'Acme'"sv);
+                    require_false(parsed.has_or());
+                    require_eq(parsed.and_negated_selectors.size(), 1u);
+
+                    const auto result = filter_by_parsed(nested_docs, parsed);
+                    require_eq(result.get<object::array>().size(), 3u);
+
+                    const auto negated_conflict = parse_filter(
+                        "not (Customer eq 'Acme' and Customer/Country eq 'USA')"sv);
+                    const auto conflict_result = filter_by_parsed(nested_docs, negated_conflict);
+                    // Inner AND is impossible for every document → not is a tautology.
+                    require_eq(conflict_result.get<object::array>().size(), 3u);
                 };
             };
 
@@ -2278,6 +2317,43 @@ auto register_odata_tests()
                     require_eq(docs.get<object::array>().size(), 0u);
                     require_true(reversed_docs.is_array());
                     require_eq(reversed_docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("not negates parent/nested conflict and object-valued eq") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto acme = object{
+                    {"name"s, "Alice"s},
+                    {"Customer"s, object{{"Country"s, "USA"s}, {"Name"s, "Acme"s}}}};
+                auto other = object{
+                    {"name"s, "Bob"s},
+                    {"Customer"s, object{{"Country"s, "UK"s}, {"Name"s, "Beta"s}}}};
+                auto missing = object{{"name"s, "Charlie"s}};
+                require_true(engine.create("clients"s, acme).has_value());
+                require_true(engine.create("clients"s, other).has_value());
+                require_true(engine.create("clients"s, missing).has_value());
+
+                const auto not_eq = parse_filter("not Customer eq 'Acme'"sv);
+                const auto not_eq_docs =
+                    read_with_parsed_filter(engine, "clients"s, object{}, not_eq);
+                const auto not_conflict = parse_filter(
+                    "not (Customer eq 'Acme' and Customer/Country eq 'USA')"sv);
+                const auto not_conflict_docs =
+                    read_with_parsed_filter(engine, "clients"s, object{}, not_conflict);
+
+                then("Both not-filters return every document") = [=]()
+                {
+                    require_true(not_eq_docs.is_array());
+                    require_eq(not_eq_docs.get<object::array>().size(), 3u);
+                    require_true(not_conflict_docs.is_array());
+                    require_eq(not_conflict_docs.get<object::array>().size(), 3u);
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());

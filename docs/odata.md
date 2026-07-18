@@ -21,7 +21,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | Feature | Notes |
 |---------|--------|
 | Comparisons | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
-| Logic | `not`, `and`, `or` (precedence: `not` > `and` > `or`); expressions that expand to more than 64 OR branches are rejected |
+| Logic | `not`, `and`, `or` (precedence: `not` > `and` > `or`); `not` is `!match(P)` (not `$ne`/`$lte` rewrites); expressions that expand to more than 64 OR branches are rejected |
 | `in` | Strings or numbers |
 | Nested paths | `Customer/Country eq 'USA'` |
 | `startswith` | Index-backed on top-level secondary keys (not when negated) |

@@ -13,6 +13,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | Item | Summary |
 |------|---------|
 | **Boolean `not` in `$filter`** | `not status eq 'deleted'`, `not contains(email,'@example')`, De Morgan for `not (A and B)` / `not (A or B)`; precedence `not` > `and` > `or` |
+| **`not` vs nested/impossible `$filter`** | `not` no longer rewrites comparisons to `$ne`/`$lte`/… (those also fail on object/array fields and on impossible `$eq`+`$ne` sentinels); evaluates `!match(P)` so `not Customer eq 'x'` and `not (Customer eq 'x' and Customer/Country eq 'y')` return the logically correct documents |
 | **`$filter` OR-branch budget** | AND-over-OR distribution and De Morgan `not` of DNF formulas reject expressions that would exceed 64 OR branches (fail closed) instead of allocating a cartesian explosion that can OOM a single request |
 | **`$apply` groupby/aggregate (v1)** | `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))` — also `average`/`min`/`max` and whole-set `aggregate(...)`; optional `$filter` first; see [odata.md](odata.md) |
 | **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |

@@ -183,11 +183,15 @@ export struct string_filter
     bool negated = false;       // true for `not contains(...)` / `not startswith(...)` / …
 };
 
-// One branch of an OData OR expression (selector AND string filters within the branch)
+// One branch of an OData OR expression (selector AND string filters within the branch).
+// `negated_selectors` are positive selectors that must fail `object::match` — used for
+// boolean `not` so type-mismatched / missing fields follow `!match(P)` rather than the
+// non-complementing `$ne`/`$lte`/… rewrites (those also fail on object/array values).
 export struct filter_branch
 {
     xson::object selector;
     std::vector<string_filter> string_filters;
+    std::vector<xson::object> negated_selectors;
 };
 
 // Parsed $filter: either a single AND-group or multiple OR branches (OData: AND binds tighter than OR)
@@ -195,6 +199,7 @@ export struct parsed_filter
 {
     xson::object and_selector;
     std::vector<string_filter> and_string_filters;
+    std::vector<xson::object> and_negated_selectors;
     std::vector<filter_branch> or_branches;
 
     [[nodiscard]] bool has_or() const noexcept
@@ -619,37 +624,9 @@ inline auto make_in_selector(std::string_view field, std::span<const xson::objec
 
 using filter_clause = std::pair<xson::object, std::vector<string_filter>>;
 
-// Negate one operator-constraint leaf ($eq/$ne/$gt/… or bare equality value).
-inline xson::object negate_constraint_leaf(const xson::object& leaf)
-{
-    if(is_operator_constraint_map(leaf))
-    {
-        if(leaf.has("$eq"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$ne"s, leaf["$eq"s]}};
-        if(leaf.has("$ne"s) and leaf.get<db::object::map>().size() == 1)
-            return leaf["$ne"s]; // bare equality
-        if(leaf.has("$gt"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$lte"s, leaf["$gt"s]}};
-        if(leaf.has("$gte"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$lt"s, leaf["$gte"s]}};
-        if(leaf.has("$lt"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$gte"s, leaf["$lt"s]}};
-        if(leaf.has("$lte"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$gt"s, leaf["$lte"s]}};
-        if(leaf.has("$in"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$nin"s, leaf["$in"s]}};
-        if(leaf.has("$nin"s) and leaf.get<db::object::map>().size() == 1)
-            return xson::object{{"$in"s, leaf["$nin"s]}};
-
-        // Multi-op maps are exploded before negate; fall back to impossible→empty.
-        throw std::invalid_argument{"Cannot negate compound operator map in $filter"};
-    }
-
-    // Bare equality value → $ne
-    return xson::object{{"$ne"s, leaf}};
-}
-
 // Walk a selector into path + leaf atoms (AND conjuncts).
+// Operator-constraint maps stay intact (including multi-op and impossible
+// `$eq`+`$ne` sentinels) so `not` can evaluate `!match(leaf)` as a unit.
 inline void collect_selector_atoms(
     const xson::object& node,
     std::string_view path_prefix,
@@ -668,8 +645,7 @@ inline void collect_selector_atoms(
         if(path_prefix.empty())
             throw std::invalid_argument{"Invalid filter selector"};
 
-        for(const auto& [op, value] : node.get<db::object::map>())
-            atoms.emplace_back(std::string{path_prefix}, xson::object{{op, value}});
+        atoms.emplace_back(std::string{path_prefix}, node);
         return;
     }
 
@@ -685,14 +661,18 @@ inline void collect_selector_atoms(
 inline filter_branch negate_string_filter(string_filter filter)
 {
     filter.negated = not filter.negated;
-    return filter_branch{xson::object{}, {std::move(filter)}};
+    return filter_branch{xson::object{}, {std::move(filter)}, {}};
 }
 
+// Keep the positive leaf and mark it negated. Operator rewrites ($eq→$ne,
+// $gt→$lte, …) are not true complements when the field is missing or a
+// non-scalar: `object::match` rejects both sides, so `not Customer eq 'x'`
+// would otherwise match nothing for nested Customer objects.
 inline filter_branch negate_selector_atom(std::string path, const xson::object& leaf)
 {
-    auto selector = xson::object{};
-    set_nested_selector_leaf(selector, path, negate_constraint_leaf(leaf));
-    return filter_branch{std::move(selector), {}};
+    auto positive = xson::object{};
+    set_nested_selector_leaf(positive, path, leaf);
+    return filter_branch{xson::object{}, {}, {std::move(positive)}};
 }
 
 // Forward declaration — defined with parse_filter below.
@@ -935,7 +915,8 @@ inline std::vector<filter_branch> as_or_branches(parsed_filter filter)
     return {
         filter_branch{
             std::move(filter.and_selector),
-            std::move(filter.and_string_filters)}};
+            std::move(filter.and_string_filters),
+            std::move(filter.and_negated_selectors)}};
 }
 
 inline parsed_filter parsed_from_branches(std::vector<filter_branch> branches)
@@ -948,13 +929,14 @@ inline parsed_filter parsed_from_branches(std::vector<filter_branch> branches)
         return parsed_filter{
             std::move(branches[0].selector),
             std::move(branches[0].string_filters),
+            std::move(branches[0].negated_selectors),
             {}};
     }
 
-    return parsed_filter{{}, {}, std::move(branches)};
+    return parsed_filter{{}, {}, {}, std::move(branches)};
 }
 
-// AND two branches by merging selectors and concatenating string filters.
+// AND two branches by merging selectors and concatenating post-filters.
 inline filter_branch and_filter_branches(const filter_branch& left, const filter_branch& right)
 {
     auto selector = left.selector;
@@ -963,7 +945,13 @@ inline filter_branch and_filter_branches(const filter_branch& left, const filter
     auto string_filters = left.string_filters;
     string_filters.append_range(right.string_filters);
 
-    return filter_branch{std::move(selector), std::move(string_filters)};
+    auto negated_selectors = left.negated_selectors;
+    negated_selectors.append_range(right.negated_selectors);
+
+    return filter_branch{
+        std::move(selector),
+        std::move(string_filters),
+        std::move(negated_selectors)};
 }
 
 // Distribute AND over OR: (A∨B) ∧ (C∨D) → AC∨AD∨BC∨BD.
@@ -1243,11 +1231,43 @@ inline auto apply_string_filters(const xson::object& documents, const std::vecto
             | std::ranges::to<xson::object::array>()};
 }
 
-// True when a document matches one OR branch (selector AND branch string filters)
+// True when a document matches one OR branch: positive selector, every
+// negated selector fails match, and string filters hold.
 export inline auto document_matches_branch(const xson::object& doc, const filter_branch& branch)
 {
-    return doc.match(branch.selector)
-        and document_matches_string_filters(doc, branch.string_filters);
+    if(not doc.match(branch.selector))
+        return false;
+
+    if(not std::ranges::all_of(
+           branch.negated_selectors,
+           [&](const xson::object& selector) { return not doc.match(selector); }))
+        return false;
+
+    return document_matches_string_filters(doc, branch.string_filters);
+}
+
+// Post-filter after engine.read already applied branch.selector (over-scan safe).
+inline auto apply_negated_and_string_filters(
+    const xson::object& documents,
+    const std::vector<xson::object>& negated_selectors,
+    const std::vector<string_filter>& string_filters)
+{
+    if(negated_selectors.empty() and string_filters.empty())
+        return documents;
+    if(not documents.is_array())
+        return documents;
+
+    return xson::object{
+        documents.get<xson::object::array>()
+            | std::views::filter([&](const xson::object& doc)
+            {
+                if(not std::ranges::all_of(
+                       negated_selectors,
+                       [&](const xson::object& selector) { return not doc.match(selector); }))
+                    return false;
+                return document_matches_string_filters(doc, string_filters);
+            })
+            | std::ranges::to<xson::object::array>()};
 }
 
 // Union branch results, deduplicating by _id
@@ -1387,7 +1407,8 @@ export inline std::size_t count_with_parsed_filter(
             lower_startswith_filters(indexed_keys, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
             engine.read(collection, branch.selector, branch_docs);
-            auto filtered = apply_string_filters(branch_docs, branch.string_filters);
+            auto filtered = apply_negated_and_string_filters(
+                branch_docs, branch.negated_selectors, branch.string_filters);
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
 
@@ -1402,13 +1423,14 @@ export inline std::size_t count_with_parsed_filter(
     auto string_filters = filter.and_string_filters;
     lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
-    if(not string_filters.empty())
+    if(not string_filters.empty() or not filter.and_negated_selectors.empty())
     {
         // Count must ignore $top/$skip — strip in case a caller left them in.
         std::ignore = extract_and_strip_paging(query_selector);
         auto documents = xson::object{};
         engine.read(collection, query_selector, documents);
-        documents = apply_string_filters(documents, string_filters);
+        documents = apply_negated_and_string_filters(
+            documents, filter.and_negated_selectors, string_filters);
         if(not documents.is_array())
             return 0;
 
@@ -1439,7 +1461,8 @@ export inline auto read_with_parsed_filter(
             lower_startswith_filters(indexed_keys, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
             engine.read(collection, branch.selector, branch_docs);
-            auto filtered = apply_string_filters(branch_docs, branch.string_filters);
+            auto filtered = apply_negated_and_string_filters(
+                branch_docs, branch.negated_selectors, branch.string_filters);
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
 
@@ -1454,15 +1477,17 @@ export inline auto read_with_parsed_filter(
     auto string_filters = filter.and_string_filters;
     lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
-    // Post-filter functions (contains/endswith/non-indexed startswith) must run
-    // before $top/$skip/$orderby. Otherwise paging is applied to the unfiltered
-    // scan and matching rows outside the window are silently dropped.
-    if(not string_filters.empty())
+    // Post-filter functions (contains/endswith/non-indexed startswith) and
+    // negated comparison atoms must run before $top/$skip/$orderby. Otherwise
+    // paging is applied to the unfiltered scan and matching rows outside the
+    // window are silently dropped.
+    if(not string_filters.empty() or not filter.and_negated_selectors.empty())
     {
         const auto paging = extract_and_strip_paging(query_selector);
         auto documents = xson::object{};
         engine.read(collection, query_selector, documents);
-        documents = apply_string_filters(documents, string_filters);
+        documents = apply_negated_and_string_filters(
+            documents, filter.and_negated_selectors, string_filters);
         if(not paging.orderby_field.empty())
             yar::db::apply_orderby(documents, paging.orderby_field, paging.descending);
         return apply_top_skip(documents, paging.skip, paging.top);

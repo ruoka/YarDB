@@ -41,6 +41,7 @@ sudo apt-get install clang-21 libc++-21-dev libc++abi-21-dev lld-21
 - Add new unit test: Create `.test.c++` file next to source (tag `[yardb]`)
 - Add new program: Create `.c++` file in `YarDB/` directory (C++ Builder will automatically detect it)
 - Run piped `yarsh` smoke tests: `./tests/yarsh/smoke.sh` (see `tests/yarsh/smoke.sh --help`)
+- Run OData performance bench (manual, not CI): `./tests/perf/bench.sh --jsonl` (see [`tests/perf/README.md`](../tests/perf/README.md))
 
 ## Logging Standards
 
@@ -289,9 +290,9 @@ Current shipped work and verification totals are maintained only in [changelog.m
   - `GET /health` liveness probe (`{}`; public with PAT auth)
   - `GET /ready` readiness probe — `200` + `{}` when `ready`; otherwise `503` + `{"status":...}`; public with PAT auth
   - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
-  - **Prometheus `GET /metrics`** (minimum) — `http_requests_total` and `http_request_duration_seconds` histogram labeled by `method` + `status` via `net` `metrics_middleware` (public with PAT auth; scrapes not counted)
+  - **Prometheus `GET /metrics`** — `http_requests_total` and `http_request_duration_seconds` histogram labeled by `method`, `status`, `path` (no query string), and `scenario` via `net` `metrics_middleware` (public with PAT auth; scrapes not counted). Opt-in scenario: send `X-Metrics-Scenario: <name>` (`[A-Za-z0-9_.:-]{1,64}`); absent or invalid → `-`. Used by [`tests/perf/bench.sh`](../tests/perf/bench.sh).
 - **Planned Implementation** (longer-term):
-  - Richer metrics (path/collection labels, process metrics) once cardinality is designed
+  - Process / runtime metrics (CPU, RSS) once needed for ops dashboards
   - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)
 - **Timeline**: longer-term observability expansions
 - **Impact**: Essential for production operations and debugging
@@ -363,7 +364,7 @@ The storage writer remains single-owner. A write lock covers file mutation and s
 
 ### Observability Strategy
 - **Logging**: ✅ **IMPLEMENTED** - Dual-mode (syslog RFC 5424 + JSONL) with structured fields support, RFC 5424 message IDs, default JSONL format
-- **Metrics**: ✅ **IMPLEMENTED** (minimum) — Prometheus `GET /metrics` with request counters and latency histogram (`method`, `status`)
+- **Metrics**: ✅ **IMPLEMENTED** — Prometheus `GET /metrics` with request counters and latency histogram (`method`, `status`, `path`, `scenario`); manual OData bench under `tests/perf/`
 - **Tracing**: OpenTelemetry for distributed request tracking (planned)
 
 ### Module Architecture

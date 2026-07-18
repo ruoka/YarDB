@@ -3675,6 +3675,47 @@ auto test_set()
             require_true(body.find("http_requests_total") != std::string::npos);
             require_true(body.find("# TYPE http_requests_total counter") != std::string::npos);
         };
+
+        section("GET /metrics includes path label after a collection request") = [setup]
+        {
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(), "POST"s, "/labelprobe"s, R"({"name":"Ada"})"s
+            );
+            require_eq(post_status, "201"s);
+            (void)post_reason;
+            (void)post_headers;
+            (void)post_body;
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/metrics"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            require_true(body.find(R"(path="/labelprobe")") != std::string::npos);
+            require_true(body.find(R"(scenario="-")") != std::string::npos);
+        };
+
+        section("GET /metrics records X-Metrics-Scenario label") = [setup]
+        {
+            auto scenario_headers = std::map<string, string>{{"X-Metrics-Scenario", "simple"s}};
+            auto [get_status, get_reason, get_headers, get_body] = make_request_with_headers(
+                setup->port(), "GET"s, "/labelprobe?$top=1"s, scenario_headers
+            );
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            (void)get_body;
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/metrics"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            require_true(body.find(R"(path="/labelprobe")") != std::string::npos);
+            require_true(body.find(R"(scenario="simple")") != std::string::npos);
+        };
     };
 
     test_case("GET /ready readiness probe, [yardb]") = []

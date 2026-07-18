@@ -20,13 +20,13 @@ Keep each owner’s data private where practical (loopback + reverse proxy, or n
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
+- ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, Prometheus `/metrics` (`method`/`status`/`path`/`scenario`), `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
 - ❌ **Missing for hardened deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
 - ❌ **Missing for parallel / fault-tolerant instances**: production-grade replication, failover, and consistent multi-instance semantics (see below)
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
 - 🔐 **Security & Authentication** (data + admin PATs shipped; JWT/RBAC and TLS at reverse proxy still planned; safe bind defaults shipped)
-- 📊 **Monitoring & Observability** (minimum Prometheus `/metrics` shipped; richer labels / tracing planned; liveness/readiness probes shipped)
+- 📊 **Monitoring & Observability** (Prometheus `/metrics` with path/scenario labels shipped; process metrics / OTel tracing planned; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
 - 🔁 **Parallelism & fault tolerance** (multiple instances for one owner’s dataset — the main microservice case)
 
@@ -172,15 +172,17 @@ yardb --pat-file=/etc/yardb/pat.txt --admin-pat-file=/etc/yardb/admin-pat.txt 21
 - **Syslog Integration** - Structured logging to system logs (`--slog_level`)
 - **Basic Error Handling** - HTTP status codes and error responses
 
-### Future Monitoring (Roadmap)
+### Monitoring endpoints
 ```bash
-# Available now:
 curl http://localhost:2112/health   # Liveness probe (public with PAT auth)
 curl http://localhost:2112/ready    # Readiness probe (public with PAT auth)
+curl http://localhost:2112/metrics  # Prometheus HTTP metrics (public with PAT auth)
 
-# Planned endpoints:
-curl http://localhost:2112/metrics  # Prometheus metrics
+# Optional: attribute a request series for benches / ad-hoc profiling
+curl -H 'X-Metrics-Scenario: simple' 'http://localhost:2112/perf?$top=20'
 ```
+
+Labels on `http_requests_total` / `http_request_duration_seconds`: `method`, `status`, `path` (query stripped), `scenario` (`X-Metrics-Scenario` or `-`).
 
 ### Log Aggregation
 ```bash

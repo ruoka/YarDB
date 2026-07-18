@@ -66,7 +66,8 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
-| **Prometheus `GET /metrics`** | Minimum HTTP metrics via `net::http::middleware::metrics_middleware` — `http_requests_total` and `http_request_duration_seconds` (`method`, `status` labels); public with PAT; scrapes not counted |
+| **Prometheus `GET /metrics`** | HTTP metrics via `net::http::middleware::metrics_middleware` — `http_requests_total` and `http_request_duration_seconds` labeled by `method`, `status`, `path` (query stripped), and `scenario` (`X-Metrics-Scenario` or `-`); public with PAT; scrapes not counted |
+| **OData perf bench** | Manual `tests/perf/bench.sh` seeds growing datasets, times simple/medium/complex OData GETs (client percentiles + `/metrics` scenario deltas); see `tests/perf/README.md` |
 
 ### Platform & tooling
 

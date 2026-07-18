@@ -889,6 +889,68 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter groups OR before AND with parentheses") = [docs]
+            {
+                then("Distributes to matching OR branches") = [docs]
+                {
+                    // (Alice or Bob) and age>25 → Alice(30) matches; Bob(20) does not
+                    const auto parsed = parse_filter(
+                        "(name eq 'Alice' or name eq 'Bob') and age gt 25"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        auto matched = false;
+                        for(const auto& branch : parsed.or_branches)
+                        {
+                            if(doc.match(branch.selector))
+                            {
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if(matched)
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 1u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("Filter groups OR after AND with parentheses") = [docs]
+            {
+                then("Keeps the AND outside the OR group") = [docs]
+                {
+                    // age>25 and (Alice or inactive) → Alice(30) matches; Bob inactive but age 20 does not
+                    const auto parsed = parse_filter(
+                        "age gt 25 and (name eq 'Alice' or status eq 'inactive')"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        auto matched = false;
+                        for(const auto& branch : parsed.or_branches)
+                        {
+                            if(doc.match(branch.selector))
+                            {
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if(matched)
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 1u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
             when("Filter uses nested outer parentheses") = []
             {
                 then("Strips them before parsing") = []

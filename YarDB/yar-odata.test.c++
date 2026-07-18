@@ -700,6 +700,53 @@ auto register_odata_tests()
                     require_eq(selector["note"s].get<string>(), "a eq b"s);
                 };
             };
+
+            when("Filter value contains in marker inside quotes") = []
+            {
+                then("Parses eq instead of hijacking as in") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("note eq 'x in (y)'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("note"s));
+                    require_eq(selector["note"s].get<string>(), "x in (y)"s);
+                };
+
+                then("Parses contains instead of hijacking as in") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("contains(note, 'a in (b)')"sv);
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_eq(filters[0].function, "contains"sv);
+                    require_eq(filters[0].field, "note"s);
+                    require_eq(filters[0].value, "a in (b)"s);
+                };
+            };
+
+            when("Filter string literal uses OData doubled quotes") = []
+            {
+                then("Unescapes eq value") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("name eq 'O''Brien'"sv);
+                    require_true(filters.empty());
+                    require_eq(selector["name"s].get<string>(), "O'Brien"s);
+                };
+
+                then("Unescapes in list value") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("name in ('O''Brien','Smith')"sv);
+                    require_true(filters.empty());
+                    require_eq(selector["name"s]["$in"s]["0"s].get<string>(), "O'Brien"s);
+                    require_eq(selector["name"s]["$in"s]["1"s].get<string>(), "Smith"s);
+                };
+
+                then("Unescapes contains value") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("contains(name, 'O''Brien')"sv);
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_eq(filters[0].value, "O'Brien"s);
+                };
+            };
         };
     };
 
@@ -1016,7 +1063,7 @@ auto register_odata_tests()
                 then("Returns only documents starting with 'A'") = [docs]
                 {
                     auto filters = std::vector<string_filter>{
-                        {"startswith"sv, "name"sv, "A"sv}
+                        {"startswith"sv, "name"s, "A"s}
                     };
                     const auto result = apply_string_filters(docs, filters);
                     require_true(result.is_array());
@@ -1031,7 +1078,7 @@ auto register_odata_tests()
                 then("Returns only documents with '@example' in email") = [docs]
                 {
                     auto filters = std::vector<string_filter>{
-                        {"contains"sv, "email"sv, "@example"sv}
+                        {"contains"sv, "email"s, "@example"s}
                     };
                     const auto result = apply_string_filters(docs, filters);
                     require_true(result.is_array());
@@ -1045,7 +1092,7 @@ auto register_odata_tests()
                 then("Returns all documents ending with '.com'") = [docs]
                 {
                     auto filters = std::vector<string_filter>{
-                        {"endswith"sv, "email"sv, ".com"sv}
+                        {"endswith"sv, "email"s, ".com"s}
                     };
                     const auto result = apply_string_filters(docs, filters);
                     require_true(result.is_array());
@@ -1122,7 +1169,7 @@ auto register_odata_tests()
 
                 auto selector = object{};
                 auto filters = std::vector<string_filter>{
-                    {"startswith"sv, "Customer/Name"sv, "Ac"sv}
+                    {"startswith"sv, "Customer/Name"s, "Ac"s}
                 };
                 lower_startswith_filters(engine, "users"s, selector, filters);
 
@@ -1144,7 +1191,7 @@ auto register_odata_tests()
 
                 auto selector = object{};
                 auto filters = std::vector<string_filter>{
-                    {"startswith"sv, "name"sv, "Al"sv}
+                    {"startswith"sv, "name"s, "Al"s}
                 };
                 lower_startswith_filters(engine, "users"s, selector, filters);
 

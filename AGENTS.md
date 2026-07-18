@@ -13,7 +13,7 @@ git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xso
 ./tools/CB.sh debug build
 ```
 
-`tools/CB.sh` is a thin wrapper over `deps/tester/tools/CB.sh.core`. Requires **Clang 23+** with libc++ modules (`std.cppm`). On Linux, the wrapper selects `clang++-23` / `/usr/lib/llvm-23` (tester's core still defaults to 21 for other repos).
+`tools/CB.sh` is a thin wrapper over `deps/tester/tools/CB.sh.core`. Requires **Clang 21+** with libc++ modules (`std.cppm`).
 
 ## Coding standards
 

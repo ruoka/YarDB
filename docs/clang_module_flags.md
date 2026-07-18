@@ -92,7 +92,7 @@ Example: `build-darwin-debug/`, `build-linux-release/`
 - Check that all submodules are initialized: `git submodule update --init --depth 1`
 
 ### std.pcm not found
-- Ensure LLVM is installed with libc++ module support (Clang 23+; CI uses `/usr/lib/llvm-23`)
+- Ensure LLVM is installed with libc++ module support (Clang 21+; CI uses `/usr/lib/llvm-21`)
 - C++ Builder automatically resolves `std.cppm` path from LLVM installation
 
 ## References

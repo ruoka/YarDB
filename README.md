@@ -49,16 +49,15 @@ YarDB is a C++23 application that implements:
 ## Requirements
 
 ### Compiler
-- **Clang 23 or higher** (required for C++23 modules, built-in std module, and libc++ ranges such as `views::enumerate`)
+- **Clang 21 or higher** (required for C++23 modules and built-in std module support)
 - libc++ development libraries with module support
 
 ### Linux
-- Clang 23+ (`clang++-23`, LLVM at `/usr/lib/llvm-23/`) — CI and devcontainer use apt.llvm.org **snapshot** suite `llvm-toolchain-<codename>` (not `…-23`)
-- libc++ development libraries (`libc++-23-dev`, `libc++abi-23-dev`)
-- Submodule projects (tester/net/xson/cryptic) may still document Clang 21; YarDB itself requires 23
+- Clang 21+ (`clang++-21`, LLVM at `/usr/lib/llvm-21/`) — CI and devcontainer use apt.llvm.org
+- libc++ development libraries (`libc++-21-dev`, `libc++abi-21-dev`)
 
 ### macOS
-- LLVM 23+ installed at `/usr/local/llvm/` (not Homebrew)
+- LLVM 21+ installed at `/usr/local/llvm/` (not Homebrew)
 - The build system expects `/usr/local/llvm/bin/clang++` to be available
 - System clang from Xcode doesn't fully support C++23 modules
 
@@ -109,7 +108,7 @@ YarDB/
 │   ├── cryptic/       # Cryptographic functions
 │   └── tester/       # Testing framework
 │
-│   Note: std module is built from libc++ source (Clang 23+), not from a submodule
+│   Note: std module is built from libc++ source (Clang 21+), not from a submodule
 ├── build-{os}-{config}/  # Build artifacts (generated, e.g., build-darwin-debug/, build-linux-release/)
 ├── tools/            # Build tools (CB.sh)
 └── docs/             # Documentation
@@ -147,7 +146,7 @@ The project uses git submodules for dependencies:
 - `cryptic`: Cryptographic functions (SHA1, SHA2, Base64)
 - `tester`: Testing framework
 
-**Note**: The `std` module is built from libc++ source (provided by Clang 23+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core` and selects `clang++-23` on Linux.
+**Note**: The `std` module is built from libc++ source (provided by Clang 21+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core`.
 
 ## API Endpoints
 

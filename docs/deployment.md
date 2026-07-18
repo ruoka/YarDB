@@ -97,7 +97,7 @@ services:
 ```bash
 # Install dependencies
 sudo apt-get update
-sudo apt-get install -y clang-23 libc++-23-dev libc++abi-23-dev
+sudo apt-get install -y clang-21 libc++-21-dev libc++abi-21-dev
 
 # Run server
 ./yardb --file=/var/lib/yardb/data.db

@@ -58,7 +58,7 @@ YarDB/
 │   ├── cryptic/                 # Cryptographic functions
 │   └── tester/                 # Testing framework
 │
-│   Note: std module is built from libc++ source (Clang 23+), not from a submodule
+│   Note: std module is built from libc++ source (Clang 21+), not from a submodule
 │
 └── docs/                        # Documentation
     ├── README.md                # Documentation index
@@ -121,7 +121,7 @@ YarDB/
 
 ### Dependencies
 
-- **std**: Built-in standard library module (from libc++ source, Clang 23+)
+- **std**: Built-in standard library module (from libc++ source, Clang 21+)
 - **net**: Network library (module) - HTTP server implementation
 - **xson**: JSON/XML library (module) - Data serialization
 - **cryptic**: Cryptographic functions (module) - Hashing and encoding

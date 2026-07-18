@@ -26,15 +26,14 @@ git pull --recurse-submodules
 
 #### macOS
 ```bash
-# LLVM 23+ at /usr/local/llvm/ (required for C++23 modules; system Xcode clang is insufficient)
+# LLVM 21+ at /usr/local/llvm/ (required for C++23 modules; system Xcode clang is insufficient)
 # See README.md for install notes
 ```
 
 #### Linux
 ```bash
-# Clang 23 from apt.llvm.org snapshot suite (see .devcontainer/Dockerfile)
-# Suite is llvm-toolchain-<codename> (no -23 suffix); packages are *-23
-sudo apt-get install clang-23 libc++-23-dev libc++abi-23-dev lld-23
+# Clang 21+ (CI and devcontainer use apt.llvm.org — see .devcontainer/Dockerfile)
+sudo apt-get install clang-21 libc++-21-dev libc++abi-21-dev lld-21
 ```
 
 ### Common Tasks

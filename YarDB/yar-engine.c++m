@@ -62,6 +62,12 @@ public:
         if(*result > 0)
             return result;
 
+        // Create path must honor an equality _id selector. Otherwise upsert(
+        // {"_id": 42}, {"name": "Ada"}) silently inserts a different primary key
+        // and retries keep creating duplicates.
+        if(selector.has("_id"s) and not updates.has("_id"s) and selector["_id"s].is_integer())
+            updates["_id"s] = selector["_id"s];
+
         auto created = create(collection, updates);
         if(not created)
             return std::unexpected{created.error()};

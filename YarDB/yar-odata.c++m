@@ -275,8 +275,22 @@ inline xson::object as_operator_constraint_map(const xson::object& leaf)
     return xson::object{{"$eq"s, leaf}};
 }
 
+// Keep the tighter lower/upper bound when AND merges the same range operator.
+inline void tighten_lower_bound(xson::object& target, const xson::object& candidate)
+{
+    if(candidate.get<xson::primitive>() > target.get<xson::primitive>())
+        target = candidate;
+}
+
+inline void tighten_upper_bound(xson::object& target, const xson::object& candidate)
+{
+    if(candidate.get<xson::primitive>() < target.get<xson::primitive>())
+        target = candidate;
+}
+
 // Merge $op maps on one field. Contradictory equalities become an impossible
-// predicate so `status eq 'a' and status eq 'b'` matches nothing.
+// predicate so `status eq 'a' and status eq 'b'` matches nothing. Same-operator
+// ranges tighten (max lower / min upper) instead of last-write-wins.
 inline void merge_operator_constraint_maps(xson::object& target, const xson::object& source)
 {
     if(target.has("$eq"s) and source.has("$eq"s) and target["$eq"s] != source["$eq"s])
@@ -287,7 +301,27 @@ inline void merge_operator_constraint_maps(xson::object& target, const xson::obj
     }
 
     for(const auto& [key, value] : source.get<db::object::map>())
+    {
+        if(not target.has(key))
+        {
+            target[key] = value;
+            continue;
+        }
+
+        if(key == "$gt"s or key == "$gte"s)
+        {
+            tighten_lower_bound(target[key], value);
+            continue;
+        }
+
+        if(key == "$lt"s or key == "$lte"s)
+        {
+            tighten_upper_bound(target[key], value);
+            continue;
+        }
+
         target[key] = value;
+    }
 }
 
 inline void merge_field_constraints(xson::object& target, const xson::object& source)

@@ -199,6 +199,10 @@ auto selector_count_keys(const yar::db::object& selector)
         | std::ranges::to<std::vector<std::string>>();
 }
 
+// True when index.view()'s range analysis can represent the field selector
+// exactly (view size == match count). Multi-op maps from AND-merged $filter
+// are not always safe: query_analysis_* lets $eq overwrite prior bounds, and
+// $gt/$gte (or $lt/$lte) are if/else-if so only one bound per side is applied.
 bool index_only_field_selector(const yar::db::object& field_selector)
 {
     if(field_selector.has_value())
@@ -207,13 +211,39 @@ bool index_only_field_selector(const yar::db::object& field_selector)
     if(not field_selector.has_objects())
         return false;
 
-    return std::ranges::all_of(
-        field_selector.get<yar::db::object::map>(),
-        [](const auto& entry)
-        {
-            const auto& op = entry.first;
-            return op == "$eq"s or op == "$gt"s or op == "$gte"s or op == "$lt"s or op == "$lte"s;
-        });
+    auto has_eq = false;
+    auto has_gt = false;
+    auto has_gte = false;
+    auto has_lt = false;
+    auto has_lte = false;
+
+    for(const auto& [op, _] : field_selector.get<yar::db::object::map>())
+    {
+        if(op == "$eq"s)
+            has_eq = true;
+        else if(op == "$gt"s)
+            has_gt = true;
+        else if(op == "$gte"s)
+            has_gte = true;
+        else if(op == "$lt"s)
+            has_lt = true;
+        else if(op == "$lte"s)
+            has_lte = true;
+        else
+            return false;
+    }
+
+    // $eq replaces the whole range in query_analysis_*; only safe alone.
+    if(has_eq)
+        return not (has_gt or has_gte or has_lt or has_lte);
+
+    // One exclusive and one inclusive bound on the same side cannot both apply.
+    if(has_gt and has_gte)
+        return false;
+    if(has_lt and has_lte)
+        return false;
+
+    return has_gt or has_gte or has_lt or has_lte;
 }
 
 std::size_t count_index_view(const yar::db::index_view& view)

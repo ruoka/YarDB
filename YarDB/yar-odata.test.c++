@@ -378,6 +378,24 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter ANDs the same range operator twice on one field") = []
+            {
+                then("Keeps the tighter bound instead of last-write-wins") = []
+                {
+                    // Weaker bound last must not loosen the earlier predicate.
+                    const auto [selector, filters] = parse_and_filter("age gt 20 and age gt 10"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("age"s));
+                    require_true(selector["age"s].has("$gt"s));
+                    require_false(selector["age"s].has("$eq"s));
+                    require_eq(static_cast<xson::integer_type>(selector["age"s]["$gt"s]), 20);
+
+                    const auto [selector2, filters2] = parse_and_filter("age lt 5 and age lt 10"sv);
+                    require_true(filters2.empty());
+                    require_eq(static_cast<xson::integer_type>(selector2["age"s]["$lt"s]), 5);
+                };
+            };
+
             when("Filter uses 'or' operator") = []
             {
                 then("Returns two OR branches") = []
@@ -727,6 +745,35 @@ auto register_odata_tests()
                 {
                     require_true(docs.is_array());
                     require_eq(docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Same range operator is AND-combined with a looser bound last") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"age"s}).has_value());
+
+                auto mid = object{{"name"s, "mid"s}, {"age"s, 15ll}};
+                auto high = object{{"name"s, "high"s}, {"age"s, 25ll}};
+                require_true(engine.create("users"s, mid).has_value());
+                require_true(engine.create("users"s, high).has_value());
+
+                // Last-write-wins would keep age gt 10 and return mid+high.
+                const auto parsed = parse_filter("age gt 20 and age gt 10"sv);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Returns only ages above the tighter bound") = [docs, test_file]
+                {
+                    require_true(docs.is_array());
+                    const auto& items = docs.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "high"s);
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());
@@ -1090,6 +1137,65 @@ auto register_odata_tests()
                 then("Falls back to scan count via engine.count") = [count]
                 {
                     require_eq(count, 2u);
+                };
+            };
+
+            when("Filter ANDs equality with an impossible range on an indexed field") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"age"s}).has_value());
+
+                auto young = object{{"name"s, "young"s}, {"age"s, 3ll}};
+                auto exact = object{{"name"s, "exact"s}, {"age"s, 10ll}};
+                require_true(engine.create("users"s, young).has_value());
+                require_true(engine.create("users"s, exact).has_value());
+
+                // Index-only $eq would count age==3; match requires age gt 5 too.
+                const auto parsed = parse_filter("age eq 3 and age gt 5"sv);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Count matches empty read instead of index-only $eq size") = [count, docs, test_file]
+                {
+                    require_eq(count, 0u);
+                    require_true(docs.is_array());
+                    require_eq(docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Filter ANDs exclusive and inclusive lower bounds on an indexed field") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"age"s}).has_value());
+
+                auto mid = object{{"name"s, "mid"s}, {"age"s, 7ll}};
+                auto high = object{{"name"s, "high"s}, {"age"s, 12ll}};
+                require_true(engine.create("users"s, mid).has_value());
+                require_true(engine.create("users"s, high).has_value());
+
+                // Index-only $gt:5 would include age 7; match also requires age ge 10.
+                const auto parsed = parse_filter("age gt 5 and age ge 10"sv);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Count matches read and excludes ages between the bounds") = [count, docs, test_file]
+                {
+                    require_eq(count, 1u);
+                    require_true(docs.is_array());
+                    require_eq(docs.get<object::array>().size(), 1u);
+                    require_eq(docs.get<object::array>()[0]["name"s].get<string>(), "high"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
                 };
             };
         };

@@ -637,6 +637,8 @@ std::vector<std::string> yar::db::engine::indexed_keys(std::string_view collecti
 
 yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::vector<std::string> keys)
 {
+    using xson::fson::operator >>;
+
     auto lock = std::unique_lock{m_rwlock};
 
     if(not m_writable)
@@ -648,6 +650,35 @@ yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::ve
     auto original = m_index;
     auto& current_index = m_index[std::string{collection}];
     current_index.add(keys);
+
+    // Populate new secondaries from live primary rows before unlock. add()
+    // creates empty maps; view() then treats the field as indexed and returns
+    // no positions — false-empty $filter/read results until a later reindex().
+    // HTTP PUT/PATCH /_db and yarimport call reindex() separately, so the gap
+    // is visible to concurrent readers (and sticky if that reindex fails).
+    auto positions = std::vector<position_type>{};
+    for(const auto position : current_index.view(object{}))
+        positions.push_back(position);
+
+    auto reader = open_reader();
+    for(const auto position : positions)
+    {
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        reader.clear();
+        reader.seekg(position, reader.beg);
+        reader >> metadata >> document;
+        if(reader.fail())
+        {
+            m_index = std::move(original);
+            return std::unexpected{db_error(
+                db_error_code::corrupt_storage,
+                db_operation::index,
+                "Failed to read a live document while populating secondary indexes"s)};
+        }
+        current_index.insert(document, position);
+    }
+
     auto selector = yar::db::object{"collection"s, std::string{collection}};
     auto document = yar::db::object{selector, {"keys"s, current_index.keys()}};
     auto documents = yar::db::object{};

@@ -733,6 +733,27 @@ auto test_set()
             require_eq(documents[0]["value"s], xson::integer_type{1});
         };
 
+        section("IndexPopulatesExistingDocumentsWithoutReindex") = []
+        {
+            // index() used to publish empty secondary maps and rely on a later
+            // reindex(). Concurrent readers (and a failed reindex) then saw
+            // false-empty results for selectors on the new key.
+            const auto test_file = "./engine_index_populate_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"tag"s, "alpha"s}, {"value"s, 1ll}},
+                document2 = object{{"tag"s, "beta"s}, {"value"s, 2ll}},
+                selector = object{{"tag"s, "alpha"s}},
+                documents = object{};
+            require_true(engine.create("IndexPopulate"s, document1).has_value());
+            require_true(engine.create("IndexPopulate"s, document2).has_value());
+            require_true(engine.index("IndexPopulate"s, {"tag"s}).has_value());
+
+            require_true(engine.read("IndexPopulate"s, selector, documents));
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+        };
+
         section("NestedSecondaryIndexDoesNotBrickRestart") = []
         {
             // Indexing an object/array field used to throw bad_variant_access from

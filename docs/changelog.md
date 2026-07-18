@@ -27,6 +27,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **`index()` populates secondaries before unlock** | Adding a secondary key no longer publishes an empty map that makes `$filter`/read on that field return false-empty results until a separate `reindex()`; existing live rows are indexed under the same exclusive lock |
 | **`replace` rejects multi-match selectors** | `engine::replace` returns `conflict` when the selector matches more than one live row instead of tombstoning every match while appending a single successor |
 | **Update/replace commit when truncate fails after restore** | If successors are durable, status restore succeeds, but truncating appends fails, update/replace publish the staged index (and re-tombstone priors) instead of reporting failure while reopen would apply the new version |
 | **Create/update/replace commit when append truncate fails** | If a durable successor is appended but truncating it on rollback fails (before status markers), create/update/replace publish the staged index (update/replace also tombstone priors) instead of reporting failure while reopen would apply the write |

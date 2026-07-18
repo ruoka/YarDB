@@ -14,6 +14,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 |------|---------|
 | **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |
 | **Same-operator range AND** | `age gt 20 and age gt 10` keeps the tighter bound (`$gt:20`) instead of last-write-wins loosening the filter |
+| **Same-field `$in` AND** | `status in ('a','b') and status in ('b','c')` intersects membership (`b` only) instead of last-write-wins keeping the second list |
 | **Multi-op `$count` vs match** | Indexed `$count=true` for AND-merged multi-op field maps (`$eq`+range, `$gt`+`$gte`) falls back to scan+match so count matches GET results |
 | **`$orderby` field sort** | Results sort by the named field (`asc`/`desc`); was previously only reversing `_id` walk order via `$desc` |
 

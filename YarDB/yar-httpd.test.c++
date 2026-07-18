@@ -337,14 +337,20 @@ auto test_set()
             require_true(error.has("message"s));
         };
 
-        section("POST with oversized body returns 413 Payload Too Large") = [setup]
+        section("POST with oversized Content-Length returns 413 Payload Too Large") = [setup]
         {
-            // Content-Length is rejected before allocate/read — no need to send 1 MiB+1 bytes.
-            const auto oversized_body = std::string(1024 * 1024 + 1, 'x');
-            auto [status, reason, headers, response_body] = make_request(
-                setup->port(), "POST"s, "/testitems"s, oversized_body
-            );
+            // Cap is enforced from Content-Length before allocate/read — declare
+            // size just over 1 MiB and omit the body (sending 1 MiB+1 would race
+            // with the server closing after 413).
+            auto stream = connect("localhost"s, setup->port());
+            stream << "POST /testitems HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Accept: application/json" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << (1024 * 1024 + 1) << crlf
+                   << crlf << flush;
 
+            auto [status, reason, headers, response_body] = parse_http_response(stream, "POST"s);
             require_eq(status, "413"s);
             require_eq(reason, "Payload Too Large"s);
         };

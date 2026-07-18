@@ -1284,9 +1284,10 @@ auto test_set()
             auto retry = object{{"name"s, "updated"s}};
             documents = object{};
             require_eq(engine.upsert("UpsertCreate"s, object{{"_id"s, 42ll}}, retry, documents).value(), 1u);
-            require_eq(static_cast<xson::integer_type>(retry["_id"s]), 42ll);
             require_eq(engine.count("UpsertCreate"s, object{}), 1u);
             require_true(engine.read("UpsertCreate"s, object{{"_id"s, 42ll}}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), 42ll);
             require_eq(documents[0]["name"s].get<string>(), "updated"s);
         };
 

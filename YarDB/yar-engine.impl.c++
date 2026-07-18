@@ -1262,6 +1262,12 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
             db_operation::replace,
             "Replace requires a selector that matches exactly one document"s)};
 
+    // Preserve the matched document's primary key when the replacement body
+    // omits _id. index::update would otherwise assign a fresh sequence value,
+    // silently moving the resource and orphaning callers of the old id.
+    if(not document.has("_id"s))
+        document["_id"s] = old_documents.front()["_id"s];
+
     auto file_size_error = std::error_code{};
     const auto original_size = std::filesystem::file_size(m_db, file_size_error);
     if(file_size_error)
@@ -1277,21 +1283,18 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
 
     // Mirror create/update: do not let replace clobber another live primary key.
     // After erasing matched rows, contains_id only sees uninvolved documents.
-    if(document.has("_id"s))
-    {
-        if(not document["_id"s].is_integer())
-            return std::unexpected{db_error(
-                db_error_code::conflict,
-                db_operation::replace,
-                "Document _id must be an integer"s)};
+    if(not document["_id"s].is_integer())
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::replace,
+            "Document _id must be an integer"s)};
 
-        const auto new_id = static_cast<sequence_type>(document["_id"s]);
-        if(staged_index.contains_id(new_id))
-            return std::unexpected{db_error(
-                db_error_code::conflict,
-                db_operation::replace,
-                "Document with _id "s + std::to_string(new_id) + " already exists"s)};
-    }
+    const auto new_id = static_cast<sequence_type>(document["_id"s]);
+    if(staged_index.contains_id(new_id))
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::replace,
+            "Document with _id "s + std::to_string(new_id) + " already exists"s)};
 
     staged_index.update(document);
 
@@ -1449,6 +1452,12 @@ yar::db::db_result<std::size_t> yar::db::engine::upsert_impl(
         return std::unexpected{result.error()};
     if(*result > 0)
         return result;
+
+    // Create path must honor an equality _id selector. Otherwise upsert(
+    // {"_id": 42}, {"name": "Ada"}) silently inserts a different primary key
+    // and retries keep creating duplicates.
+    if(selector.has("_id"s) and not updates.has("_id"s) and selector["_id"s].is_integer())
+        updates["_id"s] = selector["_id"s];
 
     auto created = create_impl(collection, updates);
     if(not created)

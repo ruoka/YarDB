@@ -20,7 +20,7 @@ Keep each owner’s data private where practical (loopback + reverse proxy, or n
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
-- ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, Prometheus `/metrics` (`method`/`status`/`path`/`scenario`), `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
+- ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, Prometheus `/metrics` (`method`/`status`/`path` with `{id}` templating/`scenario`), `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
 - ❌ **Missing for hardened deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
 - ❌ **Missing for parallel / fault-tolerant instances**: production-grade replication, failover, and consistent multi-instance semantics (see below)
 

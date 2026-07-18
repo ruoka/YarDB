@@ -192,6 +192,13 @@ YarDB implements OData-compliant query parameters for advanced querying:
 
 - **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.
 
+- **`$apply`** (v1) — `groupby` + `aggregate`:
+  - Example: `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))`
+  - Methods: `sum`, `average`, `min`, `max`
+  - Optional `$filter` runs before aggregation
+  - Not combined with `$top` / `$skip` / `$orderby` / `$select` / `$expand` / `$count` (422)
+  - Full supported-vs-pipeline list: [odata.md](odata.md)
+
 ### OData Metadata
 
 YarDB supports OData metadata in two ways:

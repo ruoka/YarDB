@@ -1507,6 +1507,322 @@ export inline auto parse_orderby(std::string_view orderby_value)
     return orderby_result{std::string{field_name}, descending};
 }
 
+// --- $apply (v1): groupby + aggregate ---------------------------------------
+// Supports:
+//   groupby((status),aggregate(amount with sum as Total))
+//   aggregate(amount with sum as Total)
+// Methods: sum, average, min, max. Top-level fields only.
+
+export enum class aggregate_method
+{
+    sum,
+    average,
+    min,
+    max
+};
+
+export struct aggregate_clause
+{
+    std::string field;
+    aggregate_method method;
+    std::string alias;
+};
+
+export struct apply_query
+{
+    std::vector<std::string> group_fields; // empty → whole-set aggregate
+    std::vector<aggregate_clause> aggregates;
+};
+
+inline void validate_apply_identifier(std::string_view name, std::string_view what)
+{
+    if(name.empty())
+        throw std::invalid_argument{std::string{what} + " cannot be empty"};
+    if(name.size() > yar::db::max_field_name_length)
+        throw std::invalid_argument{std::string{what} + " too long"};
+    if(name.contains('/'))
+        throw std::invalid_argument{std::string{what} + " nested paths are not supported in $apply v1"};
+    const auto first = name.front();
+    if(not ((first >= 'A' and first <= 'Z') or (first >= 'a' and first <= 'z') or first == '_'))
+        throw std::invalid_argument{std::string{what} + " must start with a letter or underscore"};
+    for(const auto c : name)
+    {
+        const auto ok = (c >= 'A' and c <= 'Z')
+            or (c >= 'a' and c <= 'z')
+            or (c >= '0' and c <= '9')
+            or c == '_';
+        if(not ok)
+            throw std::invalid_argument{std::string{what} + " contains an invalid character"};
+    }
+}
+
+inline aggregate_method parse_aggregate_method(std::string_view token)
+{
+    if(token == "sum"sv)
+        return aggregate_method::sum;
+    if(token == "average"sv)
+        return aggregate_method::average;
+    if(token == "min"sv)
+        return aggregate_method::min;
+    if(token == "max"sv)
+        return aggregate_method::max;
+    throw std::invalid_argument{
+        "Unsupported aggregate method '"s + std::string{token}
+        + "' (v1 supports sum, average, min, max)"s};
+}
+
+export inline aggregate_clause parse_aggregate_clause(std::string_view expr)
+{
+    auto text = utils::trim(expr);
+    constexpr auto prefix = "aggregate("sv;
+    if(not text.starts_with(prefix) or not text.ends_with(')'))
+        throw std::invalid_argument{"Invalid aggregate(...) expression"};
+    auto inner = utils::trim(text.substr(prefix.size(), text.size() - prefix.size() - 1));
+    constexpr auto with_tok = " with "sv;
+    constexpr auto as_tok = " as "sv;
+    const auto with_pos = inner.find(with_tok);
+    if(with_pos == std::string_view::npos)
+        throw std::invalid_argument{"aggregate requires 'with <method> as <alias>'"};
+    auto field = utils::trim(inner.substr(0, with_pos));
+    auto rest = utils::trim(inner.substr(with_pos + with_tok.size()));
+    const auto as_pos = rest.find(as_tok);
+    if(as_pos == std::string_view::npos)
+        throw std::invalid_argument{"aggregate requires 'as <alias>'"};
+    auto method_tok = utils::trim(rest.substr(0, as_pos));
+    auto alias = utils::trim(rest.substr(as_pos + as_tok.size()));
+    validate_apply_identifier(field, "$apply aggregate field");
+    validate_apply_identifier(alias, "$apply aggregate alias");
+    return aggregate_clause{std::string{field}, parse_aggregate_method(method_tok), std::string{alias}};
+}
+
+export inline apply_query parse_apply(std::string_view apply_expr)
+{
+    auto text = utils::trim(apply_expr);
+    if(text.empty())
+        throw std::invalid_argument{"$apply cannot be empty"};
+
+    apply_query query{};
+
+    if(text.starts_with("aggregate("sv))
+    {
+        query.aggregates.push_back(parse_aggregate_clause(text));
+        return query;
+    }
+
+    constexpr auto gb = "groupby("sv;
+    if(not text.starts_with(gb) or not text.ends_with(')'))
+        throw std::invalid_argument{
+            "$apply v1 supports groupby((field),aggregate(...)) or aggregate(...)"};
+
+    // groupby((status),aggregate(...)) → after stripping groupby( … ):
+    //   (status),aggregate(...)
+    auto inner = utils::trim(text.substr(gb.size(), text.size() - gb.size() - 1));
+    if(not inner.starts_with('('))
+        throw std::invalid_argument{"$apply groupby requires ((field),aggregate(...))"};
+    const auto field_end = inner.find(')');
+    if(field_end == std::string_view::npos or field_end < 2)
+        throw std::invalid_argument{"$apply groupby missing closing ')' for group field"};
+    auto field = utils::trim(inner.substr(1, field_end - 1));
+    validate_apply_identifier(field, "$apply groupby field");
+    auto after_keys = utils::trim(inner.substr(field_end + 1));
+    if(not after_keys.starts_with(','))
+        throw std::invalid_argument{"$apply groupby requires aggregate after group keys"};
+    auto agg_text = utils::trim(after_keys.substr(1));
+    query.group_fields.push_back(std::string{field});
+    query.aggregates.push_back(parse_aggregate_clause(agg_text));
+    return query;
+}
+
+inline bool try_numeric(const xson::object& value, double& out)
+{
+    if(value.is_integer())
+    {
+        out = static_cast<double>(static_cast<xson::integer_type>(value));
+        return true;
+    }
+    if(value.is_number())
+    {
+        out = static_cast<double>(static_cast<xson::number_type>(value));
+        return true;
+    }
+    return false;
+}
+
+inline std::string group_key_string(const xson::object& value)
+{
+    if(value.is_null())
+        return "\0null"s;
+    if(value.is_boolean())
+        return static_cast<bool>(value) ? "\0true"s : "\0false"s;
+    if(value.is_integer())
+        return "\0i:"s + std::to_string(static_cast<xson::integer_type>(value));
+    if(value.is_number())
+        return "\0n:"s + std::format("{}", static_cast<xson::number_type>(value));
+    if(value.is_string())
+        return "\0s:"s + static_cast<std::string>(value);
+    return "\0other"s;
+}
+
+inline xson::object group_key_value(const xson::object& doc, std::string_view field)
+{
+    if(not doc.has(std::string{field}))
+    {
+        auto null_value = xson::object{};
+        null_value = nullptr;
+        return null_value;
+    }
+    return doc[std::string{field}];
+}
+
+struct aggregate_acc
+{
+    bool any = false;
+    double sum = 0.0;
+    double min = 0.0;
+    double max = 0.0;
+    std::size_t count = 0;
+};
+
+inline void accumulate(aggregate_acc& acc, double value)
+{
+    if(not acc.any)
+    {
+        acc.any = true;
+        acc.sum = value;
+        acc.min = value;
+        acc.max = value;
+        acc.count = 1;
+        return;
+    }
+    acc.sum += value;
+    acc.min = std::min(acc.min, value);
+    acc.max = std::max(acc.max, value);
+    ++acc.count;
+}
+
+inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method method)
+{
+    if(not acc.any)
+    {
+        auto null_value = xson::object{};
+        null_value = nullptr;
+        return null_value;
+    }
+    const auto value = [&]() -> double
+    {
+        switch(method)
+        {
+            case aggregate_method::sum: return acc.sum;
+            case aggregate_method::average: return acc.sum / static_cast<double>(acc.count);
+            case aggregate_method::min: return acc.min;
+            case aggregate_method::max: return acc.max;
+        }
+        return acc.sum;
+    }();
+    // Prefer integer when the mathematical result is integral.
+    auto result = xson::object{};
+    if(std::floor(value) == value
+        and value >= static_cast<double>(std::numeric_limits<xson::integer_type>::min())
+        and value <= static_cast<double>(std::numeric_limits<xson::integer_type>::max()))
+    {
+        result = static_cast<xson::integer_type>(value);
+        return result;
+    }
+    result = static_cast<xson::number_type>(value);
+    return result;
+}
+
+// Aggregate an array of documents according to a parsed $apply query.
+export inline xson::object apply_aggregation(const xson::object& documents, const apply_query& query)
+{
+    if(query.aggregates.empty())
+        throw std::invalid_argument{"$apply requires at least one aggregate"};
+    if(not documents.is_array())
+        return xson::object{xson::object::array{}};
+
+    struct group_state
+    {
+        xson::object key_value;
+        std::vector<aggregate_acc> accs;
+    };
+
+    auto groups = std::map<std::string, group_state>{};
+    const auto& items = documents.get<xson::object::array>();
+
+    auto ensure_group = [&](const std::string& key, const xson::object& key_value) -> group_state&
+    {
+        auto it = groups.find(key);
+        if(it != groups.end())
+            return it->second;
+        auto state = group_state{key_value, std::vector<aggregate_acc>(query.aggregates.size())};
+        auto [ins, _] = groups.emplace(key, std::move(state));
+        return ins->second;
+    };
+
+    if(query.group_fields.empty())
+    {
+        auto& state = ensure_group(""s, xson::object{});
+        for(const auto& doc : items)
+        {
+            for(auto i = std::size_t{0}; i < query.aggregates.size(); ++i)
+            {
+                const auto& clause = query.aggregates[i];
+                if(not doc.has(clause.field))
+                    continue;
+                auto number = 0.0;
+                if(try_numeric(doc[clause.field], number))
+                    accumulate(state.accs[i], number);
+            }
+        }
+    }
+    else
+    {
+        const auto& gfield = query.group_fields.front();
+        for(const auto& doc : items)
+        {
+            const auto key_value = group_key_value(doc, gfield);
+            auto& state = ensure_group(group_key_string(key_value), key_value);
+            for(auto i = std::size_t{0}; i < query.aggregates.size(); ++i)
+            {
+                const auto& clause = query.aggregates[i];
+                if(not doc.has(clause.field))
+                    continue;
+                auto number = 0.0;
+                if(try_numeric(doc[clause.field], number))
+                    accumulate(state.accs[i], number);
+            }
+        }
+    }
+
+    auto result = xson::object::array{};
+    result.reserve(groups.size());
+    for(const auto& [_, state] : groups)
+    {
+        auto row = xson::object{};
+        if(not query.group_fields.empty())
+            row[query.group_fields.front()] = state.key_value;
+        for(auto i = std::size_t{0}; i < query.aggregates.size(); ++i)
+            row[query.aggregates[i].alias] = finish_aggregate(state.accs[i], query.aggregates[i].method);
+        result.push_back(std::move(row));
+    }
+    return xson::object{std::move(result)};
+}
+
+// Read matching documents (optional $filter) and run $apply aggregation.
+export inline xson::object read_with_apply(
+    yar::db::engine& engine,
+    std::string_view collection,
+    const apply_query& query,
+    std::optional<parsed_filter> filter = std::nullopt)
+{
+    auto documents = xson::object{};
+    if(filter)
+        documents = read_with_parsed_filter(engine, collection, xson::object{}, *filter);
+    else
+        engine.read(collection, xson::object{}, documents);
+    return apply_aggregation(documents, query);
+}
+
 // OData 4.01 JSON CSDL Metadata Generation
 // Generates metadata document based on existing collections and their schemas
 

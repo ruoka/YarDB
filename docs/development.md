@@ -261,15 +261,11 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 ### 🚧 Active Development Projects
 
-#### 0. 📊 OData `$filter` enhancements — ✅ largely complete
-- **Priority**: DONE (near-term API work)
-- **Current State**: `$filter` supports `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `and`, `or`, `in`, nested property paths, and string functions
-  - **Index-backed**: `startswith(field,'prefix')` on top-level secondary-indexed fields (prefix range via `$gte`/`$lt`)
-  - **Post-filter only**: `contains`, `endswith` (by design — no lexicographic index shortcut)
-- **Completed**:
-  - ✅ `in`, `or`, nested paths, `ne`, index-backed `startswith`
-  - ✅ Multivalue secondary indexes and `std::flat_map` collection map (engine/index layer)
-- **Recommended next (API)**: `$apply` aggregation; deepen `$expand` (overrides, multi-valued refs) beyond v1 `{singular}_id` convention
+#### 0. 📊 OData query surface
+- **Checklist**: [odata.md](odata.md) — supported today vs pipeline
+- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`)
+- **`$apply` groupby/aggregate**: ✅ v1 shipped — `groupby((field),aggregate(amount with sum as Total))` (+ `average`/`min`/`max`); optional `$filter` before aggregate
+- **Next**: deeper `$expand` (overrides, multi-valued refs) beyond `{singular}_id`; richer `$apply` (multi-key, transform chains)
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

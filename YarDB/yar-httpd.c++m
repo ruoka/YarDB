@@ -818,6 +818,53 @@ private:
                 return response_with_headers{::http::status_ok, std::to_string(static_cast<long long>(count)), std::optional<::http::headers>{}};
             }
 
+            // Handle $apply (v1: groupby + aggregate). Optional $filter only.
+            if(params.contains("$apply"s))
+            {
+                const auto incompatible = std::array{
+                    "$top"sv, "$skip"sv, "$orderby"sv, "$select"sv, "$expand"sv, "$count"sv};
+                for(const auto name : incompatible)
+                {
+                    if(params.contains(std::string{name}))
+                    {
+                        auto error = xson::object{
+                            {"error", "Unprocessable Entity"s},
+                            {"message", "$apply v1 cannot be combined with "s + std::string{name}}
+                        };
+                        return response_with_headers{
+                            status_unprocessable_entity,
+                            xson::json::stringify(error),
+                            std::optional<::http::headers>{}};
+                    }
+                }
+
+                try
+                {
+                    const auto collection_name = validate_collection_name(uri.path[1]);
+                    const auto query = yar::http::odata::parse_apply(params["$apply"s]);
+                    auto filter = std::optional<yar::http::odata::parsed_filter>{};
+                    if(params.contains("$filter"s))
+                        filter = yar::http::odata::parse_filter(params["$filter"s]);
+                    const auto document = yar::http::odata::read_with_apply(
+                        m_engine, collection_name, query, filter);
+                    return response_with_headers{
+                        ::http::status_ok,
+                        xson::json::stringify(document),
+                        std::optional<::http::headers>{}};
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", std::string{e.what()}}
+                    };
+                    return response_with_headers{
+                        status_unprocessable_entity,
+                        xson::json::stringify(error),
+                        std::optional<::http::headers>{}};
+                }
+            }
+
             // Handle $top (OData: $top=n)
             if(params.contains("$top"s))
             {

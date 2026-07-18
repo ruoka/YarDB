@@ -6,6 +6,7 @@ This directory contains comprehensive project documentation organized by topic a
 
 ### 🔧 Development & Engineering
 - **[development.md](development.md)** - Development workflows, quick reference, and **development roadmap**
+- **[odata.md](odata.md)** - OData **supported vs pipeline** checklist (`$apply`, `$expand`, …)
 - **[changelog.md](changelog.md)** - **Shipped features and smoke coverage** (completed work)
 - **[project_organization.md](project_organization.md)** - Project structure and P1204R0 compliance
 - **[clang_module_flags.md](clang_module_flags.md)** - C++23 module handling in C++ Builder

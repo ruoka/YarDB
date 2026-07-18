@@ -2146,6 +2146,115 @@ auto register_odata_tests()
         };
     };
 
+    scenario("$apply groupby and aggregate parsing and execution, [yardb]") = []
+    {
+        given("A groupby((status),aggregate(amount with sum as Total)) expression") = []
+        {
+            when("Parsing the $apply string") = []
+            {
+                const auto query = parse_apply(
+                    "groupby((status),aggregate(amount with sum as Total))"sv);
+
+                then("Group field and sum aggregate are extracted") = [query]
+                {
+                    require_eq(query.group_fields.size(), 1u);
+                    require_eq(query.group_fields[0], "status"s);
+                    require_eq(query.aggregates.size(), 1u);
+                    require_eq(query.aggregates[0].field, "amount"s);
+                    require_eq(query.aggregates[0].alias, "Total"s);
+                    require_eq(
+                        static_cast<int>(query.aggregates[0].method),
+                        static_cast<int>(aggregate_method::sum));
+                };
+            };
+        };
+
+        given("Documents with status and amount") = []
+        {
+            when("Applying groupby sum") = []
+            {
+                auto docs = object{object::array{
+                    object{{"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"status"s, "active"s}, {"amount"s, 5}},
+                    object{{"status"s, "pending"s}, {"amount"s, 7}},
+                    object{{"status"s, "pending"s}, {"amount"s, 3}},
+                }};
+                const auto query = parse_apply(
+                    "groupby((status),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, query);
+
+                then("Each status has the summed Total") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 2u);
+
+                    auto totals = std::map<string, long long>{};
+                    for(const auto& row : rows)
+                    {
+                        totals[row["status"s].get<string>()] =
+                            static_cast<long long>(row["Total"s]);
+                    }
+                    require_eq(totals["active"s], 15);
+                    require_eq(totals["pending"s], 10);
+                };
+            };
+
+            when("Applying whole-set aggregate without groupby") = []
+            {
+                auto docs = object{object::array{
+                    object{{"amount"s, 10}},
+                    object{{"amount"s, 5}},
+                }};
+                const auto query = parse_apply("aggregate(amount with sum as Total)"sv);
+                const auto result = apply_aggregation(docs, query);
+
+                then("One row with the grand total") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_eq(static_cast<long long>(rows[0]["Total"s]), 15);
+                };
+            };
+        };
+
+        given("An engine-backed collection") = []
+        {
+            const auto test_file = "./odata_apply_engine.db"s;
+            when("Reading with $apply via read_with_apply") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto a = object{{"status"s, "active"s}, {"amount"s, 20}};
+                auto b = object{{"status"s, "active"s}, {"amount"s, 22}};
+                auto c = object{{"status"s, "vip"s}, {"amount"s, 8}};
+                require_true(engine.create("orders"s, a).has_value());
+                require_true(engine.create("orders"s, b).has_value());
+                require_true(engine.create("orders"s, c).has_value());
+
+                const auto query = parse_apply(
+                    "groupby((status),aggregate(amount with sum as Total))"sv);
+                const auto filter = parse_filter("amount gt 10"sv);
+                const auto result = read_with_apply(engine, "orders"s, query, filter);
+
+                then("Filter runs before aggregation") = [=]()
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_eq(rows[0]["status"s].get<string>(), "active"s);
+                    require_eq(static_cast<long long>(rows[0]["Total"s]), 42);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
     return true;
 }
 

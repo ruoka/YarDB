@@ -12,6 +12,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **`$apply` groupby/aggregate (v1)** | `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))` — also `average`/`min`/`max` and whole-set `aggregate(...)`; optional `$filter` first; see [odata.md](odata.md) |
 | **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |
 | **Same-operator range AND** | `age gt 20 and age gt 10` keeps the tighter bound (`$gt:20`) instead of last-write-wins loosening the filter |
 | **Same-field `$in` AND** | `status in ('a','b') and status in ('b','c')` intersects membership (`b` only) instead of last-write-wins keeping the second list |

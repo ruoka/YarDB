@@ -1780,6 +1780,64 @@ auto test_set()
         };
     };
 
+    test_case("OData $apply groupby aggregate, [yardb]") = []
+    {
+        const auto test_file = "./httpd_test_odata_apply.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("GET groupby sum returns Totals per status") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/orders"s,
+                    R"({"status":"active","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/orders"s,
+                    R"({"status":"active","amount":5})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/orders"s,
+                    R"({"status":"pending","amount":7})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/orders?$apply=groupby((status),aggregate(amount%20with%20sum%20as%20Total))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto totals = std::map<string, long long>{};
+            for(const auto& row : rows.get<object::array>())
+            {
+                totals[row["status"s].get<string>()] = static_cast<long long>(row["Total"s]);
+            }
+            require_eq(totals["active"s], 15);
+            require_eq(totals["pending"s], 7);
+        };
+
+        section("GET $apply with $top is rejected") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/orders?$apply=aggregate(amount%20with%20sum%20as%20Total)&$top=1"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error.has("message"s));
+        };
+    };
+
     test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes, [yardb]") = []
     {
         const auto test_file = "./httpd_test_indexes.db";

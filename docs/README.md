@@ -33,27 +33,27 @@ See **[changelog.md](changelog.md)**, the single source of truth for shipped fea
 ## 📖 Reading Guide
 
 ### New to YarDB?
-1. Start with root **[README.md](../README.md)** for project overview
+1. Start with root **[README.md](../README.md)** for overview and **intended use** (mainly microservice persistence with parallel/fault-tolerant instances)
 2. Read **[programs.md](programs.md)** to understand available tools
 3. Check **[development.md](development.md)** for build/test instructions
 
 ### Contributing?
-1. Review **[development.md](development.md)** for development workflows
+1. Review **[development.md](development.md)** for development workflows and architecture decisions
 2. See **[project_organization.md](project_organization.md)** for code organization
 3. Check **[changelog.md](changelog.md)** for what already shipped
 4. Check **[archive/](archive/)** for historical documentation and completed proposals
 
 ### Operating YarDB?
-1. Read **[programs.md](programs.md)** for detailed command documentation
-2. Check **[deployment.md](deployment.md)** for production deployment
+1. Read **[deployment.md](deployment.md#target-deployment-model)** for the one-service / one-file model
+2. Read **[programs.md](programs.md)** for detailed command documentation
 3. Monitor **[development.md](development.md)** roadmap for upcoming features
 
 ## 📝 Documentation Principles
 
-1. **Root README.md** - Concise project overview and entry point
+1. **Root README.md** - Concise project overview, intended use, and entry point
 2. **programs.md** - Canonical executable and HTTP API behavior
-3. **deployment.md** - Canonical operational, security, backup, and recovery guidance
-4. **development.md** - Contributor workflow and active roadmap
+3. **deployment.md** - Canonical operational model, security, backup, and recovery guidance
+4. **development.md** - Contributor workflow, architecture decisions, and active roadmap
 5. **changelog.md** - Canonical shipped-work log and current verification totals
 6. **archive/** - Historical evaluations and completed proposals; never the current reference
 7. **Link instead of copying** - Keep detailed facts in their canonical document

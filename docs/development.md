@@ -325,7 +325,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Connection Pooling**: Efficient connection management
 - **Async I/O**: Non-blocking operations
 - **Memory Management**: Memory-mapped files, optimized storage
-- **Horizontal Scaling**: Multi-node clustering support
+- **Parallelism & fault tolerance (main target)**: Multiple `yardb` instances for one owner’s dataset — typically one microservice (replication, failover, production-grade proxy semantics); prefer separate deployments when domains are independent
 
 ##### Engine Reader/Writer Concurrency — ✅ implemented (Jul 2026)
 
@@ -346,6 +346,14 @@ The storage writer remains single-owner. A write lock covers file mutation and s
 - **Development Tools**: GUI admin interface, query debugger
 
 ## Architecture Decisions
+
+### Deployment model: mainly microservice persistence
+- **Main target**: Persistence for one owner with one or a few related datasets — typically a microservice. Other uses are fine when they match that shape
+- **Unit of ownership**: Prefer one YarDB deployment per owner; separate deployments when domains are independent
+- **Aim per owner**: Parallel and fault-tolerant `yardb` instances for the same dataset (throughput + failover)
+- **Today**: One writer per open database file (exclusive `.pid` lock); `yarproxy` is not yet production HA
+- **Weaker fit**: One shared store for many unrelated domains (monolith / multi-tenant enterprise style) — not the main design target
+- **Operational detail**: See [deployment.md](deployment.md#target-deployment-model)
 
 ### Security Architecture
 - **TLS Proxy Pattern**: Transport security handled externally for separation of concerns

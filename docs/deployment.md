@@ -1,18 +1,34 @@
 # YarDB Production Deployment Guide
 
+## Target deployment model
+
+YarDB is mainly targeted as microservice persistence. Other uses are fine when they match the same shape (one owner, one or a few datasets). Within that primary case, the aim is still parallel and fault-tolerant YarDB instances for that owner’s dataset.
+
+| Typical assumption (main target) | Consequence |
+|----------------------------------|-------------|
+| One microservice owns one (or a few related) datasets | Give that owner its own YarDB deployment |
+| The owner needs throughput and uptime | Run multiple `yardb` instances for that dataset (parallelism + fault tolerance) |
+| Domains are independent | Prefer separate deployments per owner rather than one shared store for many domains |
+
+Keep each owner’s data private where practical (loopback + reverse proxy, or network policy). Stuffing unrelated domains into one deployment “for convenience” is a weaker fit for how YarDB is designed.
+
+**Today vs aim:** each open database file still has one writer (exclusive `{database}.pid` lock). `yarproxy` can fan out HTTP to independent backends for development, but does not yet provide production-grade replication or failover. Parallel / fault-tolerant instances for a given owner’s dataset remain the product direction.
+
 ## 🚀 Production Readiness Status
 
-**Current State**: **Development/Testing** - Not yet production-ready
+**Current State**: **Development/Testing** - Not yet production-ready for unattended production use
 - ✅ Basic HTTP server with REST API
 - ✅ Document storage and retrieval
 - ✅ OData query support
 - ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
-- ❌ **Missing**: JWT/OAuth2, full RBAC, TLS at reverse proxy, high availability
+- ❌ **Missing for hardened deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
+- ❌ **Missing for parallel / fault-tolerant instances**: production-grade replication, failover, and consistent multi-instance semantics (see below)
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
 - 🔐 **Security & Authentication** (data + admin PATs shipped; JWT/RBAC and TLS at reverse proxy still planned; safe bind defaults shipped)
 - 📊 **Monitoring & Observability** (minimum Prometheus `/metrics` shipped; richer labels / tracing planned; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
+- 🔁 **Parallelism & fault tolerance** (multiple instances for one owner’s dataset — the main microservice case)
 
 ## 🏗️ Building for Production
 
@@ -219,18 +235,22 @@ Point-in-time recovery is not implemented yet. Stop `yardb` before copying, expo
 - **Log Files**: Syslog or application logs
 - **Temp Space**: For large query operations
 
-## 🚨 High Availability & Scaling
+## 🚨 Availability & Scaling
 
-### Current Limitations
-- **Single Node**: Each `yardb` process owns one database file; no built-in clustering
-- **`yarproxy`**: Round-robin reads and write fan-out only — independent DBs, no sync, no guaranteed consistency (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
-- **Manual backup/compact only**: `yarexport` / `yarimport` (no automated PITR)
+### Main target (microservice-shaped ownership)
+- **Ownership boundary**: one owner (typically a microservice) → one YarDB deployment for its collections. Prefer separate deployments when domains are independent.
+- **Aim per owner**: several parallel, fault-tolerant `yardb` instances for that dataset (throughput + failover).
+- **Today**: one writer per open database file (exclusive `.pid` lock); `yarproxy` is HTTP fan-out for independent backends in development — not production replication/HA yet (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
+- **Manual backup/compact**: `yarexport` / `yarimport` (no automated PITR)
 
-### Future HA Features (Roadmap)
-- **Multi-node Replication** with automatic failover and conflict handling
-- **Production-grade proxy** with health checks, partial-failure reporting, and read-your-writes semantics
-- **Automated Backups** with retention policies
-- **Horizontal Scaling** support
+### Roadmap (per owner / per microservice)
+- Replication and automatic failover among instances that serve the same dataset
+- Production-grade proxy: health checks, partial-failure reporting, and clear read/write consistency (including read-your-writes where required)
+- Automated backups and retention for each deployment
+
+### Weaker fit (not the main target)
+- One shared YarDB for many unrelated domains (monolith-style or multi-tenant enterprise store)
+- Expecting enterprise shared-DB features that assume that model
 
 ## 🔧 Runtime Requirements
 
@@ -288,13 +308,14 @@ sar -n DEV 1
 - [ ] **Security**: Bind to private interfaces (or explicit public bind with PAT); enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
 - [ ] **Monitoring**: Set up metrics collection and alerting
 - [ ] **Backup**: Configure regular backup procedures
-- [ ] **Single writer**: Ensure one process owns each database and document the stale-lock runbook
+- [ ] **Ownership boundary**: Prefer one YarDB deployment per owner (e.g. per microservice); avoid stuffing unrelated domains into one store unless you accept the weaker fit
+- [ ] **Instance lock awareness**: Until multi-instance semantics ship, ensure one process owns each open database file and document the stale-lock runbook
 - [ ] **Client limits**: Ensure clients keep request bodies within the 1 MiB limit
-- [ ] **High Availability**: Plan for redundancy and failover
-- [ ] **Performance**: Load test and tune resource limits
+- [ ] **Parallelism & fault tolerance**: Plan for multiple instances when the owner needs them; today use explicit ops patterns, and track the HA roadmap above
+- [ ] **Performance**: Load test within the expected dataset size for that deployment
 - [ ] **Documentation**: Update runbooks and procedures
 
 ---
 
-**⚠️ Important**: YarDB is currently in development and should not be used in production environments without implementing the security and monitoring features outlined in the development roadmap.
+**⚠️ Important**: YarDB is still hardening for production (auth, TLS at the proxy, multi-instance semantics, ops automation). It is mainly targeted at per-owner (typically microservice) persistence with parallel/fault-tolerant instances for that owner’s data — a weaker fit as a shared enterprise database for many domains.
 

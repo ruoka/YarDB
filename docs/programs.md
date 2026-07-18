@@ -4,16 +4,16 @@ This document describes the various programs included in the YarDB project.
 
 ## yardb - Database Server
 
-The main database server that provides a RESTful HTTP API for document storage and retrieval.
+The main database server that provides a RESTful HTTP API for document storage and retrieval. It is mainly targeted at per-microservice persistence (one owner’s collections, with parallel and fault-tolerant instances as the aim). Other uses are fine when they match that shape; a shared store for many unrelated domains is a weaker fit.
 
 ### Purpose
 
 `yardb` is the core database server that:
 - Accepts HTTP/1.1 requests
-- Stores documents in FSON-encoded format
+- Stores documents in FSON-encoded format for one service’s dataset
 - Provides RESTful CRUD operations
-- Manages collections and indexing
-- Handles concurrent requests via multi-threaded architecture
+- Manages collections and indexing for that service’s dataset
+- Handles concurrent requests in-process (shared locks for reads; exclusive write lock; exclusive `.pid` ownership of each open file today)
 
 ### Usage
 
@@ -29,10 +29,11 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [
   - Binding to `0.0.0.0` or `::` **requires** `--pat` or `--pat-file`
 
 - `--file=<name>` - Database file path (default: `yar.db`)
-  - The database file stores all collections and documents
+  - The database file stores all collections and documents for this instance
   - If the file doesn't exist, it will be created
-  - Multiple instances can use different files for separate databases
-  - Opening creates an exclusive `{file}.pid` lock; verify no live owner before manually removing a stale lock
+  - Prefer one data store per owner (e.g. per microservice); sharing one file across unrelated domains is a weaker fit
+  - Opening creates an exclusive `{file}.pid` lock (one writer per open file today); verify no live owner before manually removing a stale lock
+  - Parallel / fault-tolerant multi-instance operation for the same owner’s dataset is the product aim; see [deployment.md](deployment.md#availability--scaling)
   - Startup recovers incomplete tails automatically and refuses structurally corrupt files
 
 - `--clog` - Redirect logging to console (stdout/stderr) instead of syslog
@@ -399,15 +400,15 @@ Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter
 
 ## yarproxy - HTTP Fan-out Proxy
 
-Forwards HTTP requests to multiple independent `yardb` backends. Each backend has its own database file.
+Forwards HTTP requests to multiple independent `yardb` backends. Each backend has its own database file. The long-term aim (mainly for the microservice case) is parallel, fault-tolerant instances per owner; `yarproxy` today is only a development fan-out, not that production path.
 
 ### Purpose
 
-`yarproxy` is a **thin HTTP forwarder** for development and testing:
+`yarproxy` is a thin HTTP forwarder for development and testing:
 - **Read fan-out** (GET, HEAD): round-robin — one backend per request
 - **Write fan-out** (POST, PUT, PATCH, DELETE): same request sent to every backend
 
-It does **not** implement database replication, leader election, or conflict resolution.
+It does not implement database replication, leader election, or conflict resolution. Those belong to the per-service multi-instance roadmap in [deployment.md](deployment.md#availability--scaling).
 
 ### Usage
 
@@ -472,7 +473,7 @@ yarproxy --clog --replica=http://db1:2112 --replica=http://db2:2112 --replica=ht
 - **Read experiments**: Observe round-robin across independent datasets
 - **Write fan-out demos**: Broadcast creates/updates to several empty databases started together
 
-Not suitable for: production HA, guaranteed replication, or strongly consistent reads after writes.
+Not suitable yet for: production HA, guaranteed replication, or strongly consistent reads after writes for a microservice’s dataset.
 
 ### Smoke tests
 

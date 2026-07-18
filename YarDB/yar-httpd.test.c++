@@ -3774,6 +3774,36 @@ auto test_set()
             require_true(body.find(R"(path="/labelprobe")") != std::string::npos);
             require_true(body.find(R"(scenario="simple")") != std::string::npos);
         };
+
+        section("GET /metrics templates document id path segments") = [setup]
+        {
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(), "POST"s, "/idlabel"s, R"({"name":"Ada"})"s
+            );
+            require_eq(post_status, "201"s);
+            (void)post_reason;
+            (void)post_headers;
+            const auto created = json::parse(post_body);
+            const auto id = static_cast<xson::integer_type>(created["_id"s]);
+            const auto id_path = "/idlabel/"s + std::to_string(id);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, id_path, ""s
+            );
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            (void)get_body;
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/metrics"s, ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            require_true(body.find(R"(path="/idlabel/{id}")") != std::string::npos);
+            require_true(body.find("path=\""s + id_path + "\"") == std::string::npos);
+        };
     };
 
     test_case("GET /ready readiness probe, [yardb]") = []

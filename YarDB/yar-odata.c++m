@@ -326,11 +326,13 @@ inline bool map_contains_value(const xson::object& values, const xson::object& v
 inline void intersect_in_maps(xson::object& target, const xson::object& source)
 {
     auto kept = xson::object{};
-    for(const auto& [index, value] : target.get<db::object::map>()
+    // Note: views::enumerate needs libc++ 23; CI/devcontainer stay on Clang 21 for now
+    // (apt.llvm.org clang-23 currently segfaults compiling net:http_server_middlewares).
+    std::ranges::for_each(
+        target.get<db::object::map>()
             | std::views::values
-            | std::views::filter([&](const auto& value) { return map_contains_value(source, value); })
-            | std::views::enumerate)
-        kept[std::to_string(index)] = value;
+            | std::views::filter([&](const auto& value) { return map_contains_value(source, value); }),
+        [&](const auto& value) { kept[std::to_string(kept.size())] = value; });
     target = std::move(kept);
 }
 
@@ -563,13 +565,14 @@ inline std::optional<std::string_view> get_string_field_by_path(
     const auto segments = split_property_path(path);
     const auto* current = &document;
 
-    for(const auto& [index, segment] : segments | std::views::enumerate)
+    for(std::size_t i = 0; i < segments.size(); ++i)
     {
+        const auto& segment = segments[i];
         if(not current->has(segment))
             return std::nullopt;
 
         const auto& next = (*current)[segment];
-        if(index + 1 == segments.size())
+        if(i + 1 == segments.size())
         {
             if(not next.is_string())
                 return std::nullopt;
@@ -589,8 +592,8 @@ inline std::optional<std::string_view> get_string_field_by_path(
 inline auto make_in_selector(std::string_view field, std::span<const xson::object> values)
 {
     auto in_map = xson::object{};
-    for(const auto& [index, value] : values | std::views::enumerate)
-        in_map[std::to_string(index)] = value;
+    for(std::size_t i = 0; i < values.size(); ++i)
+        in_map[std::to_string(i)] = values[i];
 
     auto selector = xson::object{};
     set_nested_selector_leaf(selector, field, xson::object{{"$in"s, std::move(in_map)}});

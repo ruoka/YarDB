@@ -15,6 +15,22 @@ struct write_preconditions
     std::optional<std::chrono::system_clock::time_point> if_unmodified_since;
 };
 
+// HTTP PUT upsert preconditions evaluated under the same exclusive lock as
+// create/replace so If-Match / If-None-Match cannot race a concurrent writer.
+struct put_preconditions
+{
+    write_preconditions write{};
+    bool require_existing = false; // If-Match present (including *)
+    bool if_none_match_star = false;
+    std::optional<position_type> if_none_match_position;
+};
+
+enum class put_outcome
+{
+    created,
+    replaced
+};
+
 // Durable identity of a live document version. Position is the ETag source;
 // timestamp feeds Last-Modified. Captured under the same engine lock as the
 // matching body so HTTP responses cannot pair a stale body with a fresh ETag.
@@ -96,6 +112,15 @@ public:
         const object& selector,
         object& document,
         write_preconditions preconditions = {},
+        document_revision* revision = nullptr);
+
+    // Atomic PUT upsert: decide create vs replace and honor put_preconditions
+    // under one exclusive lock (no unlocked existence probe).
+    db_result<put_outcome> put(
+        std::string_view collection,
+        const object& selector,
+        object& document,
+        put_preconditions preconditions = {},
         document_revision* revision = nullptr);
 
     db_result<std::size_t> update(std::string_view collection, const object& selector, const object& updates)
@@ -199,6 +224,12 @@ private:
         const object& selector,
         object& updates,
         object& documents);
+    db_result<std::size_t> replace_impl(
+        std::string_view collection,
+        const object& selector,
+        object& document,
+        write_preconditions preconditions,
+        document_revision* revision = nullptr);
 
     std::string m_db;
     storage_lock m_lock;

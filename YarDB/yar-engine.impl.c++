@@ -1224,10 +1224,19 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     write_preconditions preconditions,
     yar::db::document_revision* revision)
 {
+    auto lock = std::unique_lock{m_rwlock};
+    return replace_impl(collection, selector, document, preconditions, revision);
+}
+
+yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
+    std::string_view collection,
+    const yar::db::object& selector,
+    yar::db::object& document,
+    write_preconditions preconditions,
+    yar::db::document_revision* revision)
+{
     using xson::fson::operator >>;
     using xson::fson::operator <<;
-
-    auto lock = std::unique_lock{m_rwlock};
 
     if(revision != nullptr)
         *revision = {};
@@ -1427,6 +1436,83 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     m_index = std::move(staged);
     assign_revision(revision, metadata);
     return positions.size();
+}
+
+yar::db::db_result<yar::db::put_outcome> yar::db::engine::put(
+    std::string_view collection,
+    const yar::db::object& selector,
+    yar::db::object& document,
+    put_preconditions preconditions,
+    yar::db::document_revision* revision)
+{
+    using xson::fson::operator>>;
+
+    auto lock = std::unique_lock{m_rwlock};
+
+    if(revision != nullptr)
+        *revision = {};
+
+    auto current_position = std::optional<position_type>{};
+    if(const auto* index = find_index(m_index, collection); index != nullptr)
+    {
+        for(const auto position : index->view(selector))
+        {
+            auto metadata = yar::db::metadata{};
+            auto existing = yar::db::object{};
+            m_storage.clear();
+            m_storage.seekg(position, m_storage.beg);
+            m_storage >> metadata >> existing;
+            if(m_storage.fail())
+                return std::unexpected{db_error(
+                    db_error_code::corrupt_storage,
+                    db_operation::replace,
+                    "Failed to read a document selected for put"s)};
+            if(existing.match(selector))
+            {
+                current_position = metadata.position;
+                break;
+            }
+        }
+    }
+
+    if(current_position.has_value())
+    {
+        if(preconditions.if_none_match_star
+            or (preconditions.if_none_match_position.has_value()
+                and *preconditions.if_none_match_position == *current_position))
+        {
+            return std::unexpected{db_error(
+                db_error_code::precondition_failed,
+                db_operation::replace,
+                "Write preconditions were not met"s)};
+        }
+
+        auto replaced = replace_impl(
+            collection, selector, document, preconditions.write, revision);
+        if(not replaced)
+            return std::unexpected{replaced.error()};
+        if(*replaced == 0)
+        {
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::replace,
+                "Document not found"s)};
+        }
+        return put_outcome::replaced;
+    }
+
+    if(preconditions.require_existing)
+    {
+        return std::unexpected{db_error(
+            db_error_code::precondition_failed,
+            db_operation::create,
+            "Write preconditions were not met"s)};
+    }
+
+    auto created = create_impl(collection, document, revision);
+    if(not created)
+        return std::unexpected{created.error()};
+    return put_outcome::created;
 }
 
 bool yar::db::engine::history(std::string_view collection, const yar::db::object& selector, yar::db::object& documents)

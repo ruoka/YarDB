@@ -34,6 +34,12 @@ inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$)[a-z][
 using handler = ::http::callback_with_headers;
 using middleware_factory = ::http::middleware_factory;
 
+// Do not trust client-supplied proxy headers for the default rate-limit key.
+inline auto safe_rate_limit_key_extractor(std::string_view, const ::http::headers&)
+{
+    return "unknown"s;
+}
+
 inline auto database_error_response(const yar::db::db_error& error)
 {
     if(error.code == yar::db::db_error_code::precondition_failed)
@@ -207,7 +213,10 @@ public:
         stop(); // Stop server and wait for thread to finish
     }
 
-    // Rate limiting configuration
+    // Rate limiting configuration.
+    // Default key ignores X-Forwarded-For / X-Real-IP — those headers are
+    // client-spoofable unless a trusted reverse proxy strips/overwrites them.
+    // Pass a custom extractor only when the deployment trusts those headers.
     void configure_rate_limiting(
         std::size_t max_requests = 100,
         std::chrono::seconds window_seconds = std::chrono::seconds{60},
@@ -219,7 +228,7 @@ public:
         if(key_extractor)
             m_rate_limit_key_extractor = std::move(key_extractor);
         else
-            m_rate_limit_key_extractor = ::http::middleware::default_rate_limit_key_extractor;
+            m_rate_limit_key_extractor = safe_rate_limit_key_extractor;
     }
 
     void disable_rate_limiting()
@@ -227,7 +236,7 @@ public:
         m_rate_limiting_enabled = false;
         m_rate_limit_max_requests = 100;
         m_rate_limit_window_seconds = std::chrono::seconds{60};
-        m_rate_limit_key_extractor = ::http::middleware::default_rate_limit_key_extractor;
+        m_rate_limit_key_extractor = safe_rate_limit_key_extractor;
     }
 
     // CORS configuration
@@ -1255,105 +1264,49 @@ private:
                 };
                 return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
             }
-            
+
             const auto uri = ::http::uri{request};
             auto document = xson::json::parse(body);
             const auto id = utils::stoll(uri.path[2]); // Regex ensures numeric format
-            
+
             // Ensure the document has the correct _id from the URL
             document["_id"s] = id;
-            
+
             const auto selector = xson::object{"_id", id};
-            auto existing_docs = xson::object{};
             const auto collection = validate_collection_name(uri.path[1]);
-            const auto exists = m_engine.read(collection, selector, existing_docs);
             auto response_headers = ::http::headers{};
             const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
-            const auto preconditions = write_preconditions_from_headers(headers);
-            const auto resource_exists = exists and not existing_docs.get<xson::object::array>().empty();
+            const auto preconditions = put_preconditions_from_headers(headers);
 
-            // If-None-Match on PUT: reject modification when the current
-            // representation matches (RFC 9110 create-only / not-modified).
-            // Checked before replace so If-None-Match: * cannot overwrite.
-            if(resource_exists and headers.contains("if-none-match"s))
+            // Persist under one engine lock so existence, If-Match / If-None-Match,
+            // and create/replace cannot race a concurrent writer.
+            auto revision = yar::db::document_revision{};
+            const auto outcome = m_engine.put(
+                collection, selector, document, preconditions, &revision);
+            if(not outcome)
+                return database_error_response(outcome.error());
+
+            if(revision.position.has_value())
             {
-                auto current_etag = ""s;
-                if(auto position = m_engine.metadata_position(collection, selector))
-                    current_etag = generate_etag(*position);
-                const auto none_match = check_if_none_match(headers, current_etag);
-                if(none_match.has_value() and not none_match.value())
-                {
-                    return database_error_response({
-                        yar::db::db_error_code::precondition_failed,
-                        yar::db::db_operation::replace,
-                        "Write preconditions were not met"s});
-                }
+                auto new_etag = generate_etag(revision.position.value());
+                response_headers.set("etag"s, new_etag);
             }
 
-            if(resource_exists)
+            yar::http::odata::add_metadata_if_requested(document, headers, collection, id);
+            if(*outcome == yar::db::put_outcome::created)
             {
-                // Persist the request body only — OData response annotations are
-                // added after replace, matching POST/PATCH.
-                auto revision = yar::db::document_revision{};
-                const auto replaced = m_engine.replace(
-                    collection, selector, document, preconditions, &revision);
-                if(not replaced)
-                    return database_error_response(replaced.error());
-                if(*replaced == 0)
-                {
-                    // Lost the race with a concurrent delete (or similar): do not report success.
-                    auto error = xson::object{
-                        {"error", "Not Found"s},
-                        {"message", "Document not found"s},
-                        {"collection", collection},
-                        {"id", id}
-                    };
-                    return response_with_headers{
-                        status_not_found,
-                        xson::json::stringify(error),
-                        std::optional<::http::headers>{}};
-                }
-
-                if(revision.position.has_value())
-                {
-                    auto new_etag = generate_etag(revision.position.value());
-                    response_headers.set("etag"s, new_etag);
-                }
-
-                response_headers.set("content-location"s, resource_path);
-                yar::http::odata::add_metadata_if_requested(document, headers, collection, id);
-                return response_with_headers{::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers)};
-            }
-
-            // If-Match requires a current representation. Upsert-create must not
-            // resurrect a missing/deleted resource when the client conditioned on
-            // an existing ETag (or If-Match: *). write_preconditions leaves
-            // If-Match: * as an empty position, so enforce via the header here.
-            if(headers.contains("if-match"s))
-            {
-                return database_error_response({
-                    yar::db::db_error_code::precondition_failed,
-                    yar::db::db_operation::create,
-                    "Write preconditions were not met"s});
-            }
-
-            {
-                // Document doesn't exist - create it (response metadata only after persist)
-                auto revision = yar::db::document_revision{};
-                const auto created = m_engine.create(collection, document, &revision);
-                if(not created)
-                    return database_error_response(created.error());
-
-                if(revision.position.has_value())
-                {
-                    auto new_etag = generate_etag(revision.position.value());
-                    response_headers.set("etag"s, new_etag);
-                }
-
                 response_headers.set("location"s, resource_path);
-                yar::http::odata::add_metadata_if_requested(document, headers, collection, id);
-                return response_with_headers{status_created, xson::json::stringify(document), std::make_optional(response_headers)};
+                return response_with_headers{
+                    status_created,
+                    xson::json::stringify(document),
+                    std::make_optional(response_headers)};
             }
+
+            response_headers.set("content-location"s, resource_path);
+            return response_with_headers{
+                ::http::status_ok,
+                xson::json::stringify(document),
+                std::make_optional(response_headers)};
         };
 
         auto put_document_middlewares = build_middleware_chain(method_put, "PUT_DOCUMENT"sv, "PUT_DOCUMENT_ERROR"sv, true);
@@ -1550,7 +1503,7 @@ private:
     bool m_rate_limiting_enabled = false;
     std::size_t m_rate_limit_max_requests = 100;
     std::chrono::seconds m_rate_limit_window_seconds{60};
-    std::function<std::string(std::string_view request, const ::http::headers&)> m_rate_limit_key_extractor = ::http::middleware::default_rate_limit_key_extractor;
+    std::function<std::string(std::string_view request, const ::http::headers&)> m_rate_limit_key_extractor = safe_rate_limit_key_extractor;
     
     // CORS configuration (optional)
     bool m_cors_enabled = false;

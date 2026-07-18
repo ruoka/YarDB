@@ -230,32 +230,58 @@ try
             throw runtime_error{"reindex failed: "s + reindexed.error().message};
     }
 
-    // Re-check lock immediately before install — yardb may have started during import.
-    if(filesystem::exists(lock_path, ec))
-        throw runtime_error{
-            "database lock appeared during import: "s + lock_path
-            + "; stop yardb and retry (staging left uninstalled)"s};
+    // Claim --file.pid with O_EXCL semantics before install so yardb cannot
+    // open the target between the existence check and the rename/hard-link.
+    // Only remove a lock we created; never delete another process's .pid.
+    auto install_lock_owned = false;
+    {
+        auto lock_file = ofstream{lock_path, ios::out | ios::noreplace};
+        if(not lock_file.is_open())
+            throw runtime_error{
+                "database lock appeared during import: "s + lock_path
+                + "; stop yardb and retry (staging left uninstalled)"s};
+        lock_file << chrono::system_clock::now().time_since_epoch().count() << '\n';
+        lock_file.flush();
+        if(lock_file.fail())
+        {
+            filesystem::remove(lock_path, ec);
+            throw runtime_error{"failed to initialize import lock: "s + lock_path};
+        }
+        install_lock_owned = true;
+    }
 
-    if(force)
+    try
     {
-        filesystem::rename(staging.path, file, ec);
-        if(ec)
-            throw system_error{ec, "failed to replace output database "s + file};
+        if(force)
+        {
+            filesystem::rename(staging.path, file, ec);
+            if(ec)
+                throw system_error{ec, "failed to replace output database "s + file};
+        }
+        else
+        {
+            // Hard-link install refuses to replace a target that appeared after the
+            // earlier exists check (rename would silently clobber it).
+            filesystem::create_hard_link(staging.path, file, ec);
+            if(ec)
+                throw system_error{
+                    ec,
+                    "failed to install output database "s + file
+                        + " (does the file already exist? use --force to overwrite)"s};
+            // Best-effort unlink of the staging path; `file` already links the inode.
+            filesystem::remove(staging.path, ec);
+        }
+        staging.release();
     }
-    else
+    catch(...)
     {
-        // Hard-link install refuses to replace a target that appeared after the
-        // earlier exists check (rename would silently clobber it).
-        filesystem::create_hard_link(staging.path, file, ec);
-        if(ec)
-            throw system_error{
-                ec,
-                "failed to install output database "s + file
-                    + " (does the file already exist? use --force to overwrite)"s};
-        // Best-effort unlink of the staging path; `file` already links the inode.
-        filesystem::remove(staging.path, ec);
+        if(install_lock_owned)
+            filesystem::remove(lock_path, ec);
+        throw;
     }
-    staging.release();
+
+    if(install_lock_owned)
+        filesystem::remove(lock_path, ec);
 
     clog << "Imported " << data_rows.size() << " document(s) and "
          << db_rows.size() << " index configuration(s) into " << file << endl;

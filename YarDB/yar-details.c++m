@@ -573,6 +573,42 @@ inline yar::db::write_preconditions write_preconditions_from_headers(const ::htt
     return pre;
 }
 
+// Build engine PUT preconditions from conditional HTTP headers.
+inline yar::db::put_preconditions put_preconditions_from_headers(const ::http::headers& headers)
+{
+    using namespace std::string_literals;
+    auto pre = yar::db::put_preconditions{};
+    pre.write = write_preconditions_from_headers(headers);
+    pre.require_existing = headers.contains("if-match"s);
+
+    if(headers.contains("if-none-match"s))
+    {
+        const auto& value = headers["if-none-match"s];
+        if(value == "*"s)
+        {
+            pre.if_none_match_star = true;
+        }
+        else
+        {
+            auto etag = value;
+            if(not etag.empty() and etag.front() == '"')
+                etag.erase(0, 1);
+            if(not etag.empty() and etag.back() == '"')
+                etag.pop_back();
+            try
+            {
+                pre.if_none_match_position = utils::stoll(etag);
+            }
+            catch(const std::exception&)
+            {
+                // Invalid ETag never matches a live position; create/replace proceed.
+            }
+        }
+    }
+
+    return pre;
+}
+
 // Generate ETag from metadata position
 inline auto generate_etag(std::int64_t position)
 {

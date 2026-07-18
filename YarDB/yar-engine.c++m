@@ -165,13 +165,14 @@ private:
 
 #ifndef NDEBUG
     // Test-only fault-injection seams. Free functions arm private flags so unit
-    // tests can force write / rollback-status / truncate failures without
-    // exposing those knobs on the public engine API. Compiled out of release
-    // builds (CB passes -DNDEBUG for `release`).
+    // tests can force write / rollback-status / truncate / torn-append failures
+    // without exposing those knobs on the public engine API. Compiled out of
+    // release builds (CB passes -DNDEBUG for `release`).
     friend void fail_next_write(engine&);
     friend void fail_write(engine&, std::size_t);
     friend void fail_next_rollback_status(engine&);
     friend void fail_next_truncate(engine&);
+    friend void fail_next_torn_append(engine&);
 #endif
 
     [[nodiscard]] std::ifstream open_reader() const;
@@ -180,6 +181,8 @@ private:
     bool consume_write_failure();
     bool consume_rollback_status_failure();
     bool consume_truncate_failure();
+    bool consume_torn_append_failure();
+    bool inject_torn_append(std::uintmax_t original_size);
     bool preconditions_met(const yar::db::metadata& metadata_record, const write_preconditions& preconditions) const;
 
     void setup_index_structure();
@@ -207,6 +210,7 @@ private:
     std::size_t m_writes_until_failure = 0;
     bool m_fail_rollback_status = false;
     bool m_fail_truncate = false;
+    bool m_fail_torn_append = false;
 #endif
     bool m_writable = true;
 };

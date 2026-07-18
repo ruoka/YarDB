@@ -1091,6 +1091,78 @@ auto test_set()
             require_eq(documents[0]["value"s], xson::integer_type{9});
         };
 
+        section("UpdateTornAppendTruncateFailurePreservesPrior") = []
+        {
+            // Append is torn (incomplete on disk) and truncate fails. Publishing
+            // staged would tombstone the prior while reopen drops the torn tail
+            // — silent data loss. Keep the prior live and disable further writes.
+            const auto test_file = "./engine_update_torn_append_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            const auto prior_id = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    updates = object{{"value"s, 2ll}},
+                    documents = object{};
+                require_true(engine.create("UpdateTornAppend"s, document).has_value());
+                const auto id = static_cast<xson::integer_type>(document["_id"s]);
+                const auto selector = object{{"_id"s, document["_id"s]}};
+
+                fail_next_torn_append(engine);
+                fail_next_truncate(engine);
+                const auto result = engine.update("UpdateTornAppend"s, selector, updates);
+
+                require_false(result.has_value());
+                require_eq(result.error().code, yar::db::db_error_code::rollback_failure);
+                require_true(engine.read("UpdateTornAppend"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{1});
+                return id;
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read(
+                "UpdateTornAppend"s,
+                object{{"_id"s, prior_id}},
+                documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+        };
+
+        section("ReplaceTornAppendTruncateFailurePreservesPrior") = []
+        {
+            const auto test_file = "./engine_replace_torn_append_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    documents = object{};
+                require_true(engine.create("ReplaceTornAppend"s, document).has_value());
+                const auto selector = object{{"_id"s, document["_id"s]}};
+                auto replacement = object{
+                    {"_id"s, document["_id"s]},
+                    {"value"s, 9ll}};
+
+                fail_next_torn_append(engine);
+                fail_next_truncate(engine);
+                const auto result = engine.replace("ReplaceTornAppend"s, selector, replacement);
+
+                require_false(result.has_value());
+                require_eq(result.error().code, yar::db::db_error_code::rollback_failure);
+                require_true(engine.read("ReplaceTornAppend"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{1});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("ReplaceTornAppend"s, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+        };
+
         section("DestroyStatusRestoreFailureCommitsDurableDelete") = []
         {
             // Delete markers are flushed, then status restore fails. Reporting

@@ -503,6 +503,39 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter ANDs two inequalities on one field") = []
+            {
+                then("Unions exclusions into $nin instead of last-write-wins") = []
+                {
+                    const auto [selector, filters] =
+                        parse_and_filter("status ne 'a' and status ne 'b'"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("status"s));
+                    require_true(selector["status"s].has("$nin"s));
+                    require_false(selector["status"s].has("$ne"s));
+                    const auto& nin_map = selector["status"s]["$nin"s];
+                    require_eq(nin_map.size(), 2u);
+                    require_eq(nin_map["0"s].get<string>(), "a"s);
+                    require_eq(nin_map["1"s].get<string>(), "b"s);
+
+                    require_true(object{{"status"s, "c"s}}.match(selector));
+                    require_false(object{{"status"s, "a"s}}.match(selector));
+                    require_false(object{{"status"s, "b"s}}.match(selector));
+
+                    // A later $ne must not resurrect a contradictory eq pair by
+                    // overwriting the sentinel $ne that encodes impossibility.
+                    const auto [contra, contra_filters] =
+                        parse_and_filter("status eq 'a' and status eq 'b' and status ne 'c'"sv);
+                    require_true(contra_filters.empty());
+                    require_true(contra["status"s].has("$eq"s));
+                    require_true(contra["status"s].has("$nin"s));
+                    require_false(contra["status"s].has("$ne"s));
+                    require_false(object{{"status"s, "a"s}}.match(contra));
+                    require_false(object{{"status"s, "b"s}}.match(contra));
+                    require_false(object{{"status"s, "c"s}}.match(contra));
+                };
+            };
+
             when("Filter uses empty 'in' list") = []
             {
                 then("Throws invalid_argument") = []
@@ -834,6 +867,39 @@ auto register_odata_tests()
                     const auto& items = docs.get<object::array>();
                     require_eq(items.size(), 1u);
                     require_eq(items[0]["name"s].get<string>(), "B"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Multiple inequalities are AND-combined on status") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"status"s}).has_value());
+
+                auto a = object{{"name"s, "A"s}, {"status"s, "a"s}};
+                auto b = object{{"name"s, "B"s}, {"status"s, "b"s}};
+                auto c = object{{"name"s, "C"s}, {"status"s, "c"s}};
+                require_true(engine.create("users"s, a).has_value());
+                require_true(engine.create("users"s, b).has_value());
+                require_true(engine.create("users"s, c).has_value());
+
+                // Last-write-wins would keep only ne 'b' and incorrectly return A+C.
+                const auto parsed = parse_filter("status ne 'a' and status ne 'b'"sv);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Returns only rows outside every excluded value") = [docs, count, test_file]
+                {
+                    require_eq(count, 1u);
+                    require_true(docs.is_array());
+                    const auto& items = docs.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "C"s);
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());

@@ -328,12 +328,11 @@ public:
     void add(const std::string& key);
 
     // Add multiple secondary index keys
-    // @param keys Vector of field names to index
-    void add(std::vector<std::string> keys);
+    // @param keys Field names to index
+    void add(std::span<const std::string> keys);
 
-    // Get list of all secondary index key names
-    // @return Vector of secondary key names
-    std::vector<std::string> keys() const;
+    // Secondary index key names (view into the index; valid while this object lives)
+    std::span<const std::string> keys() const;
 
     // Check if selector uses primary key (_id)
     // @param selector Query selector

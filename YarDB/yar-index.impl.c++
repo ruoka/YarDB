@@ -285,14 +285,14 @@ void yar::db::index::add(const std::string& key)
         m_secondary_keys.emplace(key, yar::db::secondary_index_type{});
 }
 
-void yar::db::index::add(std::vector<std::string> keys)
+void yar::db::index::add(std::span<const std::string> keys)
 {
     std::ranges::for_each(keys, [this](const std::string& key) { add(key); });
 }
 
-std::vector<std::string> yar::db::index::keys() const
+std::span<const std::string> yar::db::index::keys() const
 {
-    return m_secondary_keys.keys() | std::ranges::to<std::vector<std::string>>();
+    return m_secondary_keys.keys();
 }
 
 bool yar::db::index::primary_key(const yar::db::object& selector) const

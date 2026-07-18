@@ -632,7 +632,7 @@ std::vector<std::string> yar::db::engine::indexed_keys(std::string_view collecti
     const auto* index = find_index(m_index, collection);
     if(index == nullptr)
         return {};
-    return index->keys();
+    return index->keys() | std::ranges::to<std::vector<std::string>>();
 }
 
 yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::vector<std::string> keys)

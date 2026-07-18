@@ -2002,6 +2002,150 @@ auto register_odata_tests()
         };
     };
 
+    scenario("parse_filter bool null and numeric cross-type, [yardb]") = []
+    {
+        given("Documents with boolean, null, and JSON double fields") = []
+        {
+            const auto test_file = "./odata_bool_null_numeric_test.db"s;
+
+            when("Boolean and null literals are filtered") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("flags"s, {"active"s}).has_value());
+
+                auto on = object{{"name"s, "on"s}};
+                on["active"s] = true;
+                auto off = object{{"name"s, "off"s}};
+                off["active"s] = false;
+                auto missing = object{{"name"s, "missing"s}};
+                auto cleared = object{{"name"s, "cleared"s}};
+                cleared["active"s] = nullptr;
+                require_true(engine.create("flags"s, on).has_value());
+                require_true(engine.create("flags"s, off).has_value());
+                require_true(engine.create("flags"s, missing).has_value());
+                require_true(engine.create("flags"s, cleared).has_value());
+
+                const auto eq_true = parse_filter("active eq true"sv);
+                const auto ne_true = parse_filter("active ne true"sv);
+                const auto eq_null = parse_filter("active eq null"sv);
+                const auto true_docs = read_with_parsed_filter(engine, "flags"s, object{}, eq_true);
+                const auto ne_docs = read_with_parsed_filter(engine, "flags"s, object{}, ne_true);
+                const auto null_docs = read_with_parsed_filter(engine, "flags"s, object{}, eq_null);
+
+                then("Boolean and null literals match JSON bool/null values") = [=]()
+                {
+                    require_true(true_docs.is_array());
+                    require_eq(true_docs.get<object::array>().size(), 1u);
+                    require_eq(true_docs[0]["name"s].get<string>(), "on"s);
+
+                    // Stringified "true" would make ne match the true document.
+                    require_true(ne_docs.is_array());
+                    auto ne_names = std::vector<std::string>{};
+                    for(const auto& doc : ne_docs.get<object::array>())
+                        ne_names.push_back(doc["name"s].get<string>());
+                    require_false(std::ranges::contains(ne_names, "on"s));
+                    require_true(std::ranges::contains(ne_names, "off"s));
+
+                    require_true(null_docs.is_array());
+                    require_eq(null_docs.get<object::array>().size(), 1u);
+                    require_eq(null_docs[0]["name"s].get<string>(), "cleared"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Integer filter compares against JSON doubles with an index") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("scores"s, {"score"s}).has_value());
+
+                auto high = object{{"name"s, "high"s}};
+                high["score"s] = 100.0;
+                auto low = object{{"name"s, "low"s}};
+                low["score"s] = 3.5;
+                auto exact_int = object{{"name"s, "exact"s}, {"score"s, 100ll}};
+                require_true(engine.create("scores"s, high).has_value());
+                require_true(engine.create("scores"s, low).has_value());
+                require_true(engine.create("scores"s, exact_int).has_value());
+
+                const auto lt = parse_filter("score lt 9"sv);
+                const auto gt = parse_filter("score gt 0"sv);
+                const auto eq = parse_filter("score eq 100"sv);
+                const auto lt_docs = read_with_parsed_filter(engine, "scores"s, object{}, lt);
+                const auto gt_docs = read_with_parsed_filter(engine, "scores"s, object{}, gt);
+                const auto eq_docs = read_with_parsed_filter(engine, "scores"s, object{}, eq);
+                const auto ordered = read_with_parsed_filter(
+                    engine,
+                    "scores"s,
+                    object{{"$orderby"s, "score"s}, {"$top"s, 2ll}},
+                    parse_filter("score gt 0"sv));
+
+                then("Doubles are not ordered or matched by variant index") = [=]()
+                {
+                    require_true(lt_docs.is_array());
+                    require_eq(lt_docs.get<object::array>().size(), 1u);
+                    require_eq(lt_docs[0]["name"s].get<string>(), "low"s);
+
+                    require_true(gt_docs.is_array());
+                    require_eq(gt_docs.get<object::array>().size(), 3u);
+
+                    require_true(eq_docs.is_array());
+                    require_eq(eq_docs.get<object::array>().size(), 2u);
+
+                    require_true(ordered.is_array());
+                    require_eq(ordered.get<object::array>().size(), 2u);
+                    require_eq(ordered[0]["name"s].get<string>(), "low"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Parent and nested path AND is contradictory") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto acme = object{
+                    {"name"s, "Alice"s},
+                    {"Customer"s, object{{"Country"s, "USA"s}, {"Name"s, "Acme"s}}}};
+                auto other = object{
+                    {"name"s, "Bob"s},
+                    {"Customer"s, object{{"Country"s, "UK"s}, {"Name"s, "Beta"s}}}};
+                require_true(engine.create("clients"s, acme).has_value());
+                require_true(engine.create("clients"s, other).has_value());
+
+                // Last-write-wins kept only Country eq USA and returned Alice.
+                const auto parsed = parse_filter(
+                    "Customer eq 'Acme' and Customer/Country eq 'USA'"sv);
+                const auto docs = read_with_parsed_filter(engine, "clients"s, object{}, parsed);
+                const auto reversed = parse_filter(
+                    "Customer/Country eq 'USA' and Customer eq 'Acme'"sv);
+                const auto reversed_docs =
+                    read_with_parsed_filter(engine, "clients"s, object{}, reversed);
+
+                then("Both orders match nothing") = [=]()
+                {
+                    require_true(docs.is_array());
+                    require_eq(docs.get<object::array>().size(), 0u);
+                    require_true(reversed_docs.is_array());
+                    require_eq(reversed_docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
     return true;
 }
 

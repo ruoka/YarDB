@@ -22,7 +22,9 @@ using positions_type = std::vector<position_type>;
 
 using primary_index_type = std::flat_map<primary_key_type, position_type>;
 
-using secondary_index_type = std::flat_map<secondary_key_type, positions_type>;
+// Order integer_type and number_type by numeric value so range queries and
+// equality treat JSON doubles and OData integer literals consistently.
+using secondary_index_type = std::flat_map<secondary_key_type, positions_type, xson::primitive_less_t>;
 
 using secondary_index_map = std::flat_map<secondary_index_name, secondary_index_type>;
 

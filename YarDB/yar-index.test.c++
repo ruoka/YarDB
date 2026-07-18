@@ -148,10 +148,29 @@ auto test_set()
             fixture.insert(object{{"value"s, "1"s}});
             fixture.insert(object{{"value"s, true}});
 
-            require_eq(fixture.count(object{{"value"s, 1ll}}), 1u);
-            require_eq(fixture.count(object{{"value"s, 1.0}}), 1u);
+            // integer_type and number_type with the same numeric value share a
+            // secondary key so OData integer filters match JSON doubles.
+            require_eq(fixture.count(object{{"value"s, 1ll}}), 2u);
+            require_eq(fixture.count(object{{"value"s, 1.0}}), 2u);
             require_eq(fixture.count(object{{"value"s, "1"s}}), 1u);
             require_eq(fixture.count(object{{"value"s, true}}), 1u);
+        };
+
+        section("SecondaryNumericCrossTypeRanges") = []
+        {
+            index_fixture fixture{"./index_numeric_cross_type.db"s};
+            fixture.add_keys({"score"s});
+            auto high = object{};
+            high["score"s] = 100.0;
+            fixture.insert(high);
+            fixture.insert(object{{"score"s, 3ll}});
+
+            const auto under_9 = object{{"score"s, object{{"$lt"s, 9ll}}}};
+            const auto over_0 = object{{"score"s, object{{"$gt"s, 0ll}}}};
+            require_eq(fixture.count(under_9), 1u);
+            require_eq(fixture.view_count(under_9), 1u);
+            require_eq(fixture.count(over_0), 2u);
+            require_eq(fixture.view_count(over_0), 2u);
         };
 
         section("CountPrimaryKeyRangeIsIndexOnly") = []

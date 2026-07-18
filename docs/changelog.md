@@ -19,6 +19,9 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Multi-op `$count` vs match** | Indexed `$count=true` for AND-merged multi-op field maps (`$eq`+range, `$gt`+`$gte`) falls back to scan+match so count matches GET results |
 | **`$orderby` field sort** | Results sort by the named field (`asc`/`desc`); was previously only reversing `_id` walk order via `$desc` |
 | **Object field vs scalar `$filter`** | Nested object/array fields no longer match scalar `$eq`/`$ne`/`$gt`/`$in`/`$nin` (and bare `eq` no longer throws); use `Customer/Country` paths for nested documents |
+| **Numeric `$filter` vs JSON doubles** | Integer OData literals compare numerically with JSON `number_type` values (`score eq 100` matches `100.0`; `score lt 9` no longer includes `100.0` via variant index order); secondary indexes and `$orderby` use the same ordering |
+| **Boolean/null `$filter` literals** | `active eq true` / `eq null` parse as JSON bool/null instead of strings `"true"` / `"null"` |
+| **Parent vs nested path AND** | `Customer eq 'Acme' and Customer/Country eq 'USA'` is contradictory (matches nothing) instead of last-write-wins over-including nested documents |
 
 ### Storage & tooling
 

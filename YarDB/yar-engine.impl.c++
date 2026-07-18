@@ -703,9 +703,9 @@ void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, 
         {
             const auto& left = lhs[field_name].get<xson::primitive>();
             const auto& right = rhs[field_name].get<xson::primitive>();
-            if(left != right)
+            if(not xson::primitive_equal(left, right))
             {
-                const auto less = std::less<xson::primitive>{}(left, right);
+                const auto less = xson::primitive_less(left, right);
                 return descending ? not less : less;
             }
         }

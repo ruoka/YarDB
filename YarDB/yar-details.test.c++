@@ -56,6 +56,34 @@ auto register_details_tests()
                 };
             };
 
+            when("find_outside_quotes_and_parens searches for or") = []
+            {
+                then("Skips or inside grouping parentheses") = []
+                {
+                    const auto nested = find_outside_quotes_and_parens(
+                        "(name eq 'Alice' or name eq 'Bob') and age gt 25"sv, " or "sv);
+                    require_false(nested.has_value());
+
+                    const auto top = find_outside_quotes_and_parens(
+                        "(name eq 'Alice' or name eq 'Bob') or age gt 25"sv, " or "sv);
+                    require_true(top.has_value());
+                    require_eq(*top, 34u);
+                };
+            };
+
+            when("split_outside_quotes_and_parens splits on and") = []
+            {
+                then("Keeps and/or groups inside parentheses together") = []
+                {
+                    const auto parts = split_outside_quotes_and_parens(
+                        "(name eq 'Alice' or name eq 'Bob') and age gt 25"sv, " and "sv)
+                        | std::ranges::to<std::vector<std::string_view>>();
+                    require_eq(parts.size(), 2u);
+                    require_eq(parts[0], "(name eq 'Alice' or name eq 'Bob')"sv);
+                    require_eq(parts[1], "age gt 25"sv);
+                };
+            };
+
             when("split_outside_quotes receives an empty delimiter") = []
             {
                 then("Throws invalid_argument") = []

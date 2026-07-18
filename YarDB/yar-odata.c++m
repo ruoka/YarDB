@@ -816,41 +816,72 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     return std::make_pair(selector, string_filters);
 }
 
-// Parse AND-group: field eq 'x' and age gt 25 (no top-level OR)
-inline filter_clause parse_filter_and_group(std::string_view filter_expr)
+// Normalize a parsed filter to OR-branch form (single AND becomes one branch).
+inline std::vector<filter_branch> as_or_branches(parsed_filter filter)
 {
-    auto expr = strip_outer_parens(filter_expr);
+    if(filter.has_or())
+        return std::move(filter.or_branches);
 
-    if(expr.empty())
-        throw std::invalid_argument{"Invalid filter expression: "s + std::string{filter_expr}};
+    return {
+        filter_branch{
+            std::move(filter.and_selector),
+            std::move(filter.and_string_filters)}};
+}
 
-    if(not find_outside_quotes(expr, " and "sv))
-        return parse_filter_leaf(expr);
+inline parsed_filter parsed_from_branches(std::vector<filter_branch> branches)
+{
+    if(branches.empty())
+        throw std::invalid_argument{"Invalid filter expression"};
 
-    // split_outside_quotes skips empty segments; delimiter-only input must not
-    // collapse to an empty selector (empty match = all documents).
-    auto parts = split_outside_quotes(expr, " and "sv)
-        | std::ranges::to<std::vector<std::string_view>>();
-    if(parts.empty())
-        throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
+    if(branches.size() == 1)
+    {
+        return parsed_filter{
+            std::move(branches[0].selector),
+            std::move(branches[0].string_filters),
+            {}};
+    }
 
-    return std::ranges::fold_left(
-        parts,
-        filter_clause{xson::object{}, std::vector<string_filter>{}},
-        [](filter_clause merged, const std::string_view part)
-        {
-            auto [part_selector, part_string_filters] = parse_filter_leaf(part);
-            merge_selector_into(merged.first, part_selector);
-            merged.second.insert(
-                merged.second.end(),
-                part_string_filters.begin(),
-                part_string_filters.end());
-            return merged;
-        });
+    return parsed_filter{{}, {}, std::move(branches)};
+}
+
+// AND two branches by merging selectors and concatenating string filters.
+inline filter_branch and_filter_branches(const filter_branch& left, const filter_branch& right)
+{
+    auto selector = left.selector;
+    merge_selector_into(selector, right.selector);
+
+    auto string_filters = left.string_filters;
+    string_filters.insert(
+        string_filters.end(),
+        right.string_filters.begin(),
+        right.string_filters.end());
+
+    return filter_branch{std::move(selector), std::move(string_filters)};
+}
+
+// Distribute AND over OR: (A∨B) ∧ (C∨D) → AC∨AD∨BC∨BD.
+// Required for parenthesized groups such as `(A or B) and C`.
+inline parsed_filter and_parsed_filters(parsed_filter left, parsed_filter right)
+{
+    const auto left_branches = as_or_branches(std::move(left));
+    const auto right_branches = as_or_branches(std::move(right));
+
+    auto combined = std::vector<filter_branch>{};
+    combined.reserve(left_branches.size() * right_branches.size());
+
+    for(const auto& left_branch : left_branches)
+    {
+        for(const auto& right_branch : right_branches)
+            combined.push_back(and_filter_branches(left_branch, right_branch));
+    }
+
+    return parsed_from_branches(std::move(combined));
 }
 
 // Parse OData $filter expression
 // Supports: comparisons, in, string functions, and (AND), or (OR — OData precedence: AND before OR)
+// Grouping parentheses are honored: top-level and/or splits ignore nested groups, and
+// `(A or B) and C` is rewritten to `(A and C) or (B and C)` for the flat OR-branch model.
 export inline parsed_filter parse_filter(std::string_view filter_expr)
 {
     auto expr = strip_outer_parens(filter_expr);
@@ -858,25 +889,38 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
     if(expr.empty())
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{filter_expr}};
 
-    if(find_outside_quotes(expr, " or "sv))
+    if(find_outside_quotes_and_parens(expr, " or "sv))
     {
-        auto branches = split_outside_quotes(expr, " or "sv)
-            | std::views::transform([](const std::string_view part)
-            {
-                auto [branch_selector, branch_string_filters] = parse_filter_and_group(part);
-                return filter_branch{std::move(branch_selector), std::move(branch_string_filters)};
-            })
-            | std::ranges::to<std::vector<filter_branch>>();
+        auto branches = std::vector<filter_branch>{};
+        for(const auto part : split_outside_quotes_and_parens(expr, " or "sv))
+        {
+            for(auto branch : as_or_branches(parse_filter(part)))
+                branches.push_back(std::move(branch));
+        }
 
         // Delimiter-only " or " yields no branches; has_or() would be false and
         // the empty and_selector would match every document.
         if(branches.empty())
             throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
-        return parsed_filter{{}, {}, std::move(branches)};
+        return parsed_from_branches(std::move(branches));
     }
 
-    auto [selector, string_filters] = parse_filter_and_group(expr);
+    if(find_outside_quotes_and_parens(expr, " and "sv))
+    {
+        auto parts = split_outside_quotes_and_parens(expr, " and "sv)
+            | std::ranges::to<std::vector<std::string_view>>();
+        if(parts.empty())
+            throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
+
+        auto merged = parse_filter(parts.front());
+        for(const auto part : parts | std::views::drop(1))
+            merged = and_parsed_filters(std::move(merged), parse_filter(part));
+
+        return merged;
+    }
+
+    auto [selector, string_filters] = parse_filter_leaf(expr);
     return parsed_filter{std::move(selector), std::move(string_filters), {}};
 }
 

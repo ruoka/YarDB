@@ -205,6 +205,69 @@ inline std::optional<std::size_t> find_outside_quotes(std::string_view text, std
     return std::nullopt;
 }
 
+// Find the first needle occurrence outside quotes and outside parentheses.
+// Used for top-level OData and/or splits so `(A or B) and C` does not split on
+// the nested `or`.
+inline std::optional<std::size_t> find_outside_quotes_and_parens(
+    std::string_view text,
+    std::string_view needle)
+{
+    if(needle.empty())
+        throw std::invalid_argument{"needle cannot be empty"};
+
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+    auto depth = 0;
+
+    for(auto i = std::size_t{0}; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+
+        if(in_quote)
+        {
+            if(c == quote_char
+                and i + 1 < text.size()
+                and text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' or c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(c == '(')
+        {
+            ++depth;
+            continue;
+        }
+
+        if(c == ')')
+        {
+            if(depth > 0)
+                --depth;
+            continue;
+        }
+
+        if(depth == 0
+            and i + needle.size() <= text.size()
+            and text.substr(i, needle.size()) == needle)
+            return i;
+    }
+
+    return std::nullopt;
+}
+
 // Split on delimiter only outside quoted string literals (OData '' escape aware).
 // Empty delimiter would match at every index and spin forever (size_t wrap on
 // `i += delimiter.size() - 1`); reject eagerly before entering the coroutine.
@@ -270,6 +333,87 @@ inline generator<std::string_view> split_outside_quotes(
         throw std::invalid_argument{"delimiter cannot be empty"};
 
     return split_outside_quotes_impl(text, delimiter);
+}
+
+// Split on delimiter outside quotes and outside parentheses (top-level only).
+inline generator<std::string_view> split_outside_quotes_and_parens_impl(
+    std::string_view text,
+    std::string_view delimiter)
+{
+    if(text.empty())
+        co_return;
+
+    auto start = std::size_t{0};
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+    auto depth = 0;
+
+    for(auto i = std::size_t{0}; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+
+        if(in_quote)
+        {
+            if(c == quote_char
+                and i + 1 < text.size()
+                and text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' or c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(c == '(')
+        {
+            ++depth;
+            continue;
+        }
+
+        if(c == ')')
+        {
+            if(depth > 0)
+                --depth;
+            continue;
+        }
+
+        if(depth == 0
+            and i + delimiter.size() <= text.size()
+            and text.substr(i, delimiter.size()) == delimiter)
+        {
+            auto part = utils::trim(text.substr(start, i - start));
+            if(not part.empty())
+                co_yield part;
+
+            i += delimiter.size() - 1;
+            start = i + 1;
+        }
+    }
+
+    auto tail = utils::trim(text.substr(start));
+    if(not tail.empty())
+        co_yield tail;
+}
+
+inline generator<std::string_view> split_outside_quotes_and_parens(
+    std::string_view text,
+    std::string_view delimiter)
+{
+    if(delimiter.empty())
+        throw std::invalid_argument{"delimiter cannot be empty"};
+
+    return split_outside_quotes_and_parens_impl(text, delimiter);
 }
 
 // Paths reachable without authentication when PAT middleware is enabled.

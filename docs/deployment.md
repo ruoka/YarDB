@@ -2,15 +2,17 @@
 
 ## Target deployment model
 
-YarDB is aimed at microservice persistence, not at monolithic or multi-tenant enterprise databases.
+YarDB is aimed at microservice persistence, not at monolithic or multi-tenant enterprise databases. Within each microservice, the aim is still **parallel and fault-tolerant YarDB instances** for that service’s dataset.
 
 | Assumption | Consequence |
 |------------|-------------|
-| One microservice owns one (or a few related) datasets | One `yardb` process and one `--file` database per service is the normal layout |
-| The service is the sole writer of its data | An exclusive `{database}.pid` lock and in-process write serialization are by design, not temporary gaps |
-| Scale comes from more services | Deploy another service with its own YarDB instance; do not expect one shared cluster for many domains |
+| One microservice owns one (or a few related) datasets | That service gets its own YarDB deployment; unrelated domains do not share it |
+| The service needs throughput and uptime | Run multiple `yardb` instances for that service (parallelism + fault tolerance), not only a single process |
+| Domains stay isolated | New domains → new services with their own YarDB; not one shared cluster for the whole enterprise |
 
-Keep each service’s database private to that service (loopback + reverse proxy, or network policy). Do not put unrelated domains into one file “for convenience.”
+Keep each service’s data private to that service (loopback + reverse proxy, or network policy). Do not put unrelated domains into one deployment “for convenience.”
+
+**Today vs aim:** each open database file still has one writer (exclusive `{database}.pid` lock). `yarproxy` can fan out HTTP to independent backends for development, but does not yet provide production-grade replication or failover. Parallel / fault-tolerant instances *per microservice* remain the product direction.
 
 ## 🚀 Production Readiness Status
 
@@ -19,13 +21,15 @@ Keep each service’s database private to that service (loopback + reverse proxy
 - ✅ Document storage and retrieval
 - ✅ OData query support
 - ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
-- ❌ **Missing for hardened single-service deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
-- ❌ **Out of target model** (not a near-term product goal): multi-tenant shared databases, built-in multi-node HA for one logical store
+- ❌ **Missing for hardened per-service deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
+- ❌ **Missing for parallel / fault-tolerant instances per service**: production-grade replication, failover, and consistent multi-instance semantics (see below)
+- ❌ **Out of target model**: multi-tenant shared databases spanning unrelated domains
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
 - 🔐 **Security & Authentication** (data + admin PATs shipped; JWT/RBAC and TLS at reverse proxy still planned; safe bind defaults shipped)
 - 📊 **Monitoring & Observability** (minimum Prometheus `/metrics` shipped; richer labels / tracing planned; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
+- 🔁 **Per-service parallelism & fault tolerance** (multiple instances for one microservice’s dataset)
 
 ## 🏗️ Building for Production
 
@@ -235,20 +239,19 @@ Point-in-time recovery is not implemented yet. Stop `yardb` before copying, expo
 ## 🚨 Availability & Scaling
 
 ### By design (microservice model)
-- **Single writer per database file**: Each `yardb` process owns one `--file`; exclusive `.pid` lock. Enough when one microservice owns that data.
-- **Scale out by service**: New domains get new services and new database files, not a bigger shared YarDB cluster.
-- **`yarproxy`**: Dev/test HTTP fan-out across independent backends only — not replication or HA (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
+- **Data ownership boundary**: one microservice → one YarDB deployment (its collections). Unrelated domains stay in other deployments.
+- **Aim per service**: several parallel, fault-tolerant `yardb` instances for that service’s dataset (throughput + failover).
+- **Today**: one writer per open database file (exclusive `.pid` lock); `yarproxy` is HTTP fan-out for independent backends in development — not production replication/HA yet (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
 - **Manual backup/compact**: `yarexport` / `yarimport` (no automated PITR)
 
-### Still useful for single-service production
-- Automated backups and retention for each service’s file
-- Clear stale-lock and restore runbooks
-- Reverse-proxy TLS, PAT (or later JWT), and probes already outlined above
+### Roadmap (per microservice)
+- Replication and automatic failover among instances that serve the same service dataset
+- Production-grade proxy: health checks, partial-failure reporting, and clear read/write consistency (including read-your-writes where required)
+- Automated backups and retention for each service deployment
 
 ### Not the product target
-- Multi-node replication and automatic failover for one shared logical database
-- Multi-tenant “one YarDB for the whole enterprise” deployments
-- Strongly consistent read-your-writes across independently owned files
+- Multi-tenant “one YarDB for the whole enterprise” spanning unrelated domains
+- Treating many domains as one shared logical database
 
 ## 🔧 Runtime Requirements
 
@@ -306,14 +309,14 @@ sar -n DEV 1
 - [ ] **Security**: Bind to private interfaces (or explicit public bind with PAT); enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
 - [ ] **Monitoring**: Set up metrics collection and alerting
 - [ ] **Backup**: Configure regular backup procedures
-- [ ] **One DB per service**: Map each microservice to its own `yardb` process and `--file` (do not share a file across unrelated services)
-- [ ] **Single writer**: Ensure one process owns each database and document the stale-lock runbook
+- [ ] **One deployment per service**: Map each microservice to its own YarDB data (do not share a store across unrelated services)
+- [ ] **Instance lock awareness**: Until multi-instance semantics ship, ensure one process owns each open database file and document the stale-lock runbook
 - [ ] **Client limits**: Ensure clients keep request bodies within the 1 MiB limit
-- [ ] **Service redundancy**: If the service must stay up, plan redundancy at the *service* layer (multiple deployable units each with their own data ownership story), not by clustering one shared DB
+- [ ] **Parallelism & fault tolerance**: Plan for multiple instances per microservice when the service needs them; today use explicit ops patterns, and track the per-service HA roadmap above
 - [ ] **Performance**: Load test within the expected per-service dataset size
 - [ ] **Documentation**: Update runbooks and procedures
 
 ---
 
-**⚠️ Important**: YarDB is still hardening for production (auth, TLS at the proxy, ops automation). Even when ready, treat it as **per-service persistence**, not as a drop-in replacement for a shared enterprise database.
+**⚠️ Important**: YarDB is still hardening for production (auth, TLS at the proxy, multi-instance semantics, ops automation). Even when ready, treat it as per-service persistence with parallel/fault-tolerant instances *for that service* — not as a shared enterprise database for many domains.
 

@@ -8,11 +8,11 @@ A document-oriented database with a RESTful Web API, implemented in C++23. YarDB
 
 Microservices usually own one dataset (or a small set of related collections). YarDB matches that shape:
 
-- **One service → one `yardb` process → one database file** — collections for that service live together; other services get their own file and process
-- **Single writer is enough** — an exclusive `.pid` lock and in-process write serialization fit a service that is the sole owner of its data
-- **Scale out by services, not by clustering one DB** — add more microservices (each with its own YarDB), rather than turning one deployment into a multi-tenant enterprise store
+- **One service owns one dataset** — that service’s collections live in its own YarDB deployment; other services get their own
+- **Parallel, fault-tolerant instances per service** — the aim is several `yardb` instances for the same microservice (throughput and failover), not a single process forever
+- **Not a shared enterprise store** — do not put unrelated domains into one deployment; scale new domains by adding services, each with its own YarDB
 
-YarDB is a poor fit when many unrelated domains must share one database, or when you need built-in multi-node replication and failover for a single shared store. For the operational model and current limits, see the [deployment guide](docs/deployment.md).
+Today each open database file still has a single writer (exclusive `.pid` lock). Parallelism and fault tolerance across instances for one service are the intended direction; see the [deployment guide](docs/deployment.md) for the current model and gaps.
 
 ## Overview
 
@@ -128,7 +128,7 @@ An interactive and pipeable HTTP client. See [yarsh program documentation](docs/
 
 ### yarproxy - HTTP Fan-out Proxy
 
-A development HTTP fan-out proxy for independent `yardb` instances, not replication or HA. See [yarproxy program documentation](docs/programs.md#yarproxy---http-fan-out-proxy).
+A development HTTP fan-out proxy for independent `yardb` instances. Parallel / fault-tolerant multi-instance operation per microservice is the aim; `yarproxy` is not that production path yet. See [yarproxy program documentation](docs/programs.md#yarproxy---http-fan-out-proxy).
 
 ### yarexport / yarimport - Export, Import, Compaction
 

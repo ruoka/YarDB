@@ -325,7 +325,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Connection Pooling**: Efficient connection management
 - **Async I/O**: Non-blocking operations
 - **Memory Management**: Memory-mapped files, optimized storage
-- **Per-service capacity**: Faster single-writer paths and reader concurrency for one microservice’s dataset (scale by deploying more services with their own files, not by clustering one shared DB)
+- **Per-service parallelism & fault tolerance**: Multiple `yardb` instances for one microservice’s dataset (replication, failover, production-grade proxy semantics); new domains still get separate service deployments
 
 ##### Engine Reader/Writer Concurrency — ✅ implemented (Jul 2026)
 
@@ -349,9 +349,11 @@ The storage writer remains single-owner. A write lock covers file mutation and s
 
 ### Deployment model: microservice persistence
 - **Target**: Persistence behind one microservice (one or a few related datasets), not a multi-tenant enterprise store
-- **Unit of ownership**: One `yardb` process and one database file per service; exclusive `.pid` lock is intentional
-- **Scale-out**: More microservices → more YarDB instances/files; not one clustered database for many domains
-- **Out of scope as product goals**: Built-in multi-node replication/HA for a single shared logical database; monolith-style shared schemas across teams
+- **Unit of ownership**: One YarDB deployment per service (that service’s collections); unrelated domains stay isolated
+- **Per-service aim**: Parallel and fault-tolerant `yardb` instances for the same microservice (throughput + failover)
+- **Today**: One writer per open database file (exclusive `.pid` lock); `yarproxy` is not yet production HA
+- **Cross-service scale-out**: More microservices → more YarDB deployments; not one shared store for many domains
+- **Out of scope**: Multi-tenant “one YarDB for the enterprise”; monolith-style shared schemas across teams
 - **Operational detail**: See [deployment.md](deployment.md#target-deployment-model)
 
 ### Security Architecture

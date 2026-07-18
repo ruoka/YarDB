@@ -33,7 +33,7 @@ See **[changelog.md](changelog.md)**, the single source of truth for shipped fea
 ## 📖 Reading Guide
 
 ### New to YarDB?
-1. Start with root **[README.md](../README.md)** for overview and **intended use** (microservice persistence, not enterprise shared DB)
+1. Start with root **[README.md](../README.md)** for overview and **intended use** (per-microservice persistence with parallel/fault-tolerant instances; not an enterprise shared DB)
 2. Read **[programs.md](programs.md)** to understand available tools
 3. Check **[development.md](development.md)** for build/test instructions
 

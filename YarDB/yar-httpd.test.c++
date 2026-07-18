@@ -3485,15 +3485,14 @@ auto test_set()
             require_true(headers.contains("access-control-allow-headers"s));
         };
 
-        section("CORS uses wildcard when no Origin header") = [setup]
+        section("CORS omits ACAO when no Origin header") = [setup]
         {
             auto [status, reason, headers, body] = make_request(
                 setup->port(), "GET"s, "/"s, ""s
             );
             
             require_eq(status, "200"s);
-            require_true(headers.contains("access-control-allow-origin"s));
-            require_eq(headers["access-control-allow-origin"s], "*"s);
+            require_false(headers.contains("access-control-allow-origin"s));
         };
 
         section("CORS respects allowed origin policy") = [setup]
@@ -3521,7 +3520,7 @@ auto test_set()
             require_eq(status1, "200"s);
             require_eq(headers1["access-control-allow-origin"s], "https://example.com"s);
             
-            // Request with disallowed origin should use wildcard
+            // Disallowed origins must not fall back to wildcard ACAO.
             auto stream2 = connect("localhost"s, setup->port());
             stream2 << "GET / HTTP/1.1" << crlf
                    << "Host: localhost:" << setup->port() << crlf
@@ -3531,7 +3530,7 @@ auto test_set()
             
             auto [status2, reason2, headers2, body2] = parse_http_response(stream2);
             require_eq(status2, "200"s);
-            require_eq(headers2["access-control-allow-origin"s], "*"s);
+            require_false(headers2.contains("access-control-allow-origin"s));
         };
 
         section("CORS includes max-age when configured") = [setup]
@@ -3545,10 +3544,15 @@ auto test_set()
                 3600 // max-age: 1 hour
             );
             setup->get_server().rebuild_routes();
-            
-            auto [status, reason, headers, body] = make_request(
-                setup->port(), "GET"s, "/"s, ""s
-            );
+
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET / HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Origin: https://example.com" << crlf
+                   << "Accept: application/json" << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, body] = parse_http_response(stream);
             
             require_eq(status, "200"s);
             require_true(headers.contains("access-control-max-age"s));
@@ -3564,10 +3568,15 @@ auto test_set()
                 {} // default allowed_headers
             );
             setup->get_server().rebuild_routes();
-            
-            auto [status, reason, headers, body] = make_request(
-                setup->port(), "GET"s, "/"s, ""s
-            );
+
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET / HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Origin: https://example.com" << crlf
+                   << "Accept: application/json" << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, body] = parse_http_response(stream);
             
             require_eq(status, "200"s);
             require_true(headers.contains("access-control-allow-methods"s));

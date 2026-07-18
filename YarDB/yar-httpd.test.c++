@@ -1814,10 +1814,10 @@ auto test_set()
 
             auto rows = json::parse(body);
             require_true(rows.is_array());
-            auto totals = std::map<string, long long>{};
+            auto totals = std::map<string, integer_type>{};
             for(const auto& row : rows.get<object::array>())
             {
-                totals[row["status"s].get<string>()] = static_cast<long long>(row["Total"s]);
+                totals[row["status"s].get<string>()] = static_cast<integer_type>(row["Total"s]);
             }
             require_eq(totals["active"s], 15);
             require_eq(totals["pending"s], 7);

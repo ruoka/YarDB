@@ -682,31 +682,18 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         return std::make_pair(make_in_selector(field, values), string_filters);
     }
     
-    // Check for string functions: startswith(field, 'value'), contains(field, 'value'), endswith(field, 'value')
-    constexpr auto startswith_prefix = "startswith("sv;
-    constexpr auto contains_prefix = "contains("sv;
-    constexpr auto endswith_prefix = "endswith("sv;
-    
-    if(expr.starts_with(startswith_prefix) and expr.back() == ')')
+    // String functions: startswith / contains / endswith(field, 'value')
+    for(const auto& [prefix, name] : std::views::zip(
+            std::array{"startswith("sv, "contains("sv, "endswith("sv},
+            std::array{"startswith"sv, "contains"sv, "endswith"sv}))
     {
-        auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
-        auto [field, value] = parse_string_function_args(inner);
-        string_filters.push_back(string_filter{"startswith"sv, std::move(field), std::move(value)});
-        return std::make_pair(selector, string_filters);
-    }
-    else if(expr.starts_with(contains_prefix) and expr.back() == ')')
-    {
-        auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
-        auto [field, value] = parse_string_function_args(inner);
-        string_filters.push_back(string_filter{"contains"sv, std::move(field), std::move(value)});
-        return std::make_pair(selector, string_filters);
-    }
-    else if(expr.starts_with(endswith_prefix) and expr.back() == ')')
-    {
-        auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
-        auto [field, value] = parse_string_function_args(inner);
-        string_filters.push_back(string_filter{"endswith"sv, std::move(field), std::move(value)});
-        return std::make_pair(selector, string_filters);
+        if(expr.starts_with(prefix) and expr.back() == ')')
+        {
+            auto inner = expr.substr(prefix.size(), expr.size() - prefix.size() - 1);
+            auto [field, value] = parse_string_function_args(inner);
+            string_filters.push_back(string_filter{name, std::move(field), std::move(value)});
+            return std::make_pair(selector, string_filters);
+        }
     }
     
     // Find operator for comparison expressions
@@ -739,18 +726,12 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     if(field.empty())
         throw std::invalid_argument{"Field name cannot be empty in filter expression: "s + std::string{expr}};
     
-    // Remove quotes from string values and unescape OData doubled delimiters
-    auto is_string = false;
-    if(value.size() >= 2 and value[0] == '\'' and value.back() == '\'')
-    {
-        value = unescape_odata_string(std::string_view{value}.substr(1, value.size() - 2), '\'');
-        is_string = true;
-    }
-    else if(value.size() >= 2 and value[0] == '"' and value.back() == '"')
-    {
-        value = unescape_odata_string(std::string_view{value}.substr(1, value.size() - 2), '"');
-        is_string = true;
-    }
+    // Quoted values stay strings (including empty ''); strip + unescape via shared helper
+    const auto is_string = value.size() >= 2
+        and ((value.front() == '\'' and value.back() == '\'')
+            or (value.front() == '"' and value.back() == '"'));
+    if(is_string)
+        value = strip_quoted_literal(value);
     
     // Validate value is not empty (empty strings are allowed for string comparisons)
     if(value.empty() and not is_string)
@@ -759,32 +740,25 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     // Unquoted literals: true/false/null, integer, or floating-point. Quoted
     // values stay strings. Bare identifiers that are not literals become strings
     // (legacy); boolean/null must not be stringified or they never match JSON.
-    const auto parse_unquoted_literal = [](const std::string& literal) -> xson::object
+    const auto parse_unquoted_literal = [](const std::string& literal)
     {
+        const auto box = [](const auto& v)
+        {
+            auto value = xson::object{};
+            value = v;
+            return value;
+        };
+
         if(literal == "true"s)
-        {
-            auto value = xson::object{};
-            value = true;
-            return value;
-        }
+            return box(true);
         if(literal == "false"s)
-        {
-            auto value = xson::object{};
-            value = false;
-            return value;
-        }
+            return box(false);
         if(literal == "null"s)
-        {
-            auto value = xson::object{};
-            value = nullptr;
-            return value;
-        }
+            return box(nullptr);
 
         try
         {
-            auto value = xson::object{};
-            value = utils::stoll(literal);
-            return value;
+            return box(utils::stoll(literal));
         }
         catch(const std::invalid_argument&)
         {
@@ -795,13 +769,9 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         const auto* end = literal.data() + literal.size();
         const auto [ptr, ec] = std::from_chars(begin, end, number);
         if(ec == std::errc{} and ptr == end)
-        {
-            auto value = xson::object{};
-            value = number;
-            return value;
-        }
+            return box(number);
 
-        return xson::object{literal};
+        return box(literal);
     };
 
     const auto require_numeric_literal = [&](std::string_view op_name) -> xson::object
@@ -881,10 +851,7 @@ inline filter_branch and_filter_branches(const filter_branch& left, const filter
     merge_selector_into(selector, right.selector);
 
     auto string_filters = left.string_filters;
-    string_filters.insert(
-        string_filters.end(),
-        right.string_filters.begin(),
-        right.string_filters.end());
+    string_filters.append_range(right.string_filters);
 
     return filter_branch{std::move(selector), std::move(string_filters)};
 }
@@ -1100,15 +1067,8 @@ inline auto apply_string_filters(const xson::object& documents, const std::vecto
 // True when a document matches one OR branch (selector AND branch string filters)
 export inline auto document_matches_branch(const xson::object& doc, const filter_branch& branch)
 {
-    if(not doc.match(branch.selector))
-        return false;
-
-    if(branch.string_filters.empty())
-        return true;
-
-    const auto wrapped = xson::object{xson::object::array{doc}};
-    const auto filtered = apply_string_filters(wrapped, branch.string_filters);
-    return filtered.is_array() and not filtered.get<xson::object::array>().empty();
+    return doc.match(branch.selector)
+        and document_matches_string_filters(doc, branch.string_filters);
 }
 
 // Union branch results, deduplicating by _id

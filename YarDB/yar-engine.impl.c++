@@ -748,11 +748,12 @@ bool yar::db::engine::read(
 
     revision = {};
     auto lock = std::shared_lock{m_rwlock};
+    // Always leave documents as an array so missing collections match the
+    // empty-collection contract (HTTP entity sets stringify as []).
+    documents = yar::db::object{yar::db::object::array{}};
     const auto* index = find_index(m_index, collection);
     if(index == nullptr)
         return false;
-
-    documents = yar::db::object{yar::db::object::array{}};
     auto top = std::numeric_limits<yar::db::sequence_type>::max();
     if(selector.has("$top"s))
         top = selector["$top"s];
@@ -1433,11 +1434,12 @@ bool yar::db::engine::history(std::string_view collection, const yar::db::object
     using xson::fson::operator >>;
 
     auto lock = std::shared_lock{m_rwlock};
+    // Same empty-array contract as read() when the collection is absent.
+    documents = yar::db::object{yar::db::object::array{}};
     const auto* index = find_index(m_index, collection);
     if(index == nullptr)
         return false;
 
-    documents = yar::db::object{yar::db::object::array{}};
     auto success = false;
     auto reader = open_reader();
 

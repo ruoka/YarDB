@@ -198,6 +198,7 @@ auto test_set()
             auto selector = object{}, documents = object{};
             require_false(engine.read("ReadEmptyCollection"s, selector, documents));
             dump(engine, "ReadEmptyCollection"s);
+            require_true(documents.is_array());
             require_true(0u == documents.size());
         };
 

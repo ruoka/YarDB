@@ -1006,12 +1006,12 @@ private:
             // Extract collection name from path (e.g., /_db/users -> users)
             const auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
             
-            // Switch to target collection
+            // Switch to target collection. index() populates new secondaries
+            // under the same lock; reindex() still rebuilds/heals from storage.
             const auto indexed = m_engine.index(collection_name, keys);
             if(not indexed)
                 return database_error_response(indexed.error());
             
-            // Reindex to populate the new indexes
             const auto reindexed = m_engine.reindex();
             if(not reindexed)
                 return database_error_response(reindexed.error());
@@ -1199,12 +1199,12 @@ private:
                 }
             }
             
-            // Switch to target collection
+            // index() populates new secondaries under the same lock; reindex()
+            // still rebuilds/heals from storage.
             const auto indexed = m_engine.index(collection_name, new_keys);
             if(not indexed)
                 return database_error_response(indexed.error());
             
-            // Reindex to populate the new indexes
             const auto reindexed = m_engine.reindex();
             if(not reindexed)
                 return database_error_response(reindexed.error());

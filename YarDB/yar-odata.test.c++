@@ -1420,6 +1420,68 @@ auto register_odata_tests()
                     require_true(threw);
                 };
             };
+
+            when("Filter is a long unary not chain") = [docs]
+            {
+                then("Rejects nested not beyond the depth budget") = [docs]
+                {
+                    // parse_filter recurses once per leading not; without a
+                    // depth cap a GET ?$filter=not%20not%20… leaf can exhaust
+                    // the request-thread stack (and burn quadratic scan CPU).
+                    auto expr = ""s;
+                    for(std::size_t i = 0; i < max_filter_not_depth + 1; ++i)
+                        expr += "not ";
+                    expr += "status eq 'deleted'";
+
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_filter(expr);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string_view{e.what()}.contains("nested not"sv));
+                    }
+                    require_true(threw);
+
+                    // Depth at the budget still parses. Even nesting restores
+                    // the positive comparison (same as not not status eq …).
+                    static_assert(max_filter_not_depth % 2u == 0u);
+                    auto at_budget = ""s;
+                    for(std::size_t i = 0; i < max_filter_not_depth; ++i)
+                        at_budget += "not ";
+                    at_budget += "status eq 'deleted'";
+                    const auto parsed = parse_filter(at_budget);
+                    require_false(parsed.has_or());
+                    require_true(parsed.and_negated_selectors.empty());
+                    require_true(parsed.and_selector.has("status"s));
+
+                    const auto result = filter_by_parsed(docs, parsed);
+                    require_eq(result.get<object::array>().size(), 1u);
+                    require_eq(result.get<object::array>()[0]["name"s].get<string>(), "Bob"s);
+                };
+
+                then("Rejects oversized filter expressions") = []
+                {
+                    auto expr = "status eq '"s;
+                    expr.append(max_filter_expression_length, 'x');
+                    expr += "'";
+                    require_true(expr.size() > max_filter_expression_length);
+
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_filter(expr);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string_view{e.what()}.contains("too long"sv));
+                    }
+                    require_true(threw);
+                };
+            };
         };
     };
 

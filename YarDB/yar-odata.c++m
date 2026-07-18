@@ -214,6 +214,13 @@ export struct parsed_filter
 // grows as n^(2^n) branches and can OOM a single GET /$filter request.
 export inline constexpr std::size_t max_filter_or_branches = 64;
 
+// Cap unary `not` nesting and raw expression size. `parse_filter` recurses once
+// per leading `not`/`not(` and rescans the suffix for `and`/`or` each time, so
+// a long `not not not … leaf` chain is both deep stack and roughly quadratic
+// CPU — enough for a single GET /$filter to crash or pin the request thread.
+export inline constexpr std::size_t max_filter_not_depth = 64;
+export inline constexpr std::size_t max_filter_expression_length = 8192;
+
 inline void ensure_filter_or_branch_budget(std::size_t branch_count)
 {
     if(branch_count > max_filter_or_branches)
@@ -221,6 +228,16 @@ inline void ensure_filter_or_branch_budget(std::size_t branch_count)
         throw std::invalid_argument{
             "Filter expression is too complex (exceeds "
             + std::to_string(max_filter_or_branches) + " OR branches)"};
+    }
+}
+
+inline void ensure_filter_not_depth_budget(std::size_t not_depth)
+{
+    if(not_depth > max_filter_not_depth)
+    {
+        throw std::invalid_argument{
+            "Filter expression is too complex (exceeds "
+            + std::to_string(max_filter_not_depth) + " nested not operators)"};
     }
 }
 
@@ -1032,7 +1049,7 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
 // Supports: comparisons, in, string functions, not, and (AND), or (OR)
 // Precedence: not > and > or. Grouping parentheses are honored; top-level and/or
 // splits ignore nested groups, and `(A or B) and C` distributes to OR branches.
-export inline parsed_filter parse_filter(std::string_view filter_expr)
+inline parsed_filter parse_filter_impl(std::string_view filter_expr, std::size_t not_depth)
 {
     auto expr = strip_outer_parens(filter_expr);
 
@@ -1043,8 +1060,8 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
     {
         // Flatten nested OR branches from each part (join of parse → as_or_branches).
         auto branches = split_outside_quotes_and_parens(expr, " or "sv)
-            | std::views::transform([](std::string_view part) {
-                  return as_or_branches(parse_filter(part));
+            | std::views::transform([not_depth](std::string_view part) {
+                  return as_or_branches(parse_filter_impl(part, not_depth));
               })
             | std::views::join
             | std::ranges::to<std::vector<filter_branch>>();
@@ -1065,9 +1082,9 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
         if(parts.empty())
             throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
-        auto merged = parse_filter(parts.front());
+        auto merged = parse_filter_impl(parts.front(), not_depth);
         for(const auto part : parts | std::views::drop(1))
-            merged = and_parsed_filters(std::move(merged), parse_filter(part));
+            merged = and_parsed_filters(std::move(merged), parse_filter_impl(part, not_depth));
 
         return merged;
     }
@@ -1075,16 +1092,28 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
     // Unary not (binds tighter than and/or; handled after those splits).
     if(expr.starts_with("not "sv) or expr.starts_with("not("sv))
     {
+        ensure_filter_not_depth_budget(not_depth + 1);
         auto rest = expr.substr(3);
         if(rest.starts_with(' '))
             rest = utils::trim(rest);
         if(rest.empty())
             throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
-        return negate_parsed_filter(parse_filter(rest));
+        return negate_parsed_filter(parse_filter_impl(rest, not_depth + 1));
     }
 
     auto [selector, string_filters] = parse_filter_leaf(expr);
     return parsed_filter{std::move(selector), std::move(string_filters), {}, {}};
+}
+
+export inline parsed_filter parse_filter(std::string_view filter_expr)
+{
+    if(filter_expr.size() > max_filter_expression_length)
+    {
+        throw std::invalid_argument{
+            "Filter expression is too long (exceeds "
+            + std::to_string(max_filter_expression_length) + " characters)"};
+    }
+    return parse_filter_impl(filter_expr, 0);
 }
 
 // Helper function to apply $select projection to documents

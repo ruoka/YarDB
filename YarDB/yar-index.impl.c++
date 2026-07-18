@@ -185,10 +185,6 @@ auto selector_count_keys(const yar::db::object& selector)
         | std::ranges::to<std::vector<std::string>>();
 }
 
-// True when index.view()'s range analysis can represent the field selector
-// exactly (view size == match count). Multi-op maps from AND-merged $filter
-// are not always safe: query_analysis_* lets $eq overwrite prior bounds, and
-// $gt/$gte (or $lt/$lte) are if/else-if so only one bound per side is applied.
 // Secondary indexes store primitives only (see insert()). Nested document
 // selectors such as Customer/Country → {Customer:{Country:...}} use ordinary
 // field names under the indexed parent; those cannot be probed as secondary
@@ -212,6 +208,10 @@ bool secondary_field_selector_usable(const yar::db::object& field_selector)
         });
 }
 
+// True when index.view()'s range analysis can represent the field selector
+// exactly (view size == match count). Multi-op maps from AND-merged $filter
+// are not always safe: query_analysis_* lets $eq overwrite prior bounds, and
+// $gt/$gte (or $lt/$lte) are if/else-if so only one bound per side is applied.
 bool index_only_field_selector(const yar::db::object& field_selector)
 {
     if(field_selector.has_value())

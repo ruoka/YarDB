@@ -2340,20 +2340,20 @@ auto register_odata_tests()
                 require_true(engine.create("clients"s, other).has_value());
                 require_true(engine.create("clients"s, missing).has_value());
 
-                const auto not_eq = parse_filter("not Customer eq 'Acme'"sv);
-                const auto not_eq_docs =
-                    read_with_parsed_filter(engine, "clients"s, object{}, not_eq);
-                const auto not_conflict = parse_filter(
+                const auto negated_eq = parse_filter("not Customer eq 'Acme'"sv);
+                const auto negated_eq_docs =
+                    read_with_parsed_filter(engine, "clients"s, object{}, negated_eq);
+                const auto negated_conflict = parse_filter(
                     "not (Customer eq 'Acme' and Customer/Country eq 'USA')"sv);
-                const auto not_conflict_docs =
-                    read_with_parsed_filter(engine, "clients"s, object{}, not_conflict);
+                const auto negated_conflict_docs =
+                    read_with_parsed_filter(engine, "clients"s, object{}, negated_conflict);
 
                 then("Both not-filters return every document") = [=]()
                 {
-                    require_true(not_eq_docs.is_array());
-                    require_eq(not_eq_docs.get<object::array>().size(), 3u);
-                    require_true(not_conflict_docs.is_array());
-                    require_eq(not_conflict_docs.get<object::array>().size(), 3u);
+                    require_true(negated_eq_docs.is_array());
+                    require_eq(negated_eq_docs.get<object::array>().size(), 3u);
+                    require_true(negated_conflict_docs.is_array());
+                    require_eq(negated_conflict_docs.get<object::array>().size(), 3u);
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());

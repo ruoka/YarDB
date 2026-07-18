@@ -1076,7 +1076,7 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
     }
 
     auto [selector, string_filters] = parse_filter_leaf(expr);
-    return parsed_filter{std::move(selector), std::move(string_filters), {}};
+    return parsed_filter{std::move(selector), std::move(string_filters), {}, {}};
 }
 
 // Helper function to apply $select projection to documents

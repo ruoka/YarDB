@@ -1,5 +1,5 @@
 name: "setup-llvm"
-description: "Install LLVM 21 + related tools (with caching). Accepts a space-separated list of apt packages."
+description: "Install LLVM 21 + related tools via apt, caching .deb archives in a user-owned directory."
 inputs:
   packages:
     description: "Space-separated apt packages to install (default includes libc++, clang, lld, lldb, jq)"
@@ -9,92 +9,75 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # Snapshot lives under the runner tool cache (user-writable). Caching paths
-    # under /usr fails on restore: tar cannot create root-owned symlinks
-    # (Permission denied on clang++-21 → ../lib/llvm-21/bin/clang++).
-    - name: Cache LLVM 21 toolchain snapshot
-      id: cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ runner.tool_cache }}/yardb-llvm-21
-        key: llvm-21-snapshot-${{ runner.os }}-${{ runner.arch }}-v3
-
-    - name: Ensure LLVM toolchain installed
+    # Apt must remain the source of truth for /usr. We only cache downloaded
+    # .debs in a user-owned directory so actions/cache can restore them (the
+    # runner user cannot extract into root-owned /var/cache/apt/archives).
+    - name: Prepare LLVM apt source and cache fingerprint
+      id: prep
       shell: bash
       env:
-        LLVM_CACHE_ROOT: ${{ runner.tool_cache }}/yardb-llvm-21
         LLVM_PACKAGES: ${{ inputs.packages }}
       run: |
         set -euo pipefail
 
-        CACHE_FS="$LLVM_CACHE_ROOT/root"
-        CACHE_MARKER="$LLVM_CACHE_ROOT/.yardb-llvm-complete"
+        APT_CACHE="${HOME}/.cache/yardb-apt-llvm"
+        mkdir -p "${APT_CACHE}/partial"
+        echo "cache_dir=${APT_CACHE}" >> "${GITHUB_OUTPUT}"
 
-        restore_from_cache()
-        {
-          if [[ ! -f "$CACHE_MARKER" || ! -d "$CACHE_FS" ]]; then
-            return 1
-          fi
-          echo "Restoring LLVM 21 snapshot from cache into / ..."
-          sudo cp -a "$CACHE_FS"/. /
-          command -v clang++-21 >/dev/null 2>&1
-        }
+        # Hosted runners wipe kept packages via docker-clean; keep .debs so the
+        # archive cache is non-empty after install.
+        sudo rm -f /etc/apt/apt.conf.d/docker-clean
+        echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+          | sudo tee /etc/apt/apt.conf.d/01keep-debs >/dev/null
 
-        snapshot_to_cache()
-        {
-          echo "Saving LLVM 21 snapshot into cache directory..."
-          rm -rf "$LLVM_CACHE_ROOT"
-          mkdir -p "$CACHE_FS"
+        sudo apt-get update -y
+        sudo apt-get install -y wget gnupg ca-certificates lsb-release software-properties-common
 
-          # Capture the llvm-21 prefix plus every file owned by the packages.
-          # dpkg -L lists "/" for many packages — never copy that (would recurse
-          # into CACHE_FS which lives under /opt/hostedtoolcache/...).
-          pkgs=()
-          read -r -a pkgs <<< "$LLVM_PACKAGES"
+        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key \
+          | sudo gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg
+        echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" \
+          | sudo tee /etc/apt/sources.list.d/apt-llvm.org.list >/dev/null
+        sudo apt-get update -y
+
+        # Fingerprint candidate versions so a LLVM apt bump invalidates the cache.
+        fingerprint="$(
           {
-            printf '%s\n' /usr/lib/llvm-21
-            for pkg in "${pkgs[@]}"; do
-              dpkg -L "$pkg" 2>/dev/null || true
+            printf 'packages:%s\n' "${LLVM_PACKAGES}"
+            # shellcheck disable=SC2086
+            for pkg in ${LLVM_PACKAGES}; do
+              apt-cache policy "${pkg}" 2>/dev/null \
+                | awk -v p="${pkg}" '/Candidate:/ { print p ":" $2; exit }'
             done
-          } | sort -u | while IFS= read -r path; do
-            [[ -n "$path" ]] || continue
-            case "$path" in
-              /|/.|/..|.) continue ;;
-            esac
-            # Only snapshot concrete toolchain paths under /usr (and /etc if any).
-            case "$path" in
-              /usr/*|/etc/*) ;;
-              *) continue ;;
-            esac
-            [[ -e "$path" || -L "$path" ]] || continue
-            dest="$CACHE_FS$path"
-            sudo mkdir -p "$(dirname "$dest")"
-            sudo cp -a "$path" "$dest"
-          done
+          } | sha256sum | awk '{ print $1 }'
+        )"
+        echo "fingerprint=${fingerprint}" >> "${GITHUB_OUTPUT}"
+        echo "Apt fingerprint: ${fingerprint}"
 
-          sudo chown -R "$(id -u):$(id -g)" "$LLVM_CACHE_ROOT"
-          touch "$CACHE_MARKER"
-          echo "Snapshot saved ($(du -sh "$LLVM_CACHE_ROOT" | awk '{print $1}'))."
-        }
+    - name: Cache apt .deb archives
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.prep.outputs.cache_dir }}
+        key: apt-llvm-21-${{ runner.os }}-${{ runner.arch }}-${{ steps.prep.outputs.fingerprint }}
+        restore-keys: |
+          apt-llvm-21-${{ runner.os }}-${{ runner.arch }}-
 
-        if restore_from_cache; then
-          echo "clang++-21 restored from cache; skipping apt install."
-        else
-          echo "clang++-21 not available from cache — installing LLVM 21 toolchain..."
-          sudo apt-get update -y
-          sudo apt-get install -y wget gnupg ca-certificates lsb-release software-properties-common
-          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg
-          echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/apt-llvm.org.list > /dev/null
-          sudo apt-get update -y
-          # shellcheck disable=SC2086
-          sudo apt-get install -y $LLVM_PACKAGES
-          # Snapshot is best-effort: apt already succeeded; do not fail the job
-          # if packing the cache hits a transient cp issue.
-          if ! snapshot_to_cache; then
-            echo "::warning::LLVM snapshot failed; clang is installed but cache will miss next run."
-            rm -rf "$LLVM_CACHE_ROOT"
-          fi
-        fi
+    - name: Install LLVM packages from apt
+      shell: bash
+      env:
+        LLVM_PACKAGES: ${{ inputs.packages }}
+        APT_CACHE: ${{ steps.prep.outputs.cache_dir }}
+      run: |
+        set -euo pipefail
+
+        mkdir -p "${APT_CACHE}/partial"
+
+        # shellcheck disable=SC2086
+        sudo apt-get \
+          -o Dir::Cache::archives="${APT_CACHE}" \
+          install -y ${LLVM_PACKAGES}
+
+        # actions/cache packs as the runner user; apt may have written as root.
+        sudo chown -R "$(id -u):$(id -g)" "${APT_CACHE}"
 
         if [[ -x /usr/bin/clang-21 ]]; then
           sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-21   100 || true
@@ -107,4 +90,5 @@ runs:
         fi
 
         clang++-21 --version | head -1
+        echo "Apt archive cache: $(du -sh "${APT_CACHE}" | awk '{print $1}') ($(find "${APT_CACHE}" -name '*.deb' | wc -l | tr -d ' ') .deb files)"
         echo "LLVM setup complete."

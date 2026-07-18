@@ -793,6 +793,132 @@ auto register_odata_tests()
         };
     };
 
+    scenario("parse_filter grouping parentheses match documents, [yardb]") = []
+    {
+        given("Documents with name and status fields") = []
+        {
+            auto docs = object{object::array{
+                object{{"name"s, "Alice"s}, {"status"s, "active"s}, {"age"s, 30}},
+                object{{"name"s, "Bob"s}, {"status"s, "inactive"s}, {"age"s, 20}}
+            }};
+
+            when("Filter wraps a leaf in parentheses") = [docs]
+            {
+                then("Matches the same documents as the ungrouped filter") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("(name eq 'Alice')"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("name"s));
+                    require_eq(selector["name"s].get<string>(), "Alice"s);
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        if(doc.match(selector))
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 1u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("Filter wraps an AND group in parentheses") = [docs]
+            {
+                then("Applies both predicates") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("(name eq 'Alice' and age gt 25)"sv);
+                    require_true(filters.empty());
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        if(doc.match(selector))
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 1u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("Filter parenthesizes each OR branch") = [docs]
+            {
+                then("Matches either branch") = [docs]
+                {
+                    const auto parsed = parse_filter("(name eq 'Alice') or (status eq 'inactive')"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        auto matched = false;
+                        for(const auto& branch : parsed.or_branches)
+                        {
+                            if(doc.match(branch.selector))
+                            {
+                                matched = true;
+                                break;
+                            }
+                        }
+                        if(matched)
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 2u);
+                };
+            };
+
+            when("Filter parenthesizes each AND operand") = [docs]
+            {
+                then("Applies both leaf predicates") = [docs]
+                {
+                    const auto [selector, filters] = parse_and_filter("(name eq 'Alice') and (status eq 'active')"sv);
+                    require_true(filters.empty());
+
+                    auto result = object::array{};
+                    for(const auto& doc : docs.get<object::array>())
+                    {
+                        if(doc.match(selector))
+                            result.push_back(doc);
+                    }
+
+                    require_eq(result.size(), 1u);
+                    require_eq(result[0]["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("Filter uses nested outer parentheses") = []
+            {
+                then("Strips them before parsing") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("((name eq 'Alice'))"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("name"s));
+                    require_eq(selector["name"s].get<string>(), "Alice"s);
+                };
+            };
+
+            when("Filter is empty parentheses") = []
+            {
+                then("Throws invalid_argument") = []
+                {
+                    auto thrown = false;
+                    try
+                    {
+                        parse_filter("()"sv);
+                    }
+                    catch(const std::invalid_argument&)
+                    {
+                        thrown = true;
+                    }
+                    require_true(thrown);
+                };
+            };
+        };
+    };
+
     scenario("parse_filter same-field AND keeps all predicates, [yardb]") = []
     {
         given("Documents with overlapping ages and statuses") = []

@@ -283,6 +283,20 @@ auto test_set()
             require_true(error.has("id"s));
         };
 
+        section("GET never-created collection returns empty array") = [setup]
+        {
+            // Missing collections must not stringify as {} — entity sets are arrays.
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/nevercreatedcollection"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            require_eq(0u, documents.size());
+        };
+
         section("DELETE existing document returns 204 No Content") = [setup]
         {
             // First create a document

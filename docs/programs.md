@@ -4,16 +4,16 @@ This document describes the various programs included in the YarDB project.
 
 ## yardb - Database Server
 
-The main database server that provides a RESTful HTTP API for document storage and retrieval.
+The main database server that provides a RESTful HTTP API for document storage and retrieval. It is meant as per-microservice persistence: one process, one database file, and the collections that service owns — not as a shared enterprise database for many domains.
 
 ### Purpose
 
 `yardb` is the core database server that:
 - Accepts HTTP/1.1 requests
-- Stores documents in FSON-encoded format
+- Stores documents in FSON-encoded format (one `--file` per service is the usual layout)
 - Provides RESTful CRUD operations
-- Manages collections and indexing
-- Handles concurrent requests via multi-threaded architecture
+- Manages collections and indexing for that service’s dataset
+- Handles concurrent requests in-process (shared locks for reads; exclusive write lock; exclusive `.pid` ownership of the file)
 
 ### Usage
 
@@ -29,10 +29,10 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [
   - Binding to `0.0.0.0` or `::` **requires** `--pat` or `--pat-file`
 
 - `--file=<name>` - Database file path (default: `yar.db`)
-  - The database file stores all collections and documents
+  - The database file stores all collections and documents for this instance
   - If the file doesn't exist, it will be created
-  - Multiple instances can use different files for separate databases
-  - Opening creates an exclusive `{file}.pid` lock; verify no live owner before manually removing a stale lock
+  - Give each microservice its own file (and usually its own `yardb` process); do not share one file across unrelated services
+  - Opening creates an exclusive `{file}.pid` lock (single writer by design); verify no live owner before manually removing a stale lock
   - Startup recovers incomplete tails automatically and refuses structurally corrupt files
 
 - `--clog` - Redirect logging to console (stdout/stderr) instead of syslog

@@ -1,8 +1,18 @@
 # YarDB - Yet Another RESTful Database
 
-A document-oriented database with a RESTful Web API, implemented in C++23. YarDB is intended for development, testing, and controlled single-node deployments; see the [deployment guide](docs/deployment.md) for current operational limitations.
+A document-oriented database with a RESTful Web API, implemented in C++23. YarDB is a persistence layer for microservices, not a shared enterprise database for monoliths.
 
 **Project Structure**: This project follows [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html) guidelines for C++ projects.
+
+## Intended use
+
+Microservices usually own one dataset (or a small set of related collections). YarDB matches that shape:
+
+- **One service → one `yardb` process → one database file** — collections for that service live together; other services get their own file and process
+- **Single writer is enough** — an exclusive `.pid` lock and in-process write serialization fit a service that is the sole owner of its data
+- **Scale out by services, not by clustering one DB** — add more microservices (each with its own YarDB), rather than turning one deployment into a multi-tenant enterprise store
+
+YarDB is a poor fit when many unrelated domains must share one database, or when you need built-in multi-node replication and failover for a single shared store. For the operational model and current limits, see the [deployment guide](docs/deployment.md).
 
 ## Overview
 
@@ -126,7 +136,7 @@ Export FSON records as JSONL (`yarexport`, including `--live` for current docs o
 
 ## Operations
 
-Database locking, recovery behavior, backups, request limits, and production constraints are documented in the [Deployment Guide](docs/deployment.md).
+The intended one-service / one-file model, database locking, recovery, backups, request limits, and production constraints are documented in the [Deployment Guide](docs/deployment.md).
 
 ## Dependencies
 

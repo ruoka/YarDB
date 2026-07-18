@@ -17,8 +17,17 @@ CB_TOOLS_DIR="$TOOLS_DIR"
 CB_PROJECT_ROOT="$PROJECT_ROOT"
 CB_TESTER_ROOT="$TESTER_ROOT"
 CB_SANDBOX_DISABLE_NETWORK_TESTS=1
-CB_RESPECT_CXX_ENV=0
 CB_INCLUDE_EXAMPLES_MODE=never
+
+# YarDB requires Clang/LLVM 23 (views::enumerate, etc.). Tester's CB.sh.core still
+# defaults Linux to clang++-21 for submodules; override only for this wrapper.
+if [[ "$(uname -s)" == "Linux" ]]; then
+  CB_RESPECT_CXX_ENV=1
+  : "${CXX:=clang++-23}"
+  export CXX
+else
+  CB_RESPECT_CXX_ENV=0
+fi
 
 CB_INCLUDE_DIRS=("$PROJECT_ROOT/deps/net/net" "$PROJECT_ROOT/deps/cryptic/cryptic")
 [[ -n "$TESTER_ROOT" && -d "$TESTER_ROOT/tester" ]] && CB_INCLUDE_DIRS+=("$TESTER_ROOT/tester")

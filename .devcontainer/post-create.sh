@@ -7,14 +7,14 @@ STAMP=".devcontainer/bootstrap-stamp"
 KEY="$(git rev-parse HEAD)-$(git submodule status)"
 
 echo "=== Toolchain ==="
-clang++-21 -v
-/usr/lib/llvm-21/bin/clang-scan-deps --version
+clang++-23 -v
+/usr/lib/llvm-23/bin/clang-scan-deps --version
 
-if [[ -f /usr/lib/llvm-21/share/libc++/v1/std.cppm ]]; then
-    echo "std.cppm: /usr/lib/llvm-21/share/libc++/v1/std.cppm"
+if [[ -f /usr/lib/llvm-23/share/libc++/v1/std.cppm ]]; then
+    echo "std.cppm: /usr/lib/llvm-23/share/libc++/v1/std.cppm"
 else
-    echo "WARNING: std.cppm not found at /usr/lib/llvm-21/share/libc++/v1/std.cppm"
-    find /usr/lib/llvm-21 -name "std.cppm" 2>/dev/null || true
+    echo "WARNING: std.cppm not found at /usr/lib/llvm-23/share/libc++/v1/std.cppm"
+    find /usr/lib/llvm-23 -name "std.cppm" 2>/dev/null || true
 fi
 
 echo "=== Submodules ==="

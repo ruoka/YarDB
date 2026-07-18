@@ -6,7 +6,7 @@ Thank you for your interest in contributing to YarDB! This document provides gui
 
 ### Prerequisites
 
-- **Clang 21 or higher** with C++23 modules support and built-in std module
+- **Clang 23 or higher** with C++23 modules support and built-in std module (YarDB CI/devcontainer use apt.llvm.org snapshot packages; submodules may still document Clang 21)
 - **Git** for version control
 
 ### Getting Started

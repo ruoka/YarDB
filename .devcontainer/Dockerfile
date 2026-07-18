@@ -6,21 +6,23 @@ RUN set -ex && \
     apt-get install -y --no-install-recommends wget gnupg ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# LLVM 23 is the apt.llvm.org development snapshot (unversioned suite).
+# There is no llvm-toolchain-noble-23 — use llvm-toolchain-noble + *-23 packages.
 RUN set -ex && \
     wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg && \
-    echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
+    echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         git cmake make file jq libssl-dev \
-        clang-21 clang-tools-21 lldb-21 lld-21 libc++-21-dev libc++abi-21-dev && \
+        clang-23 clang-tools-23 lldb-23 lld-23 libc++-23-dev libc++abi-23-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-21 100 && \
-    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 100 && \
-    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-21 100
+RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-23 100 && \
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-23 100 && \
+    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-23 100
 
-ENV CC=clang-21 \
-    CXX=clang++-21 \
+ENV CC=clang-23 \
+    CXX=clang++-23 \
     LDFLAGS="-Wl,--push-state,--no-as-needed -lc++ -lc++abi -lc++experimental -Wl,--pop-state -pthread -ldl"
 
 ARG USERNAME=vscode

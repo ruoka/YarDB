@@ -19,6 +19,9 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Multi-op `$count` vs match** | Indexed `$count=true` for AND-merged multi-op field maps (`$eq`+range, `$gt`+`$gte`) falls back to scan+match so count matches GET results |
 | **`$orderby` field sort** | Results sort by the named field (`asc`/`desc`); was previously only reversing `_id` walk order via `$desc` |
 | **Object field vs scalar `$filter`** | Nested object/array fields no longer match scalar `$eq`/`$ne`/`$gt`/`$in`/`$nin` (and bare `eq` no longer throws); use `Customer/Country` paths for nested documents |
+| **Numeric `$filter` vs JSON doubles** | Integer OData literals compare numerically with JSON `number_type` values (`score eq 100` matches `100.0`; `score lt 9` no longer includes `100.0` via variant index order); secondary indexes and `$orderby` use the same ordering |
+| **Boolean/null `$filter` literals** | `active eq true` / `eq null` parse as JSON bool/null instead of strings `"true"` / `"null"` |
+| **Parent vs nested path AND** | `Customer eq 'Acme' and Customer/Country eq 'USA'` is contradictory (matches nothing) instead of last-write-wins over-including nested documents |
 
 ### Storage & tooling
 
@@ -28,6 +31,8 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Update/replace commit when truncate fails after restore** | If successors are durable, status restore succeeds, but truncating appends fails, update/replace publish the staged index (and re-tombstone priors) instead of reporting failure while reopen would apply the new version |
 | **Create/update/replace commit when append truncate fails** | If a durable successor is appended but truncating it on rollback fails (before status markers), create/update/replace publish the staged index (update/replace also tombstone priors) instead of reporting failure while reopen would apply the write |
 | **Torn append + truncate failure does not publish** | If the append past `original_size` is incomplete (torn) and truncating it fails, create/update/replace return `rollback_failure` without publishing staged or tombstoning priors — avoids silent data loss when reopen drops the incomplete tail |
+| **Multi-update mid-batch torn append aborts** | `update` checks failbit after each append and does not `clear()` away a torn ENOSPC record before writing further successors — prevents tombstoning every prior while reopen truncates at the tear and drops later successors |
+| **Incomplete multi-append neutralize on truncate failure** | When truncate fails after a torn multi-append, complete successors past `original_size` are delete-marked so reopen keeps all priors instead of silently applying a partial update after `rollback_failure` |
 | **Destroy re-asserts tombstones after failed status restore** | After a failed/partial status restore, destroy rewrites `deleted` markers before publishing the staged index so partially revived rows cannot resurrect on reopen |
 | **PUT honors `If-None-Match`** | Conditional PUT returns `412` when `If-None-Match: *` or a matching ETag would be violated, so create-only clients cannot silently overwrite |
 | **`yarexport --live` uses engine** | Live export opens through `engine` so dual-live crash windows export one current document per `_id` (stale pre-images are not resurrected into compaction JSONL) |

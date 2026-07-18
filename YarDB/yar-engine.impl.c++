@@ -134,6 +134,57 @@ bool complete_appended_records(
     return static_cast<std::uintmax_t>(end_pos) == file_size;
 }
 
+// Best-effort: mark every complete record past original_size as deleted so a
+// failed multi-append that cannot be truncated does not silently apply a
+// complete prefix on reopen. Stops at the first incomplete/torn tail.
+void neutralize_appended_records(
+    std::fstream& storage,
+    const std::string& db,
+    std::uintmax_t original_size)
+{
+    using xson::fson::operator >>;
+    using xson::fson::operator <<;
+
+    auto size_error = std::error_code{};
+    const auto file_size = std::filesystem::file_size(db, size_error);
+    if(size_error or file_size <= original_size)
+        return;
+
+    storage.clear();
+    storage.seekg(static_cast<std::streamoff>(original_size), storage.beg);
+    while(true)
+    {
+        const auto record_start = storage.tellg();
+        if(record_start < 0)
+            return;
+        if(static_cast<std::uintmax_t>(record_start) >= file_size)
+            break;
+
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        try
+        {
+            storage >> metadata >> document;
+        }
+        catch(const std::runtime_error&)
+        {
+            return;
+        }
+        if(storage.fail())
+            return;
+
+        const auto resume = storage.tellg();
+        storage.clear();
+        storage.seekp(record_start, storage.beg);
+        storage << yar::db::deleted;
+        if(storage.fail())
+            return;
+        storage.clear();
+        storage.seekg(resume, storage.beg);
+    }
+    storage.flush();
+}
+
 void validate_and_recover_storage(std::fstream& storage, const std::string& db)
 {
     using xson::fson::operator >>;
@@ -316,6 +367,7 @@ yar::db::engine::engine(yar::db::engine&& e) :
     m_fail_rollback_status{std::exchange(e.m_fail_rollback_status, false)},
     m_fail_truncate{std::exchange(e.m_fail_truncate, false)},
     m_fail_torn_append{std::exchange(e.m_fail_torn_append, false)},
+    m_torn_append_after{std::exchange(e.m_torn_append_after, 0)},
 #endif
     m_writable{std::exchange(e.m_writable, false)}
 {}
@@ -376,6 +428,11 @@ void yar::db::fail_next_torn_append(yar::db::engine& engine)
 {
     engine.m_fail_torn_append = true;
 }
+
+void yar::db::fail_torn_append_after(yar::db::engine& engine, std::size_t appended)
+{
+    engine.m_torn_append_after = appended;
+}
 #endif
 
 bool yar::db::engine::consume_write_failure()
@@ -418,6 +475,8 @@ bool yar::db::engine::consume_torn_append_failure()
 
 // After a flushed append, tear the trailing record and mark the stream failed so
 // append-phase rollback sees durable-but-incomplete bytes (ENOSPC mid-record).
+// Prefer file_size-1 so a complete prefix from earlier multi-append iterations
+// remains (original_size+1 would destroy that prefix).
 // No-op in release (NDEBUG): consume_torn_append_failure() always returns false.
 bool yar::db::engine::inject_torn_append(std::uintmax_t original_size)
 {
@@ -431,11 +490,29 @@ bool yar::db::engine::inject_torn_append(std::uintmax_t original_size)
     if(not size_error and file_size > original_size)
     {
         auto resize_error = std::error_code{};
-        std::filesystem::resize_file(m_db, original_size + 1, resize_error);
+        const auto torn_size = file_size - 1;
+        const auto target = torn_size > original_size ? torn_size : original_size + 1;
+        std::filesystem::resize_file(m_db, target, resize_error);
     }
     reopen(m_storage, m_db);
     m_storage.setstate(std::ios::badbit);
     return true;
+}
+
+bool yar::db::engine::maybe_inject_torn_append_after(
+    std::uintmax_t original_size,
+    std::size_t appended)
+{
+#ifndef NDEBUG
+    if(m_torn_append_after == 0 or appended != m_torn_append_after)
+        return false;
+
+    m_torn_append_after = 0;
+    m_fail_torn_append = true;
+    return inject_torn_append(original_size);
+#else
+    return false;
+#endif
 }
 
 void yar::db::engine::setup_index_structure()
@@ -655,6 +732,9 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
                 m_index = std::move(staged);
                 return {};
             }
+            // Incomplete tail cannot publish. Neutralize any complete prefix so
+            // reopen does not apply a partial durable create after failure.
+            neutralize_appended_records(m_storage, m_db, original_size);
             m_writable = false;
             return std::unexpected{db_error(
                 db_error_code::rollback_failure,
@@ -725,9 +805,9 @@ void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, 
         {
             const auto& left = lhs[field_name].get<xson::primitive>();
             const auto& right = rhs[field_name].get<xson::primitive>();
-            if(left != right)
+            if(not xson::primitive_equal(left, right))
             {
-                const auto less = std::less<xson::primitive>{}(left, right);
+                const auto less = xson::primitive_less(left, right);
                 return descending ? not less : less;
             }
         }
@@ -942,14 +1022,28 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
 
     auto staged = m_index;
     auto& staged_index = staged[std::string{collection}];
+    auto appended = std::size_t{0};
     for(auto& entry : pending)
     {
+        // Do not clear() away a prior append failure. ENOSPC mid-batch can leave
+        // a torn record; clearing failbit and appending further successors would
+        // let the status phase tombstone every prior while reopen truncates at
+        // the tear and drops the later successors — silent data loss.
+        if(m_storage.fail())
+            break;
+
         staged_index.erase(entry.old_document);
         staged_index.update(entry.new_document);
         m_storage.clear();
         m_storage.seekp(0, m_storage.end);
         m_storage << entry.metadata_record << entry.new_document;
+        if(m_storage.fail())
+            break;
+
         staged_index.insert(entry.new_document, entry.metadata_record.position);
+        ++appended;
+        if(maybe_inject_torn_append_after(original_size, appended))
+            break;
     }
     // Flush before synthetic failure so append-phase rollback sees durable
     // successors (mirrors status-phase inject ordering).
@@ -985,6 +1079,10 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
                 m_index = std::move(staged);
                 return pending.size();
             }
+            // N-1 complete + torn last: delete-mark the complete prefix so reopen
+            // keeps all priors (matches the reported failure) instead of silently
+            // applying a partial update.
+            neutralize_appended_records(m_storage, m_db, original_size);
             m_writable = false;
             return std::unexpected{db_error(
                 db_error_code::rollback_failure,
@@ -1334,6 +1432,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
                 m_index = std::move(staged);
                 return positions.size();
             }
+            neutralize_appended_records(m_storage, m_db, original_size);
             m_writable = false;
             return std::unexpected{db_error(
                 db_error_code::rollback_failure,

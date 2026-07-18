@@ -179,6 +179,7 @@ private:
     friend void fail_next_rollback_status(engine&);
     friend void fail_next_truncate(engine&);
     friend void fail_next_torn_append(engine&);
+    friend void fail_torn_append_after(engine&, std::size_t);
 #endif
 
     [[nodiscard]] std::ifstream open_reader() const;
@@ -189,6 +190,7 @@ private:
     bool consume_truncate_failure();
     bool consume_torn_append_failure();
     bool inject_torn_append(std::uintmax_t original_size);
+    bool maybe_inject_torn_append_after(std::uintmax_t original_size, std::size_t appended);
     bool preconditions_met(const yar::db::metadata& metadata_record, const write_preconditions& preconditions) const;
 
     void setup_index_structure();
@@ -217,6 +219,7 @@ private:
     bool m_fail_rollback_status = false;
     bool m_fail_truncate = false;
     bool m_fail_torn_append = false;
+    std::size_t m_torn_append_after = 0;
 #endif
     bool m_writable = true;
 };

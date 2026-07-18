@@ -298,14 +298,20 @@ inline xson::object as_operator_constraint_map(const xson::object& leaf)
 // Keep the tighter lower/upper bound when AND merges the same range operator.
 inline void tighten_lower_bound(xson::object& target, const xson::object& candidate)
 {
-    if(candidate.get<xson::primitive>() > target.get<xson::primitive>())
+    if(xson::primitive_less(target.get<xson::primitive>(), candidate.get<xson::primitive>()))
         target = candidate;
 }
 
 inline void tighten_upper_bound(xson::object& target, const xson::object& candidate)
 {
-    if(candidate.get<xson::primitive>() < target.get<xson::primitive>())
+    if(xson::primitive_less(candidate.get<xson::primitive>(), target.get<xson::primitive>()))
         target = candidate;
+}
+
+// Contradictory predicate that matches no document (used for parent-vs-nested AND).
+inline xson::object impossible_predicate()
+{
+    return xson::object{{"$eq"s, true}, {"$ne"s, true}};
 }
 
 // AND of two $in maps is their value intersection. Empty intersection matches
@@ -486,6 +492,15 @@ inline void merge_selector_into(xson::object& target, const xson::object& source
             continue;
         }
 
+        // Scalar/constraint versus nested path on the same key cannot both hold
+        // (Customer eq 'Acme' and Customer/Country eq 'USA'). Last-write-wins
+        // previously dropped one side and over-included everyday nested docs.
+        if((dest_is_nested and source_is_constraint) or (dest_is_constraint and source_is_nested))
+        {
+            dest = impossible_predicate();
+            continue;
+        }
+
         dest = value;
     }
 }
@@ -519,10 +534,22 @@ inline void set_nested_selector_leaf(xson::object& selector, std::string_view pa
     auto top = xson::object{};
     top[segments[0]] = std::move(nested);
 
-    if(selector.has(segments[0]) and selector[segments[0]].has_objects())
-        merge_selector_into(selector[segments[0]], top[segments[0]]);
-    else
+    if(not selector.has(segments[0]))
+    {
         selector[segments[0]] = std::move(top[segments[0]]);
+        return;
+    }
+
+    auto& existing = selector[segments[0]];
+    const auto existing_is_nested =
+        existing.has_objects() and not is_operator_constraint_map(existing);
+
+    // Deep-merge nested paths; scalar/constraint vs nested goes through
+    // merge_selector_into so the conflict becomes an impossible predicate.
+    if(existing_is_nested)
+        merge_selector_into(existing, top[segments[0]]);
+    else
+        merge_selector_into(selector, top);
 }
 
 // Resolve nested document field for string filter post-processing
@@ -728,6 +755,69 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     // Validate value is not empty (empty strings are allowed for string comparisons)
     if(value.empty() and not is_string)
         throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
+
+    // Unquoted literals: true/false/null, integer, or floating-point. Quoted
+    // values stay strings. Bare identifiers that are not literals become strings
+    // (legacy); boolean/null must not be stringified or they never match JSON.
+    const auto parse_unquoted_literal = [](const std::string& literal) -> xson::object
+    {
+        if(literal == "true"s)
+        {
+            auto value = xson::object{};
+            value = true;
+            return value;
+        }
+        if(literal == "false"s)
+        {
+            auto value = xson::object{};
+            value = false;
+            return value;
+        }
+        if(literal == "null"s)
+        {
+            auto value = xson::object{};
+            value = nullptr;
+            return value;
+        }
+
+        try
+        {
+            auto value = xson::object{};
+            value = utils::stoll(literal);
+            return value;
+        }
+        catch(const std::invalid_argument&)
+        {
+        }
+
+        auto number = xson::number_type{};
+        const auto* begin = literal.data();
+        const auto* end = literal.data() + literal.size();
+        const auto [ptr, ec] = std::from_chars(begin, end, number);
+        if(ec == std::errc{} and ptr == end)
+        {
+            auto value = xson::object{};
+            value = number;
+            return value;
+        }
+
+        return xson::object{literal};
+    };
+
+    const auto require_numeric_literal = [&](std::string_view op_name) -> xson::object
+    {
+        if(is_string)
+            throw std::invalid_argument{
+                "Numeric operator '"s + std::string{op_name}
+                + "' requires numeric value in filter expression: "s + std::string{expr}};
+
+        auto literal = parse_unquoted_literal(value);
+        if(not literal.is_number())
+            throw std::invalid_argument{
+                "Numeric operator '"s + std::string{op_name}
+                + "' requires numeric value in filter expression: "s + std::string{expr}};
+        return literal;
+    };
     
     // Convert to selector format (supports nested paths: Customer/Country)
     if(op == "eq")
@@ -735,83 +825,23 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         if(is_string)
             set_nested_selector_leaf(selector, field, xson::object{value});
         else
-        {
-            try
-            {
-                auto num = utils::stoll(value);
-                set_nested_selector_leaf(selector, field, xson::object{num});
-            }
-            catch(...)
-            {
-                set_nested_selector_leaf(selector, field, xson::object{value});
-            }
-        }
+            set_nested_selector_leaf(selector, field, parse_unquoted_literal(value));
     }
     else if(op == "ne")
     {
         if(is_string)
             set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, value}});
         else
-        {
-            try
-            {
-                auto num = utils::stoll(value);
-                set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, num}});
-            }
-            catch(...)
-            {
-                set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, value}});
-            }
-        }
+            set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, parse_unquoted_literal(value)}});
     }
     else if(op == "gt")
-    {
-        try
-        {
-            auto num = stoll(value);
-            set_nested_selector_leaf(selector, field, xson::object{{"$gt"s, num}});
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'gt' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
+        set_nested_selector_leaf(selector, field, xson::object{{"$gt"s, require_numeric_literal("gt"sv)}});
     else if(op == "ge")
-    {
-        try
-        {
-            auto num = stoll(value);
-            set_nested_selector_leaf(selector, field, xson::object{{"$gte"s, num}});
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'ge' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
+        set_nested_selector_leaf(selector, field, xson::object{{"$gte"s, require_numeric_literal("ge"sv)}});
     else if(op == "lt")
-    {
-        try
-        {
-            auto num = stoll(value);
-            set_nested_selector_leaf(selector, field, xson::object{{"$lt"s, num}});
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'lt' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
+        set_nested_selector_leaf(selector, field, xson::object{{"$lt"s, require_numeric_literal("lt"sv)}});
     else if(op == "le")
-    {
-        try
-        {
-            auto num = stoll(value);
-            set_nested_selector_leaf(selector, field, xson::object{{"$lte"s, num}});
-        }
-        catch(const std::exception&)
-        {
-            throw std::invalid_argument{"Numeric operator 'le' requires numeric value in filter expression: "s + std::string{expr}};
-        }
-    }
+        set_nested_selector_leaf(selector, field, xson::object{{"$lte"s, require_numeric_literal("le"sv)}});
     
     return std::make_pair(selector, string_filters);
 }

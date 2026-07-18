@@ -123,7 +123,7 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
 }
 
 // OData string literals escape the delimiter by doubling it ('O''Brien' → O'Brien).
-inline auto unescape_odata_string(std::string_view text, char quote) -> std::string
+inline std::string unescape_odata_string(std::string_view text, char quote)
 {
     auto out = std::string{};
     out.reserve(text.size());
@@ -144,7 +144,7 @@ inline auto unescape_odata_string(std::string_view text, char quote) -> std::str
 
 // Strip surrounding quotes and unescape doubled delimiters. Returns owned text
 // because unescaping may shorten the literal ('' → ').
-inline auto strip_quoted_literal(std::string_view value) -> std::string
+inline std::string strip_quoted_literal(std::string_view value)
 {
     auto trimmed = utils::trim(value);
 
@@ -774,7 +774,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         return box(literal);
     };
 
-    const auto require_numeric_literal = [&](std::string_view op_name) -> xson::object
+    const auto require_numeric_literal = [&](std::string_view op_name)
     {
         if(is_string)
             throw std::invalid_argument{
@@ -956,7 +956,7 @@ inline auto apply_select(const xson::object& documents, std::string_view select_
 }
 
 // Smallest string strictly greater than all strings with the given prefix (for index range scans)
-export inline auto prefix_exclusive_upper_bound(std::string_view prefix) -> std::optional<std::string>
+export inline std::optional<std::string> prefix_exclusive_upper_bound(std::string_view prefix)
 {
     if(prefix.empty())
         return std::nullopt;
@@ -1130,7 +1130,7 @@ struct query_paging
     bool descending = false;
 };
 
-inline auto extract_and_strip_paging(xson::object& selector) -> query_paging
+inline query_paging extract_and_strip_paging(xson::object& selector)
 {
     auto paging = query_paging{};
 
@@ -1166,7 +1166,7 @@ inline auto extract_and_strip_paging(xson::object& selector) -> query_paging
 // Filter an in-memory array to documents matching any OR branch (unit tests)
 export inline auto filter_documents_by_or(
     const xson::object& documents,
-    const std::vector<filter_branch>& branches)
+    std::span<const filter_branch> branches)
 {
     if(not documents.is_array())
         return documents;
@@ -1196,11 +1196,11 @@ export inline auto filter_documents_by_or(
 }
 
 // Count documents for $count=true — index-only when the parsed filter allows it
-export inline auto count_with_parsed_filter(
+export inline std::size_t count_with_parsed_filter(
     yar::db::engine& engine,
     std::string_view collection,
     xson::object query_selector,
-    const parsed_filter& filter) -> std::size_t
+    const parsed_filter& filter)
 {
     if(filter.has_or())
     {
@@ -1504,7 +1504,7 @@ export inline auto parse_orderby(std::string_view orderby_value)
 // Generates metadata document based on existing collections and their schemas
 
 // Infer EDM (Entity Data Model) type from xson::object value
-inline auto infer_edm_type(const xson::object& value) -> std::string
+inline std::string infer_edm_type(const xson::object& value)
 {
     if(value.is_null())
         return "Edm.String"s; // Default for null
@@ -1526,7 +1526,7 @@ inline auto infer_edm_type(const xson::object& value) -> std::string
 
 // Infer schema from a single document
 // Returns Property array with field definitions
-inline auto infer_document_schema(const xson::object& document) -> xson::object::array
+inline xson::object::array infer_document_schema(const xson::object& document)
 {
     auto properties = xson::object::array{};
     
@@ -1555,7 +1555,7 @@ inline auto infer_document_schema(const xson::object& document) -> xson::object:
 
 // Infer schema from collection (use most recent document)
 // Requires engine to be locked by caller and collection to be set
-inline auto infer_collection_schema(yar::db::engine& engine, std::string_view collection) -> xson::object::array
+inline xson::object::array infer_collection_schema(yar::db::engine& engine, std::string_view collection)
 {
     auto selector = xson::object{"$top"s, 1ll};
     auto documents = xson::object{};
@@ -1579,7 +1579,7 @@ inline auto infer_collection_schema(yar::db::engine& engine, std::string_view co
 // Generate OData 4.01 JSON CSDL metadata
 // Creates complete metadata document with EntitySets and EntityTypes
 // Requires engine to be locked by caller
-export auto generate_metadata(yar::db::engine& engine) -> xson::object
+export xson::object generate_metadata(yar::db::engine& engine)
 {
     auto entity_sets = xson::object::array{};
     auto entity_types = xson::object::array{};

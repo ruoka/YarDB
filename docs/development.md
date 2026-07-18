@@ -325,7 +325,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Connection Pooling**: Efficient connection management
 - **Async I/O**: Non-blocking operations
 - **Memory Management**: Memory-mapped files, optimized storage
-- **Per-service parallelism & fault tolerance**: Multiple `yardb` instances for one microservice’s dataset (replication, failover, production-grade proxy semantics); new domains still get separate service deployments
+- **Parallelism & fault tolerance (main target)**: Multiple `yardb` instances for one owner’s dataset — typically one microservice (replication, failover, production-grade proxy semantics); prefer separate deployments when domains are independent
 
 ##### Engine Reader/Writer Concurrency — ✅ implemented (Jul 2026)
 
@@ -347,13 +347,12 @@ The storage writer remains single-owner. A write lock covers file mutation and s
 
 ## Architecture Decisions
 
-### Deployment model: microservice persistence
-- **Target**: Persistence behind one microservice (one or a few related datasets), not a multi-tenant enterprise store
-- **Unit of ownership**: One YarDB deployment per service (that service’s collections); unrelated domains stay isolated
-- **Per-service aim**: Parallel and fault-tolerant `yardb` instances for the same microservice (throughput + failover)
+### Deployment model: mainly microservice persistence
+- **Main target**: Persistence for one owner with one or a few related datasets — typically a microservice. Other uses are fine when they match that shape
+- **Unit of ownership**: Prefer one YarDB deployment per owner; separate deployments when domains are independent
+- **Aim per owner**: Parallel and fault-tolerant `yardb` instances for the same dataset (throughput + failover)
 - **Today**: One writer per open database file (exclusive `.pid` lock); `yarproxy` is not yet production HA
-- **Cross-service scale-out**: More microservices → more YarDB deployments; not one shared store for many domains
-- **Out of scope**: Multi-tenant “one YarDB for the enterprise”; monolith-style shared schemas across teams
+- **Weaker fit**: One shared store for many unrelated domains (monolith / multi-tenant enterprise style) — not the main design target
 - **Operational detail**: See [deployment.md](deployment.md#target-deployment-model)
 
 ### Security Architecture

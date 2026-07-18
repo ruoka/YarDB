@@ -4,7 +4,7 @@ This document describes the various programs included in the YarDB project.
 
 ## yardb - Database Server
 
-The main database server that provides a RESTful HTTP API for document storage and retrieval. It is meant as per-microservice persistence: the collections that service owns, with parallel and fault-tolerant instances as the aim for that service — not as a shared enterprise database for many domains.
+The main database server that provides a RESTful HTTP API for document storage and retrieval. It is mainly targeted at per-microservice persistence (one owner’s collections, with parallel and fault-tolerant instances as the aim). Other uses are fine when they match that shape; a shared store for many unrelated domains is a weaker fit.
 
 ### Purpose
 
@@ -31,9 +31,9 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [
 - `--file=<name>` - Database file path (default: `yar.db`)
   - The database file stores all collections and documents for this instance
   - If the file doesn't exist, it will be created
-  - Give each microservice its own data store; do not share one file across unrelated services
+  - Prefer one data store per owner (e.g. per microservice); sharing one file across unrelated domains is a weaker fit
   - Opening creates an exclusive `{file}.pid` lock (one writer per open file today); verify no live owner before manually removing a stale lock
-  - Parallel / fault-tolerant multi-instance operation for the same service is the product aim; see [deployment.md](deployment.md#availability--scaling)
+  - Parallel / fault-tolerant multi-instance operation for the same owner’s dataset is the product aim; see [deployment.md](deployment.md#availability--scaling)
   - Startup recovers incomplete tails automatically and refuses structurally corrupt files
 
 - `--clog` - Redirect logging to console (stdout/stderr) instead of syslog
@@ -400,7 +400,7 @@ Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter
 
 ## yarproxy - HTTP Fan-out Proxy
 
-Forwards HTTP requests to multiple independent `yardb` backends. Each backend has its own database file. The long-term aim is parallel, fault-tolerant instances *per microservice*; `yarproxy` today is only a development fan-out, not that production path.
+Forwards HTTP requests to multiple independent `yardb` backends. Each backend has its own database file. The long-term aim (mainly for the microservice case) is parallel, fault-tolerant instances per owner; `yarproxy` today is only a development fan-out, not that production path.
 
 ### Purpose
 

@@ -2,17 +2,17 @@
 
 ## Target deployment model
 
-YarDB is aimed at microservice persistence, not at monolithic or multi-tenant enterprise databases. Within each microservice, the aim is still **parallel and fault-tolerant YarDB instances** for that service’s dataset.
+YarDB is mainly targeted as microservice persistence. Other uses are fine when they match the same shape (one owner, one or a few datasets). Within that primary case, the aim is still parallel and fault-tolerant YarDB instances for that owner’s dataset.
 
-| Assumption | Consequence |
-|------------|-------------|
-| One microservice owns one (or a few related) datasets | That service gets its own YarDB deployment; unrelated domains do not share it |
-| The service needs throughput and uptime | Run multiple `yardb` instances for that service (parallelism + fault tolerance), not only a single process |
-| Domains stay isolated | New domains → new services with their own YarDB; not one shared cluster for the whole enterprise |
+| Typical assumption (main target) | Consequence |
+|----------------------------------|-------------|
+| One microservice owns one (or a few related) datasets | Give that owner its own YarDB deployment |
+| The owner needs throughput and uptime | Run multiple `yardb` instances for that dataset (parallelism + fault tolerance) |
+| Domains are independent | Prefer separate deployments per owner rather than one shared store for many domains |
 
-Keep each service’s data private to that service (loopback + reverse proxy, or network policy). Do not put unrelated domains into one deployment “for convenience.”
+Keep each owner’s data private where practical (loopback + reverse proxy, or network policy). Stuffing unrelated domains into one deployment “for convenience” is a weaker fit for how YarDB is designed.
 
-**Today vs aim:** each open database file still has one writer (exclusive `{database}.pid` lock). `yarproxy` can fan out HTTP to independent backends for development, but does not yet provide production-grade replication or failover. Parallel / fault-tolerant instances *per microservice* remain the product direction.
+**Today vs aim:** each open database file still has one writer (exclusive `{database}.pid` lock). `yarproxy` can fan out HTTP to independent backends for development, but does not yet provide production-grade replication or failover. Parallel / fault-tolerant instances for a given owner’s dataset remain the product direction.
 
 ## 🚀 Production Readiness Status
 
@@ -21,15 +21,14 @@ Keep each service’s data private to that service (loopback + reverse proxy, or
 - ✅ Document storage and retrieval
 - ✅ OData query support
 - ⚠️ **Partial**: Bearer PAT MVP (data + admin for `/_*`), safe bind defaults (`127.0.0.1`, public bind requires PAT), liveness/readiness probes, minimum Prometheus `/metrics`, `correlation_id` tracing, exclusive database locking, startup validation, truncated-tail recovery, and a 1 MiB request limit
-- ❌ **Missing for hardened per-service deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
-- ❌ **Missing for parallel / fault-tolerant instances per service**: production-grade replication, failover, and consistent multi-instance semantics (see below)
-- ❌ **Out of target model**: multi-tenant shared databases spanning unrelated domains
+- ❌ **Missing for hardened deploys**: JWT/OAuth2, full RBAC, TLS at reverse proxy, richer ops automation
+- ❌ **Missing for parallel / fault-tolerant instances**: production-grade replication, failover, and consistent multi-instance semantics (see below)
 
 **Production Requirements** (see [development roadmap](../docs/development.md)):
 - 🔐 **Security & Authentication** (data + admin PATs shipped; JWT/RBAC and TLS at reverse proxy still planned; safe bind defaults shipped)
 - 📊 **Monitoring & Observability** (minimum Prometheus `/metrics` shipped; richer labels / tracing planned; liveness/readiness probes shipped)
 - 🛡️ **Production Hardening** (graceful shutdown, resource limits)
-- 🔁 **Per-service parallelism & fault tolerance** (multiple instances for one microservice’s dataset)
+- 🔁 **Parallelism & fault tolerance** (multiple instances for one owner’s dataset — the main microservice case)
 
 ## 🏗️ Building for Production
 
@@ -238,20 +237,20 @@ Point-in-time recovery is not implemented yet. Stop `yardb` before copying, expo
 
 ## 🚨 Availability & Scaling
 
-### By design (microservice model)
-- **Data ownership boundary**: one microservice → one YarDB deployment (its collections). Unrelated domains stay in other deployments.
-- **Aim per service**: several parallel, fault-tolerant `yardb` instances for that service’s dataset (throughput + failover).
+### Main target (microservice-shaped ownership)
+- **Ownership boundary**: one owner (typically a microservice) → one YarDB deployment for its collections. Prefer separate deployments when domains are independent.
+- **Aim per owner**: several parallel, fault-tolerant `yardb` instances for that dataset (throughput + failover).
 - **Today**: one writer per open database file (exclusive `.pid` lock); `yarproxy` is HTTP fan-out for independent backends in development — not production replication/HA yet (see [programs.md](programs.md#yarproxy---http-fan-out-proxy))
 - **Manual backup/compact**: `yarexport` / `yarimport` (no automated PITR)
 
-### Roadmap (per microservice)
-- Replication and automatic failover among instances that serve the same service dataset
+### Roadmap (per owner / per microservice)
+- Replication and automatic failover among instances that serve the same dataset
 - Production-grade proxy: health checks, partial-failure reporting, and clear read/write consistency (including read-your-writes where required)
-- Automated backups and retention for each service deployment
+- Automated backups and retention for each deployment
 
-### Not the product target
-- Multi-tenant “one YarDB for the whole enterprise” spanning unrelated domains
-- Treating many domains as one shared logical database
+### Weaker fit (not the main target)
+- One shared YarDB for many unrelated domains (monolith-style or multi-tenant enterprise store)
+- Expecting enterprise shared-DB features that assume that model
 
 ## 🔧 Runtime Requirements
 
@@ -309,14 +308,14 @@ sar -n DEV 1
 - [ ] **Security**: Bind to private interfaces (or explicit public bind with PAT); enable Bearer PAT (`--pat` / `--pat-file`); add TLS at reverse proxy
 - [ ] **Monitoring**: Set up metrics collection and alerting
 - [ ] **Backup**: Configure regular backup procedures
-- [ ] **One deployment per service**: Map each microservice to its own YarDB data (do not share a store across unrelated services)
+- [ ] **Ownership boundary**: Prefer one YarDB deployment per owner (e.g. per microservice); avoid stuffing unrelated domains into one store unless you accept the weaker fit
 - [ ] **Instance lock awareness**: Until multi-instance semantics ship, ensure one process owns each open database file and document the stale-lock runbook
 - [ ] **Client limits**: Ensure clients keep request bodies within the 1 MiB limit
-- [ ] **Parallelism & fault tolerance**: Plan for multiple instances per microservice when the service needs them; today use explicit ops patterns, and track the per-service HA roadmap above
-- [ ] **Performance**: Load test within the expected per-service dataset size
+- [ ] **Parallelism & fault tolerance**: Plan for multiple instances when the owner needs them; today use explicit ops patterns, and track the HA roadmap above
+- [ ] **Performance**: Load test within the expected dataset size for that deployment
 - [ ] **Documentation**: Update runbooks and procedures
 
 ---
 
-**⚠️ Important**: YarDB is still hardening for production (auth, TLS at the proxy, multi-instance semantics, ops automation). Even when ready, treat it as per-service persistence with parallel/fault-tolerant instances *for that service* — not as a shared enterprise database for many domains.
+**⚠️ Important**: YarDB is still hardening for production (auth, TLS at the proxy, multi-instance semantics, ops automation). It is mainly targeted at per-owner (typically microservice) persistence with parallel/fault-tolerant instances for that owner’s data — a weaker fit as a shared enterprise database for many domains.
 

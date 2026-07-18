@@ -1,18 +1,18 @@
 # YarDB - Yet Another RESTful Database
 
-A document-oriented database with a RESTful Web API, implemented in C++23. YarDB is a persistence layer for microservices, not a shared enterprise database for monoliths.
+A document-oriented database with a RESTful Web API, implemented in C++23. YarDB is mainly targeted as a persistence layer for microservices; it can be used elsewhere, but that is the design sweet spot.
 
 **Project Structure**: This project follows [P1204R0: Canonical Project Structure](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2018/p1204r0.html) guidelines for C++ projects.
 
 ## Intended use
 
-Microservices usually own one dataset (or a small set of related collections). YarDB matches that shape:
+YarDB is mainly targeted at microservice persistence. Microservices usually own one dataset (or a few related collections), so a small deployment with parallel, fault-tolerant instances is typically enough:
 
-- **One service owns one dataset** — that service’s collections live in its own YarDB deployment; other services get their own
-- **Parallel, fault-tolerant instances per service** — the aim is several `yardb` instances for the same microservice (throughput and failover), not a single process forever
-- **Not a shared enterprise store** — do not put unrelated domains into one deployment; scale new domains by adding services, each with its own YarDB
+- **Primary fit**: one service owns its data in its own YarDB deployment; other services get their own
+- **Per-service aim**: several `yardb` instances for the same microservice (throughput and failover)
+- **Weaker fit**: a single shared store for many unrelated domains (classic monolith / multi-tenant enterprise DB). That is not the main target; prefer separate deployments when domains are independent
 
-Today each open database file still has a single writer (exclusive `.pid` lock). Parallelism and fault tolerance across instances for one service are the intended direction; see the [deployment guide](docs/deployment.md) for the current model and gaps.
+Today each open database file still has a single writer (exclusive `.pid` lock). Parallelism and fault tolerance across instances for one service remain the intended direction; see the [deployment guide](docs/deployment.md) for the current model and gaps.
 
 ## Overview
 
@@ -128,7 +128,7 @@ An interactive and pipeable HTTP client. See [yarsh program documentation](docs/
 
 ### yarproxy - HTTP Fan-out Proxy
 
-A development HTTP fan-out proxy for independent `yardb` instances. Parallel / fault-tolerant multi-instance operation per microservice is the aim; `yarproxy` is not that production path yet. See [yarproxy program documentation](docs/programs.md#yarproxy---http-fan-out-proxy).
+A development HTTP fan-out proxy for independent `yardb` instances. Parallel / fault-tolerant multi-instance operation (mainly per microservice) is the aim; `yarproxy` is not that production path yet. See [yarproxy program documentation](docs/programs.md#yarproxy---http-fan-out-proxy).
 
 ### yarexport / yarimport - Export, Import, Compaction
 

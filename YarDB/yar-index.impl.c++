@@ -50,15 +50,17 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
     else if(selector.has("$head"s))
     {
         const xson::integer_type n = selector["$head"s];
+        const xson::integer_type len = std::ranges::distance(begin, end);
         auto itr = begin;
-        std::ranges::advance(itr, std::min<xson::integer_type>(n, static_cast<xson::integer_type>(std::ranges::distance(begin, end))));
+        std::ranges::advance(itr, std::min(n, len));
         end = itr;
     }
     else if(selector.has("$tail"s))
     {
         const xson::integer_type n = selector["$tail"s];
+        const xson::integer_type len = std::ranges::distance(begin, end);
         auto itr = end;
-        std::ranges::advance(itr, -std::min<xson::integer_type>(n, static_cast<xson::integer_type>(std::ranges::distance(begin, end))));
+        std::ranges::advance(itr, -std::min(n, len));
         begin = itr;
     }
     else if(selector.has_value())
@@ -67,7 +69,7 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
         std::tie(begin, end) = keys.equal_range(key);
     }
 
-    const auto known_size = static_cast<std::size_t>(std::ranges::distance(begin, end));
+    const std::size_t known_size = std::ranges::distance(begin, end);
 
     if(not selector.has("$desc"s))
         return {begin, end, known_size};
@@ -76,35 +78,6 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
         std::make_reverse_iterator(end),
         std::make_reverse_iterator(begin),
         known_size};
-}
-
-auto sum_secondary_positions(
-    yar::db::secondary_index_type::const_iterator key_begin,
-    yar::db::secondary_index_type::const_iterator key_end)
-{
-    auto total = std::size_t{0};
-    for(auto it = key_begin; it != key_end; ++it)
-        total += it->second.size();
-    return total;
-}
-
-auto count_positions(
-    const yar::db::secondary_position_iterator& begin,
-    const yar::db::secondary_position_iterator& end)
-{
-    return static_cast<std::size_t>(std::ranges::distance(begin, end));
-}
-
-void advance_positions(
-    yar::db::secondary_position_iterator& it,
-    const yar::db::secondary_position_iterator& end,
-    xson::integer_type steps)
-{
-    while(steps > 0 and it != end)
-    {
-        ++it;
-        --steps;
-    }
 }
 
 yar::db::index_view query_analysis_secondary(
@@ -157,21 +130,23 @@ yar::db::index_view query_analysis_secondary(
     auto known_size = std::optional<std::size_t>{};
 
     if(not selector.has("$head"s) and not selector.has("$tail"s))
-        known_size = sum_secondary_positions(key_begin, key_end);
+        known_size = std::ranges::fold_left(
+            key_begin, key_end, std::size_t{0},
+            [](std::size_t total, const auto& entry) { return total + entry.second.size(); });
 
     if(selector.has("$head"s))
     {
         const xson::integer_type n = selector["$head"s];
         auto limited_end = pos_begin;
-        advance_positions(limited_end, pos_end, n);
+        std::ranges::advance(limited_end, n, pos_end);
         pos_end = limited_end;
     }
     else if(selector.has("$tail"s))
     {
         const xson::integer_type n = selector["$tail"s];
-        const auto total = static_cast<xson::integer_type>(count_positions(pos_begin, pos_end));
+        const xson::integer_type total = std::ranges::distance(pos_begin, pos_end);
         if(total > n)
-            advance_positions(pos_begin, pos_end, total - n);
+            std::ranges::advance(pos_begin, total - n, pos_end);
     }
 
     if(not selector.has("$desc"s))
@@ -257,18 +232,13 @@ bool index_only_field_selector(const yar::db::object& field_selector)
     return has_gt or has_gte or has_lt or has_lte;
 }
 
-std::size_t count_index_view(const yar::db::index_view& view)
-{
-    return std::ranges::distance(view);
-}
-
 std::optional<std::size_t> try_index_only_count(
     const yar::db::index& index,
     const yar::db::object& selector)
 {
     const auto keys = selector_count_keys(selector);
     if(keys.empty())
-        return count_index_view(index.view(selector));
+        return std::ranges::distance(index.view(selector));
 
     if(keys.size() != 1)
         return std::nullopt;
@@ -277,13 +247,13 @@ std::optional<std::size_t> try_index_only_count(
     {
         if(not index_only_field_selector(selector["_id"s]))
             return std::nullopt;
-        return count_index_view(index.view(selector));
+        return std::ranges::distance(index.view(selector));
     }
 
     if(not index.secondary_key(selector) or not index_only_field_selector(selector[keys[0]]))
         return std::nullopt;
 
-    return count_index_view(index.view(selector));
+    return std::ranges::distance(index.view(selector));
 }
 
 std::size_t count_by_scan(

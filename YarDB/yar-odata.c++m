@@ -113,7 +113,7 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
         {
             if(item.has("_id"s))
             {
-                auto item_id = static_cast<xson::integer_type>(item["_id"s]);
+                const xson::integer_type item_id = item["_id"s];
                 item = add_metadata(item, level, collection_name, item_id);
             }
         }
@@ -1125,7 +1125,7 @@ export inline void merge_or_branch_documents(
         if(not doc.has("_id"s))
             continue;
 
-        const auto id = static_cast<xson::integer_type>(doc["_id"s]);
+        const xson::integer_type id = doc["_id"s];
         if(not seen_ids.insert(id).second)
             continue;
 
@@ -1224,7 +1224,7 @@ export inline auto filter_documents_by_or(
 
         if(doc.has("_id"s))
         {
-            const auto id = static_cast<xson::integer_type>(doc["_id"s]);
+            const xson::integer_type id = doc["_id"s];
             if(not seen_ids.insert(id).second)
                 continue;
         }
@@ -1396,7 +1396,7 @@ inline void expand_document(xson::object& document, std::string_view navigation,
         return;
     }
 
-    const auto related_id = static_cast<xson::integer_type>(ref);
+    const xson::integer_type related_id = ref;
     const auto related_collection = pluralize_collection_name(navigation);
 
     try

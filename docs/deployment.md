@@ -182,7 +182,7 @@ curl http://localhost:2112/metrics  # Prometheus HTTP metrics (public with PAT a
 curl -H 'X-Metrics-Scenario: simple' 'http://localhost:2112/perf?$top=20'
 ```
 
-Labels on `http_requests_total` / `http_request_duration_seconds`: `method`, `status`, `path` (query stripped; digit-only segments → `{id}`), `scenario` (`X-Metrics-Scenario` or `-`). Unique series are capped; surplus paths collapse to `path="_other"`.
+Labels on `http_requests_total` / `http_request_duration_seconds`: `method`, `status`, `path` (query stripped; digit-only segments → `{id}`), `scenario` (`X-Metrics-Scenario` or `-`). Unique series are hard-capped; surplus observations collapse into a single all-`_other` label bucket (path-only collapse is not enough — `X-Metrics-Scenario` is client-controlled and metrics wrap auth).
 
 ### Log Aggregation
 ```bash

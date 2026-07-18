@@ -286,7 +286,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
   - `GET /health` liveness probe (`{}`; public with PAT auth)
   - `GET /ready` readiness probe — `200` + `{}` when `ready`; otherwise `503` + `{"status":...}`; public with PAT auth
   - **`correlation_id` request tracing** — `X-Correlation-ID` middleware + logging on all `yar::http::rest_api_server` handlers and error paths (`[yardb]` correlation ID tests)
-  - **Prometheus `GET /metrics`** — `http_requests_total` and `http_request_duration_seconds` histogram labeled by `method`, `status`, `path` (query stripped; digit-only segments → `{id}`), and `scenario` via `net` `metrics_middleware` (public with PAT auth; scrapes not counted; unique series capped). Opt-in scenario: send `X-Metrics-Scenario: <name>` (`[A-Za-z0-9_.:-]{1,64}`); absent or invalid → `-`. Used by [`tests/perf/bench.sh`](../tests/perf/bench.sh).
+  - **Prometheus `GET /metrics`** — `http_requests_total` and `http_request_duration_seconds` histogram labeled by `method`, `status`, `path` (query stripped; digit-only segments → `{id}`), and `scenario` via `net` `metrics_middleware` (public with PAT auth; scrapes not counted; unique series hard-capped with an all-`_other` overflow bucket). Opt-in scenario: send `X-Metrics-Scenario: <name>` (`[A-Za-z0-9_.:-]{1,64}`); absent or invalid → `-`. Used by [`tests/perf/bench.sh`](../tests/perf/bench.sh).
 - **Planned Implementation** (longer-term):
   - Process / runtime metrics (CPU, RSS) once needed for ops dashboards
   - **Distributed Tracing**: OpenTelemetry integration (beyond header-based `correlation_id`)

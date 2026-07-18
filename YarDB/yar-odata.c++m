@@ -1633,21 +1633,6 @@ export inline apply_query parse_apply(std::string_view apply_expr)
     return query;
 }
 
-inline bool try_numeric(const xson::object& value, double& out)
-{
-    if(value.is_integer())
-    {
-        out = static_cast<double>(static_cast<xson::integer_type>(value));
-        return true;
-    }
-    if(value.is_number())
-    {
-        out = static_cast<double>(static_cast<xson::number_type>(value));
-        return true;
-    }
-    return false;
-}
-
 inline std::string group_key_string(const xson::object& value)
 {
     if(value.is_null())
@@ -1674,17 +1659,72 @@ inline xson::object group_key_value(const xson::object& doc, std::string_view fi
     return doc[std::string{field}];
 }
 
+// Integer aggregates must not round-trip through double: values beyond 2^53 lose
+// low bits, and casting a 2^63 double back to int64 is undefined behavior
+// (commonly wrapping to INT64_MIN — a silent sign flip on large sums).
 struct aggregate_acc
 {
     bool any = false;
+    bool all_integer = true;
+    bool int_sum_ok = true;
+    xson::integer_type int_sum = 0;
+    xson::integer_type int_min = 0;
+    xson::integer_type int_max = 0;
     double sum = 0.0;
     double min = 0.0;
     double max = 0.0;
     std::size_t count = 0;
 };
 
-inline void accumulate(aggregate_acc& acc, double value)
+inline bool checked_add_integer(xson::integer_type a, xson::integer_type b, xson::integer_type& out)
 {
+    if(b > 0 and a > std::numeric_limits<xson::integer_type>::max() - b)
+        return false;
+    if(b < 0 and a < std::numeric_limits<xson::integer_type>::min() - b)
+        return false;
+    out = a + b;
+    return true;
+}
+
+inline void accumulate_integer(aggregate_acc& acc, xson::integer_type value)
+{
+    if(not acc.any)
+    {
+        acc.any = true;
+        acc.all_integer = true;
+        acc.int_sum_ok = true;
+        acc.int_sum = value;
+        acc.int_min = value;
+        acc.int_max = value;
+        acc.sum = static_cast<double>(value);
+        acc.min = acc.sum;
+        acc.max = acc.sum;
+        acc.count = 1;
+        return;
+    }
+
+    if(acc.all_integer and acc.int_sum_ok)
+    {
+        auto next = xson::integer_type{0};
+        if(checked_add_integer(acc.int_sum, value, next))
+            acc.int_sum = next;
+        else
+            acc.int_sum_ok = false;
+        acc.int_min = std::min(acc.int_min, value);
+        acc.int_max = std::max(acc.int_max, value);
+    }
+
+    const auto as_double = static_cast<double>(value);
+    acc.sum += as_double;
+    acc.min = std::min(acc.min, as_double);
+    acc.max = std::max(acc.max, as_double);
+    ++acc.count;
+}
+
+inline void accumulate_number(aggregate_acc& acc, double value)
+{
+    acc.all_integer = false;
+    acc.int_sum_ok = false;
     if(not acc.any)
     {
         acc.any = true;
@@ -1700,6 +1740,21 @@ inline void accumulate(aggregate_acc& acc, double value)
     ++acc.count;
 }
 
+inline bool accumulate_value(aggregate_acc& acc, const xson::object& value)
+{
+    if(value.is_integer())
+    {
+        accumulate_integer(acc, static_cast<xson::integer_type>(value));
+        return true;
+    }
+    if(value.is_number())
+    {
+        accumulate_number(acc, static_cast<double>(static_cast<xson::number_type>(value)));
+        return true;
+    }
+    return false;
+}
+
 inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method method)
 {
     if(not acc.any)
@@ -1708,6 +1763,41 @@ inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method 
         null_value = nullptr;
         return null_value;
     }
+
+    auto result = xson::object{};
+
+    if(acc.all_integer)
+    {
+        switch(method)
+        {
+            case aggregate_method::sum:
+                if(acc.int_sum_ok)
+                {
+                    result = acc.int_sum;
+                    return result;
+                }
+                // Sum overflowed int64 — best-effort floating result (no int cast).
+                result = static_cast<xson::number_type>(acc.sum);
+                return result;
+            case aggregate_method::min:
+                result = acc.int_min;
+                return result;
+            case aggregate_method::max:
+                result = acc.int_max;
+                return result;
+            case aggregate_method::average:
+            {
+                if(acc.int_sum_ok and acc.count > 0 and (acc.int_sum % static_cast<xson::integer_type>(acc.count)) == 0)
+                {
+                    result = static_cast<xson::integer_type>(acc.int_sum / static_cast<xson::integer_type>(acc.count));
+                    return result;
+                }
+                result = static_cast<xson::number_type>(acc.sum / static_cast<double>(acc.count));
+                return result;
+            }
+        }
+    }
+
     const auto value = [&]() -> double
     {
         switch(method)
@@ -1719,11 +1809,15 @@ inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method 
         }
         return acc.sum;
     }();
-    // Prefer integer when the mathematical result is integral.
-    auto result = xson::object{};
-    if(std::floor(value) == value
-        and value >= static_cast<double>(std::numeric_limits<xson::integer_type>::min())
-        and value <= static_cast<double>(std::numeric_limits<xson::integer_type>::max()))
+
+    // Only emit integer when the value is an exact int64 in the safe double
+    // mantissa range — never cast values near ±2^63 (UB / wrap to INT64_MIN).
+    constexpr auto max_safe_int = 9007199254740992.0; // 2^53
+    constexpr auto min_safe_int = -9007199254740992.0;
+    if(std::isfinite(value)
+        and std::floor(value) == value
+        and value >= min_safe_int
+        and value <= max_safe_int)
     {
         result = static_cast<xson::integer_type>(value);
         return result;
@@ -1769,9 +1863,7 @@ export inline xson::object apply_aggregation(const xson::object& documents, cons
                 const auto& clause = query.aggregates[i];
                 if(not doc.has(clause.field))
                     continue;
-                auto number = 0.0;
-                if(try_numeric(doc[clause.field], number))
-                    accumulate(state.accs[i], number);
+                std::ignore = accumulate_value(state.accs[i], doc[clause.field]);
             }
         }
     }
@@ -1787,9 +1879,7 @@ export inline xson::object apply_aggregation(const xson::object& documents, cons
                 const auto& clause = query.aggregates[i];
                 if(not doc.has(clause.field))
                     continue;
-                auto number = 0.0;
-                if(try_numeric(doc[clause.field], number))
-                    accumulate(state.accs[i], number);
+                std::ignore = accumulate_value(state.accs[i], doc[clause.field]);
             }
         }
     }

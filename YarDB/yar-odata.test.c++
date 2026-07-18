@@ -2217,6 +2217,65 @@ auto register_odata_tests()
                     require_eq(static_cast<long long>(rows[0]["Total"s]), 15);
                 };
             };
+
+            when("Aggregating int64 values beyond the double mantissa") = []
+            {
+                // 2^53 + 1 cannot be represented exactly in IEEE-754 double.
+                // Routing sums through double silently drops the +1 and still
+                // emits an integer — wrong Totals for large counters / IDs.
+                constexpr auto large = static_cast<long long>(9007199254740992LL + 1); // 2^53+1
+                auto docs = object{object::array{
+                    object{{"amount"s, large}},
+                    object{{"amount"s, 1}},
+                }};
+                const auto sum_query = parse_apply("aggregate(amount with sum as Total)"sv);
+                const auto max_query = parse_apply("aggregate(amount with max as Peak)"sv);
+                const auto sum_result = apply_aggregation(docs, sum_query);
+                const auto max_result = apply_aggregation(docs, max_query);
+
+                then("sum and max keep exact int64 results") = [=]
+                {
+                    require_true(sum_result.is_array());
+                    require_true(max_result.is_array());
+                    const auto& sum_rows = sum_result.get<object::array>();
+                    const auto& max_rows = max_result.get<object::array>();
+                    require_eq(sum_rows.size(), 1u);
+                    require_eq(max_rows.size(), 1u);
+                    require_true(sum_rows[0]["Total"s].is_integer());
+                    require_true(max_rows[0]["Peak"s].is_integer());
+                    require_eq(
+                        static_cast<long long>(sum_rows[0]["Total"s]),
+                        large + 1);
+                    require_eq(
+                        static_cast<long long>(max_rows[0]["Peak"s]),
+                        large);
+                };
+            };
+
+            when("Summing two 2^62 amounts that reach 2^63") = []
+            {
+                // 2^62 + 2^62 = 2^63. As a double that is exact, but casting
+                // 2^63 back to int64 is undefined (often wraps to INT64_MIN).
+                constexpr auto half = 4611686018427387904LL; // 2^62
+                auto docs = object{object::array{
+                    object{{"amount"s, half}},
+                    object{{"amount"s, half}},
+                }};
+                const auto query = parse_apply("aggregate(amount with sum as Total)"sv);
+                const auto result = apply_aggregation(docs, query);
+
+                then("Overflowed int64 sum is not wrapped to a negative integer") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_false(rows[0]["Total"s].is_integer());
+                    require_true(rows[0]["Total"s].is_number());
+                    const auto total = static_cast<double>(
+                        static_cast<xson::number_type>(rows[0]["Total"s]));
+                    require_true(total > 0.0);
+                };
+            };
         };
 
         given("An engine-backed collection") = []

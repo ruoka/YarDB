@@ -2964,7 +2964,7 @@ auto test_set()
             auto [del_status, _unused_del_r, _unused_del_h, _unused_del_b] = make_request(
                 setup->port(), "DELETE"s, "/etagtest10del/"s + std::to_string(doc_id), ""s
             );
-            require_eq(del_status, "200"s);
+            require_eq(del_status, "204"s);
 
             // Stale ETag from before DELETE must not recreate the document.
             auto custom_headers = std::map<string, string>{{"If-Match", etag}};

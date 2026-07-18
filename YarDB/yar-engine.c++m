@@ -35,7 +35,7 @@ class engine
 {
 public:
 
-    engine(std::string_view db = "./yar.db"s);
+    engine(std::string_view db = "./yar.db");
     engine(engine&&);
     ~engine();
 
@@ -79,26 +79,11 @@ public:
 
     bool history(std::string_view collection, const object& selector, object& documents);
 
-    db_result<std::size_t> upsert(std::string_view collection, const object& selector, object& updates, object& documents)
-    {
-        auto result = update(collection, selector, updates, documents);
-        if(not result)
-            return std::unexpected{result.error()};
-        if(*result > 0)
-            return result;
-
-        // Create path must honor an equality _id selector. Otherwise upsert(
-        // {"_id": 42}, {"name": "Ada"}) silently inserts a different primary key
-        // and retries keep creating duplicates.
-        if(selector.has("_id"s) and not updates.has("_id"s) and selector["_id"s].is_integer())
-            updates["_id"s] = selector["_id"s];
-
-        auto created = create(collection, updates);
-        if(not created)
-            return std::unexpected{created.error()};
-        documents += updates;
-        return 1;
-    }
+    db_result<std::size_t> upsert(
+        std::string_view collection,
+        const object& selector,
+        object& updates,
+        object& documents);
 
     db_result<std::size_t> upsert(std::string_view collection, const object& selector, object& updates)
     {
@@ -125,13 +110,10 @@ public:
         return destroy(collection, selector, documents);
     }
 
-    auto collections() const
+    std::vector<std::string> collections() const
     {
         auto lock = std::shared_lock{m_rwlock};
-        auto documents = std::vector<std::string>{};
-        for(const auto& entry : m_index)
-            documents.push_back(entry.first);
-        return documents;
+        return m_index | std::views::keys | std::ranges::to<std::vector<std::string>>();
     }
 
 private:

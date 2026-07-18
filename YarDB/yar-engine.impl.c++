@@ -287,7 +287,10 @@ yar::db::index* find_index(
     std::flat_map<std::string, yar::db::index>& indexes,
     std::string_view collection)
 {
-    return std::addressof(indexes[std::string{collection}]);
+    const auto it = indexes.find(std::string{collection});
+    if(it == indexes.end())
+        return nullptr;
+    return std::addressof(it->second);
 }
 
 // Crash between appending a successor and tombstoning the prior row can leave
@@ -1452,6 +1455,16 @@ bool yar::db::engine::history(std::string_view collection, const yar::db::object
         }
 
     return success;
+}
+
+yar::db::db_result<std::size_t> yar::db::engine::upsert(
+    std::string_view collection,
+    const object& selector,
+    object& updates,
+    object& documents)
+{
+    auto lock = std::unique_lock{m_rwlock};
+    return upsert_impl(collection, selector, updates, documents);
 }
 
 yar::db::db_result<std::size_t> yar::db::engine::upsert_impl(

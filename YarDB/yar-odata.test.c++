@@ -1299,6 +1299,45 @@ auto register_odata_tests()
                     require_eq(items.size(), 2u); // Alice, Charlie
                 };
             };
+
+            when("Filter is not of two pairwise ORs") = [docs]
+            {
+                then("De Morgan stays within the OR-branch budget") = [docs]
+                {
+                    // 2×2 DNF → not rebuilds at most 2^4 = 16 OR branches.
+                    const auto parsed = parse_filter(
+                        "not ((status eq 'active' or status eq 'deleted') and "
+                        "(name eq 'Alice' or name eq 'Bob'))"sv);
+                    require_true(parsed.has_or());
+                    require_true(parsed.or_branches.size() <= max_filter_or_branches);
+
+                    const auto result = filter_by_parsed(docs, parsed);
+                    const auto& items = result.get<object::array>();
+                    // Only Charlie/Dana fail the inner AND (status/name pairs).
+                    require_eq(items.size(), 2u);
+                };
+            };
+
+            when("Filter is not of three pairwise ORs") = []
+            {
+                then("Rejects De Morgan CNF blow-up instead of allocating 3^8 branches") = []
+                {
+                    // Without a budget this becomes 3^8 = 6561 OR branches (and
+                    // 4 pairs → 4^16 ≈ 4e9). Fail closed during parse.
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_filter(
+                            "not ((a eq 1 or a eq 2) and (b eq 1 or b eq 2) and "
+                            "(c eq 1 or c eq 2))"sv);
+                    }
+                    catch(const std::invalid_argument&)
+                    {
+                        threw = true;
+                    }
+                    require_true(threw);
+                };
+            };
         };
     };
 

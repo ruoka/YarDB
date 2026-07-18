@@ -13,6 +13,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | Item | Summary |
 |------|---------|
 | **Boolean `not` in `$filter`** | `not status eq 'deleted'`, `not contains(email,'@example')`, De Morgan for `not (A and B)` / `not (A or B)`; precedence `not` > `and` > `or` |
+| **`$filter` OR-branch budget** | AND-over-OR distribution and De Morgan `not` of DNF formulas reject expressions that would exceed 64 OR branches (fail closed) instead of allocating a cartesian explosion that can OOM a single request |
 | **`$apply` groupby/aggregate (v1)** | `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))` — also `average`/`min`/`max` and whole-set `aggregate(...)`; optional `$filter` first; see [odata.md](odata.md) |
 | **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |
 | **Same-operator range AND** | `age gt 20 and age gt 10` keeps the tighter bound (`$gt:20`) instead of last-write-wins loosening the filter |

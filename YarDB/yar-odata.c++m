@@ -203,6 +203,22 @@ export struct parsed_filter
     }
 };
 
+// Cap OR-branch fan-out from AND-over-OR distribution and from De Morgan
+// `not` of a DNF formula (which otherwise rebuilds a CNF cartesian product).
+// Without a budget, `not ((a eq 1 or a eq 2) and (b eq 1 or b eq 2) and …)`
+// grows as n^(2^n) branches and can OOM a single GET /$filter request.
+export inline constexpr std::size_t max_filter_or_branches = 64;
+
+inline void ensure_filter_or_branch_budget(std::size_t branch_count)
+{
+    if(branch_count > max_filter_or_branches)
+    {
+        throw std::invalid_argument{
+            "Filter expression is too complex (exceeds "
+            + std::to_string(max_filter_or_branches) + " OR branches)"};
+    }
+}
+
 // Parse OData 'in' list: ('active','pending') or (1, 2, 3)
 inline auto parse_in_value_list(std::string_view list_content)
 {
@@ -957,8 +973,18 @@ inline parsed_filter and_parsed_filters(parsed_filter left, parsed_filter right)
     const auto left_branches = as_or_branches(std::move(left));
     const auto right_branches = as_or_branches(std::move(right));
 
+    if(left_branches.empty() or right_branches.empty())
+        throw std::invalid_argument{"Invalid filter expression"};
+
+    // Guard the cartesian product before reserve/loop (also catches size_t overflow).
+    if(left_branches.size() > max_filter_or_branches / right_branches.size())
+        ensure_filter_or_branch_budget(max_filter_or_branches + 1);
+
+    const auto product = left_branches.size() * right_branches.size();
+    ensure_filter_or_branch_budget(product);
+
     auto combined = std::vector<filter_branch>{};
-    combined.reserve(left_branches.size() * right_branches.size());
+    combined.reserve(product);
 
     for(const auto& left_branch : left_branches)
     {
@@ -990,6 +1016,9 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
     auto branches = std::vector<filter_branch>{};
     auto atoms = std::vector<std::pair<std::string, xson::object>>{};
     collect_selector_atoms(filter.and_selector, ""sv, atoms);
+
+    const auto atom_count = atoms.size() + filter.and_string_filters.size();
+    ensure_filter_or_branch_budget(atom_count);
 
     for(auto& [path, leaf] : atoms)
         branches.push_back(negate_selector_atom(std::move(path), leaf));
@@ -1029,6 +1058,7 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
         if(branches.empty())
             throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
+        ensure_filter_or_branch_budget(branches.size());
         return parsed_from_branches(std::move(branches));
     }
 

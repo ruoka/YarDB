@@ -17,7 +17,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ runner.tool_cache }}/yardb-llvm-21
-        key: llvm-21-snapshot-${{ runner.os }}-${{ runner.arch }}-v2
+        key: llvm-21-snapshot-${{ runner.os }}-${{ runner.arch }}-v3
 
     - name: Ensure LLVM toolchain installed
       shell: bash
@@ -47,6 +47,8 @@ runs:
           mkdir -p "$CACHE_FS"
 
           # Capture the llvm-21 prefix plus every file owned by the packages.
+          # dpkg -L lists "/" for many packages — never copy that (would recurse
+          # into CACHE_FS which lives under /opt/hostedtoolcache/...).
           pkgs=()
           read -r -a pkgs <<< "$LLVM_PACKAGES"
           {
@@ -55,6 +57,15 @@ runs:
               dpkg -L "$pkg" 2>/dev/null || true
             done
           } | sort -u | while IFS= read -r path; do
+            [[ -n "$path" ]] || continue
+            case "$path" in
+              /|/.|/..|.) continue ;;
+            esac
+            # Only snapshot concrete toolchain paths under /usr (and /etc if any).
+            case "$path" in
+              /usr/*|/etc/*) ;;
+              *) continue ;;
+            esac
             [[ -e "$path" || -L "$path" ]] || continue
             dest="$CACHE_FS$path"
             sudo mkdir -p "$(dirname "$dest")"
@@ -77,7 +88,12 @@ runs:
           sudo apt-get update -y
           # shellcheck disable=SC2086
           sudo apt-get install -y $LLVM_PACKAGES
-          snapshot_to_cache
+          # Snapshot is best-effort: apt already succeeded; do not fail the job
+          # if packing the cache hits a transient cp issue.
+          if ! snapshot_to_cache; then
+            echo "::warning::LLVM snapshot failed; clang is installed but cache will miss next run."
+            rm -rf "$LLVM_CACHE_ROOT"
+          fi
         fi
 
         if [[ -x /usr/bin/clang-21 ]]; then

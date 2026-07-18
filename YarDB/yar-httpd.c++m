@@ -111,6 +111,9 @@ public:
         m_port_or_service{port_or_service},
         m_engine{file}
     {
+        // Cap Content-Length before net allocates the body. Middleware alone
+        // cannot prevent memory exhaustion from a huge Content-Length header.
+        m_server.max_request_body_size(yar::db::max_request_body_size);
         setup_routes();
     }
 

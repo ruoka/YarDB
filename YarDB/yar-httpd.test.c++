@@ -339,6 +339,7 @@ auto test_set()
 
         section("POST with oversized body returns 413 Payload Too Large") = [setup]
         {
+            // Content-Length is rejected before allocate/read — no need to send 1 MiB+1 bytes.
             const auto oversized_body = std::string(1024 * 1024 + 1, 'x');
             auto [status, reason, headers, response_body] = make_request(
                 setup->port(), "POST"s, "/testitems"s, oversized_body
@@ -346,7 +347,23 @@ auto test_set()
 
             require_eq(status, "413"s);
             require_eq(reason, "Payload Too Large"s);
-            require_true(response_body.contains("1048576 bytes"s));
+        };
+
+        section("POST with huge Content-Length and no body returns 413 without allocating") = [setup]
+        {
+            // Declared size far above the 1 MiB cap; omit the body so a buggy
+            // pre-check would hang waiting for bytes (or OOM on allocate).
+            auto stream = connect("localhost"s, setup->port());
+            stream << "POST /testitems HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Accept: application/json" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: 2147483647" << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, response_body] = parse_http_response(stream, "POST"s);
+            require_eq(status, "413"s);
+            require_eq(reason, "Payload Too Large"s);
         };
 
         section("PUT updates document and returns 200 OK with Content-Location header") = [setup]

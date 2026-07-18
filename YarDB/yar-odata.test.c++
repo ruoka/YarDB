@@ -1371,6 +1371,65 @@ auto register_odata_tests()
                     std::remove((test_file + ".pid").c_str());
                 };
             };
+
+            when("Filter ANDs an inverted range on an indexed field") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"age"s}).has_value());
+
+                auto young = object{{"name"s, "young"s}, {"age"s, 3ll}};
+                auto mid = object{{"name"s, "mid"s}, {"age"s, 10ll}};
+                auto old = object{{"name"s, "old"s}, {"age"s, 20ll}};
+                require_true(engine.create("users"s, young).has_value());
+                require_true(engine.create("users"s, mid).has_value());
+                require_true(engine.create("users"s, old).has_value());
+
+                // Index view must treat {$gt:10,$lt:5} as empty (not UB / wild count).
+                const auto parsed = parse_filter("age gt 10 and age lt 5"sv);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Count and read are empty") = [count, docs, test_file]
+                {
+                    require_eq(count, 0u);
+                    require_true(docs.is_array());
+                    require_eq(docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Filter ANDs an inverted primary-key range") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto a = object{{"name"s, "a"s}};
+                auto b = object{{"name"s, "b"s}};
+                auto c = object{{"name"s, "c"s}};
+                require_true(engine.create("users"s, a).has_value());
+                require_true(engine.create("users"s, b).has_value());
+                require_true(engine.create("users"s, c).has_value());
+
+                const auto parsed = parse_filter("_id gt 10 and _id lt 5"sv);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Count and read are empty") = [count, docs, test_file]
+                {
+                    require_eq(count, 0u);
+                    require_true(docs.is_array());
+                    require_eq(docs.get<object::array>().size(), 0u);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
         };
     };
 

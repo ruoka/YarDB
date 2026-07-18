@@ -234,6 +234,8 @@ auto test_set()
             require_eq(static_cast<string>(remaining["name"s]), "alice"s);
         };
 
+#ifndef NDEBUG
+        // Requires debug-only fail_next_write seam (omitted under NDEBUG).
         section("POST storage failure returns 500 Internal Server Error") = [setup]
         {
             fail_next_write(setup->get_server());
@@ -247,6 +249,7 @@ auto test_set()
             require_eq(error["error"s].get<string>(), "Internal Server Error"s);
             require_true(error.has("message"s));
         };
+#endif
 
         section("GET existing document returns 200 OK with single object") = [setup]
         {

@@ -62,6 +62,12 @@ public:
         if(*result > 0)
             return result;
 
+        // Create path must honor an equality _id selector. Otherwise upsert(
+        // {"_id": 42}, {"name": "Ada"}) silently inserts a different primary key
+        // and retries keep creating duplicates.
+        if(selector.has("_id"s) and not updates.has("_id"s) and selector["_id"s].is_integer())
+            updates["_id"s] = selector["_id"s];
+
         auto created = create(collection, updates);
         if(not created)
             return std::unexpected{created.error()};
@@ -163,14 +169,22 @@ private:
         bool m_owns_lock = false;
     };
 
+#ifndef NDEBUG
+    // Test-only fault-injection seams. Free functions arm private flags so unit
+    // tests can force write / rollback-status / truncate / torn-append failures
+    // without exposing those knobs on the public engine API. Compiled out of
+    // release builds (CB passes -DNDEBUG for `release`).
     friend void fail_next_write(engine&);
     friend void fail_write(engine&, std::size_t);
     friend void fail_next_rollback_status(engine&);
     friend void fail_next_truncate(engine&);
     friend void fail_next_torn_append(engine&);
     friend void fail_torn_append_after(engine&, std::size_t);
+#endif
 
     [[nodiscard]] std::ifstream open_reader() const;
+    // Synthetic failure consumers for the seams above. Always return false when
+    // NDEBUG is set so release call sites compile to no-ops.
     bool consume_write_failure();
     bool consume_rollback_status_failure();
     bool consume_truncate_failure();
@@ -200,11 +214,13 @@ private:
     std::flat_map<std::string, yar::db::index> m_index;
     std::fstream m_storage;
     mutable std::shared_mutex m_rwlock;
+#ifndef NDEBUG
     std::size_t m_writes_until_failure = 0;
     bool m_fail_rollback_status = false;
     bool m_fail_truncate = false;
     bool m_fail_torn_append = false;
     std::size_t m_torn_append_after = 0;
+#endif
     bool m_writable = true;
 };
 

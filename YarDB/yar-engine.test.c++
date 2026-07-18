@@ -617,6 +617,29 @@ auto test_set()
             require_eq(static_cast<xson::integer_type>(documents[0]["value"s]), 2ll);
         };
 
+        section("ReplacePreservesIdWhenOmitted") = []
+        {
+            // Replacement bodies without _id used to get a fresh sequence id from
+            // index::update, silently moving the resource off its original key.
+            const auto test_file = "./engine_replace_omit_id_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "before"s}},
+                replacement = object{{"name"s, "after"s}},
+                documents = object{};
+            require_true(engine.create("ReplaceOmitId"s, original).has_value());
+            const auto id = static_cast<xson::integer_type>(original["_id"s]);
+            const auto selector = object{{"_id"s, id}};
+
+            require_true(engine.replace("ReplaceOmitId"s, selector, replacement).value() > 0);
+            require_eq(static_cast<xson::integer_type>(replacement["_id"s]), id);
+            require_true(engine.read("ReplaceOmitId"s, selector, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "after"s);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), id);
+            require_eq(engine.count("ReplaceOmitId"s, object{}), 1u);
+        };
+
         section("ReplaceRejectsDuplicatePrimaryKey") = []
         {
             // replace used to overwrite m_primary_keys[id] and orphan the victim.
@@ -778,6 +801,9 @@ auto test_set()
             require_eq(engine.count("IndexOnlyCount"s, not_deleted), 3u);
         };
 
+#ifndef NDEBUG
+        // Fault-injection sections: require debug-only fail_* seams (omitted
+        // under NDEBUG / release builds).
         section("CreateWriteFailureRollsBack") = []
         {
             const auto test_file = "./engine_create_failure_test.db";
@@ -1317,6 +1343,7 @@ auto test_set()
             require_true(result.error().code == yar::db::db_error_code::io_failure);
             require_true(engine.indexed_keys("IndexFailure"s).empty());
         };
+#endif
 
         section("UpsertCreateReturnsCreatedDocument") = []
         {
@@ -1330,7 +1357,22 @@ auto test_set()
 
             require_eq(result.value(), 1u);
             require_eq(documents.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(document["_id"s]), 42ll);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), 42ll);
             require_true(documents[0].match(document));
+            require_true(engine.read("UpsertCreate"s, object{{"_id"s, 42ll}}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "created"s);
+
+            // Idempotent retry must update the same row, not mint another id.
+            auto retry = object{{"name"s, "updated"s}};
+            documents = object{};
+            require_eq(engine.upsert("UpsertCreate"s, object{{"_id"s, 42ll}}, retry, documents).value(), 1u);
+            require_eq(engine.count("UpsertCreate"s, object{}), 1u);
+            require_true(engine.read("UpsertCreate"s, object{{"_id"s, 42ll}}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), 42ll);
+            require_eq(documents[0]["name"s].get<string>(), "updated"s);
         };
 
         section("Create2Keys") = [test_file]

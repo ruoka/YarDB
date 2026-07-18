@@ -362,11 +362,13 @@ yar::db::engine::engine(yar::db::engine&& e) :
     m_lock{std::move(e.m_lock)},
     m_index{std::move(e.m_index)},
     m_storage{std::move(e.m_storage)},
+#ifndef NDEBUG
     m_writes_until_failure{std::exchange(e.m_writes_until_failure, 0)},
     m_fail_rollback_status{std::exchange(e.m_fail_rollback_status, false)},
     m_fail_truncate{std::exchange(e.m_fail_truncate, false)},
     m_fail_torn_append{std::exchange(e.m_fail_torn_append, false)},
     m_torn_append_after{std::exchange(e.m_torn_append_after, 0)},
+#endif
     m_writable{std::exchange(e.m_writable, false)}
 {}
 
@@ -400,6 +402,8 @@ bool yar::db::engine::preconditions_met(
     return true;
 }
 
+#ifndef NDEBUG
+// Test-only: arm synthetic I/O failures for unit tests. Omitted from release.
 void yar::db::fail_next_write(yar::db::engine& engine)
 {
     engine.m_writes_until_failure = 1;
@@ -429,33 +433,51 @@ void yar::db::fail_torn_append_after(yar::db::engine& engine, std::size_t append
 {
     engine.m_torn_append_after = appended;
 }
+#endif
 
 bool yar::db::engine::consume_write_failure()
 {
+#ifndef NDEBUG
     if(m_writes_until_failure == 0)
         return false;
     return --m_writes_until_failure == 0;
+#else
+    return false;
+#endif
 }
 
 bool yar::db::engine::consume_rollback_status_failure()
 {
+#ifndef NDEBUG
     return std::exchange(m_fail_rollback_status, false);
+#else
+    return false;
+#endif
 }
 
 bool yar::db::engine::consume_truncate_failure()
 {
+#ifndef NDEBUG
     return std::exchange(m_fail_truncate, false);
+#else
+    return false;
+#endif
 }
 
 bool yar::db::engine::consume_torn_append_failure()
 {
+#ifndef NDEBUG
     return std::exchange(m_fail_torn_append, false);
+#else
+    return false;
+#endif
 }
 
 // After a flushed append, tear the trailing record and mark the stream failed so
 // append-phase rollback sees durable-but-incomplete bytes (ENOSPC mid-record).
 // Prefer file_size-1 so a complete prefix from earlier multi-append iterations
 // remains (original_size+1 would destroy that prefix).
+// No-op in release (NDEBUG): consume_torn_append_failure() always returns false.
 bool yar::db::engine::inject_torn_append(std::uintmax_t original_size)
 {
     if(not consume_torn_append_failure())
@@ -481,12 +503,16 @@ bool yar::db::engine::maybe_inject_torn_append_after(
     std::uintmax_t original_size,
     std::size_t appended)
 {
+#ifndef NDEBUG
     if(m_torn_append_after == 0 or appended != m_torn_append_after)
         return false;
 
     m_torn_append_after = 0;
     m_fail_torn_append = true;
     return inject_torn_append(original_size);
+#else
+    return false;
+#endif
 }
 
 void yar::db::engine::setup_index_structure()
@@ -1334,6 +1360,12 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
             db_operation::replace,
             "Replace requires a selector that matches exactly one document"s)};
 
+    // Preserve the matched document's primary key when the replacement body
+    // omits _id. index::update would otherwise assign a fresh sequence value,
+    // silently moving the resource and orphaning callers of the old id.
+    if(not document.has("_id"s))
+        document["_id"s] = old_documents.front()["_id"s];
+
     auto file_size_error = std::error_code{};
     const auto original_size = std::filesystem::file_size(m_db, file_size_error);
     if(file_size_error)
@@ -1349,21 +1381,18 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
 
     // Mirror create/update: do not let replace clobber another live primary key.
     // After erasing matched rows, contains_id only sees uninvolved documents.
-    if(document.has("_id"s))
-    {
-        if(not document["_id"s].is_integer())
-            return std::unexpected{db_error(
-                db_error_code::conflict,
-                db_operation::replace,
-                "Document _id must be an integer"s)};
+    if(not document["_id"s].is_integer())
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::replace,
+            "Document _id must be an integer"s)};
 
-        const auto new_id = static_cast<sequence_type>(document["_id"s]);
-        if(staged_index.contains_id(new_id))
-            return std::unexpected{db_error(
-                db_error_code::conflict,
-                db_operation::replace,
-                "Document with _id "s + std::to_string(new_id) + " already exists"s)};
-    }
+    const auto new_id = static_cast<sequence_type>(document["_id"s]);
+    if(staged_index.contains_id(new_id))
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::replace,
+            "Document with _id "s + std::to_string(new_id) + " already exists"s)};
 
     staged_index.update(document);
 
@@ -1522,6 +1551,12 @@ yar::db::db_result<std::size_t> yar::db::engine::upsert_impl(
         return std::unexpected{result.error()};
     if(*result > 0)
         return result;
+
+    // Create path must honor an equality _id selector. Otherwise upsert(
+    // {"_id": 42}, {"name": "Ada"}) silently inserts a different primary key
+    // and retries keep creating duplicates.
+    if(selector.has("_id"s) and not updates.has("_id"s) and selector["_id"s].is_integer())
+        updates["_id"s] = selector["_id"s];
 
     auto created = create_impl(collection, updates);
     if(not created)

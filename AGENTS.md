@@ -159,6 +159,8 @@ Tests are co-located with source (P1204R0). Tag all tests with `[yardb]`.
 
 HTTP integration tests use a `fixture` that starts `rest_api_server` on port `21120`. Capture the fixture with `std::make_shared` — sections run after the `test_case` lambda returns.
 
+**Fault-injection seams (do not expand casually):** `yar:engine` exposes debug-only friend helpers (`fail_next_write`, `fail_write`, `fail_next_rollback_status`, `fail_next_truncate`, `fail_next_torn_append`) so existing durability tests can force I/O failures. They and their arming tests are compiled out under `NDEBUG`. Do not spend tokens designing new inject hooks or growing this surface unless the human request explicitly requires it — see [Do not](#do-not).
+
 ## Example agent loop
 
 ```text
@@ -177,6 +179,7 @@ HTTP integration tests use a `fixture` that starts `rest_api_server` on port `21
 - Use an unfiltered full-suite run as the default fix loop — scope with `--tags='\[yardb\]'` (unfiltered runs include `deps/tester` `[jsonl-probe]` intentional failures)
 - Run `[.tag]` probe fixtures unless explicitly selected (they are hidden by default)
 - Run release-only verification until debug tests pass
+- **Build new fault-injection / failure-hook test machinery** (`fail_next_write`, `fail_write`, `fail_next_rollback_status`, `fail_next_truncate`, `fail_next_torn_append`, friends that arm private inject flags, synthetic `badbit` / truncate / status-restore / torn-append hooks, and tests whose only purpose is to arm them). Those seams already exist, are debug-only (`#ifndef NDEBUG`; CB release passes `-DNDEBUG`), and are expensive to invent or extend. Prefer ordinary behavioral tests against the public API. Only touch or add fault hooks when the task **explicitly** asks for failure-injection coverage.
 
 ## Tester JSONL reference
 

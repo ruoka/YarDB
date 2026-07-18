@@ -473,7 +473,7 @@ yarproxy --clog --replica=http://db1:2112 --replica=http://db2:2112 --replica=ht
 - **Read experiments**: Observe round-robin across independent datasets
 - **Write fan-out demos**: Broadcast creates/updates to several empty databases started together
 
-Not suitable for: production HA, guaranteed replication, or strongly consistent reads after writes.
+Not suitable yet for: production HA, guaranteed replication, or strongly consistent reads after writes for a microservice’s dataset.
 
 ### Smoke tests
 

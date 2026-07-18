@@ -47,7 +47,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Secondary indexes skip object/array values** | `index::insert`/`erase` ignore non-primitive field values so create/reindex/restart cannot throw `bad_variant_access` and brick the database |
 | **PUT no longer persists OData annotations** | Response-only `@odata.*` fields are added after `replace`/`create`, matching POST/PATCH — they are not written into stored documents |
 | **`replace` preserves history** | Reuses prior metadata so `previous` chains, and marks old live records as `updated` (not `deleted`) |
-| **`yarexport` refuses live lock** | Exits non-zero when `--file.pid` is present, matching `yarimport` |
+| **`yarexport` claims history-export lock** | History mode creates exclusive `--file.pid` for the scan (not only refuses an existing lock), so yardb cannot open/append mid-export; `--live` still relies on engine lock ownership |
 | **Offline compaction** | `yarexport --live` exports current documents only; new `yarimport` rebuilds a FSON file (preserves `_id` and `_db` indexes). Workflow: stop yardb → live export → import → swap |
 | **Safe `yarimport --force`** | Validate JSONL and build a staging sidecar before replacing `--file`; failed `--force` imports no longer delete the existing database |
 | **`yarexport` stdout failures** | Exit non-zero when stdout write/flush fails (full disk, broken pipe) so truncated JSONL is not treated as a successful export |

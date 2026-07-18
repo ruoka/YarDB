@@ -9,7 +9,8 @@ const auto usage = R"(
 yarexport [--help] [--file=<name>] [--live]
 
 Export FSON database records to JSONL on stdout (one JSON object per line).
-Refuses to run when --file.pid exists — stop yardb before exporting.
+Claims --file.pid for the duration of a history export so yardb cannot open
+the database mid-scan; refuses to run when the lock already exists.
 
   --live   Export only current documents for offline compaction.
            Opens via the database engine so dual-live crash windows are
@@ -26,6 +27,46 @@ auto require_no_live_lock(const string& file)
             "database lock present: "s + lock_path
             + "; stop yardb before exporting (remove a stale lock only after verifying no live owner)"s};
 }
+
+// Exclusive {file}.pid for raw history export. Existence checks alone are a
+// TOCTOU gap: yardb can start after the check and append while we scan.
+class history_export_lock
+{
+public:
+    explicit history_export_lock(const string& file) :
+        m_path{file + ".pid"s}
+    {
+        auto lock_file = ofstream{m_path, ios::out | ios::noreplace};
+        if(not lock_file.is_open())
+            throw runtime_error{
+                "database lock present: "s + m_path
+                + "; stop yardb before exporting (remove a stale lock only after verifying no live owner)"s};
+        lock_file << chrono::system_clock::now().time_since_epoch().count() << '\n';
+        lock_file.flush();
+        if(lock_file.fail())
+        {
+            error_code ec{};
+            filesystem::remove(m_path, ec);
+            throw runtime_error{"failed to initialize export lock: "s + m_path};
+        }
+        m_owns_lock = true;
+    }
+
+    history_export_lock(const history_export_lock&) = delete;
+    history_export_lock& operator=(const history_export_lock&) = delete;
+
+    ~history_export_lock()
+    {
+        if(not exchange(m_owns_lock, false))
+            return;
+        error_code ec{};
+        filesystem::remove(m_path, ec);
+    }
+
+private:
+    string m_path;
+    bool m_owns_lock = false;
+};
 
 auto export_live(const string& file)
 {
@@ -117,12 +158,18 @@ try
         }
     }
 
-    require_no_live_lock(file);
-
     if(live_only)
+    {
+        // Engine open claims .pid; fail closed if yardb wins the race.
+        require_no_live_lock(file);
         export_live(file);
+    }
     else
+    {
+        // Hold .pid across the raw scan so yardb cannot append mid-export.
+        auto lock = history_export_lock{file};
         export_history(file);
+    }
 
     // Compaction/import trusts a successful exit. A full disk or broken pipe
     // must not look like a complete export.

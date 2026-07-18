@@ -1160,6 +1160,90 @@ auto test_set()
             require_eq(documents[0]["value"s], xson::integer_type{1});
         };
 
+        section("UpdateMidBatchTornAppendDoesNotTombstonePriors") = []
+        {
+            // Multi-doc update: tear after the first successor. Clearing failbit
+            // and continuing would append further successors, tombstone every
+            // prior, then reopen would truncate at the tear and drop those later
+            // successors — silent data loss. Abort the batch instead.
+            const auto test_file = "./engine_update_mid_batch_torn_append_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                for(auto value = 1ll; value <= 3ll; ++value)
+                {
+                    auto document = object{{"value"s, value}};
+                    require_true(engine.create("UpdateMidBatchTorn"s, document).has_value());
+                }
+
+                fail_torn_append_after(engine, 1);
+                const auto result = engine.update(
+                    "UpdateMidBatchTorn"s,
+                    object{},
+                    object{{"value"s, 99ll}});
+
+                require_false(result.has_value());
+                require_eq(result.error().code, yar::db::db_error_code::io_failure);
+                auto documents = object{};
+                require_true(engine.read("UpdateMidBatchTorn"s, object{}, documents));
+                require_eq(documents.size(), 3u);
+                require_eq(documents[0]["value"s], xson::integer_type{1});
+                require_eq(documents[1]["value"s], xson::integer_type{2});
+                require_eq(documents[2]["value"s], xson::integer_type{3});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("UpdateMidBatchTorn"s, object{}, documents));
+            require_eq(documents.size(), 3u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+            require_eq(documents[1]["value"s], xson::integer_type{2});
+            require_eq(documents[2]["value"s], xson::integer_type{3});
+        };
+
+        section("UpdatePartialTornAppendTruncateFailurePreservesPriors") = []
+        {
+            // Two complete successors + torn third, truncate fails. Without
+            // neutralizing the complete prefix, reopen would supersede two
+            // priors after a reported failure. Delete-mark the prefix instead.
+            const auto test_file = "./engine_update_partial_torn_append_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                for(auto value = 1ll; value <= 3ll; ++value)
+                {
+                    auto document = object{{"value"s, value}};
+                    require_true(engine.create("UpdatePartialTorn"s, document).has_value());
+                }
+
+                fail_torn_append_after(engine, 2);
+                fail_next_truncate(engine);
+                const auto result = engine.update(
+                    "UpdatePartialTorn"s,
+                    object{},
+                    object{{"value"s, 99ll}});
+
+                require_false(result.has_value());
+                require_eq(result.error().code, yar::db::db_error_code::rollback_failure);
+                auto documents = object{};
+                require_true(engine.read("UpdatePartialTorn"s, object{}, documents));
+                require_eq(documents.size(), 3u);
+                require_eq(documents[0]["value"s], xson::integer_type{1});
+                require_eq(documents[1]["value"s], xson::integer_type{2});
+                require_eq(documents[2]["value"s], xson::integer_type{3});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("UpdatePartialTorn"s, object{}, documents));
+            require_eq(documents.size(), 3u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+            require_eq(documents[1]["value"s], xson::integer_type{2});
+            require_eq(documents[2]["value"s], xson::integer_type{3});
+        };
+
         section("DestroyStatusRestoreFailureCommitsDurableDelete") = []
         {
             // Delete markers are flushed, then status restore fails. Reporting

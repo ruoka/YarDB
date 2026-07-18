@@ -166,10 +166,12 @@ private:
     friend void fail_next_write(engine&);
     friend void fail_write(engine&, std::size_t);
     friend void fail_next_rollback_status(engine&);
+    friend void fail_next_truncate(engine&);
 
     [[nodiscard]] std::ifstream open_reader() const;
     bool consume_write_failure();
     bool consume_rollback_status_failure();
+    bool consume_truncate_failure();
     bool preconditions_met(const yar::db::metadata& metadata_record, const write_preconditions& preconditions) const;
 
     void setup_index_structure();
@@ -195,6 +197,7 @@ private:
     mutable std::shared_mutex m_rwlock;
     std::size_t m_writes_until_failure = 0;
     bool m_fail_rollback_status = false;
+    bool m_fail_truncate = false;
     bool m_writable = true;
 };
 

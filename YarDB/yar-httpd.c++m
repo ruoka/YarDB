@@ -1303,6 +1303,18 @@ private:
                 return response_with_headers{::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers)};
             }
 
+            // If-Match requires a current representation. Upsert-create must not
+            // resurrect a missing/deleted resource when the client conditioned on
+            // an existing ETag (or If-Match: *). write_preconditions leaves
+            // If-Match: * as an empty position, so enforce via the header here.
+            if(headers.contains("if-match"s))
+            {
+                return database_error_response({
+                    yar::db::db_error_code::precondition_failed,
+                    yar::db::db_operation::create,
+                    "Write preconditions were not met"s});
+            }
+
             {
                 // Document doesn't exist - create it (response metadata only after persist)
                 const auto created = m_engine.create(collection, document);

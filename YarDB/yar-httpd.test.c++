@@ -2926,6 +2926,63 @@ auto test_set()
             require_eq(status, "200"s); // Should succeed because resource exists
         };
 
+        section("PUT with If-Match on missing resource returns 412 (no upsert)") = [setup]
+        {
+            // Conditional PUT must not create when If-Match requires a current representation.
+            auto custom_headers = std::map<string, string>{{"If-Match", "*"s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "PUT"s, "/etagtest10missing/42"s, custom_headers,
+                R"({"name":"Should Not Create"})"s
+            );
+
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+            auto error = json::parse(body);
+            require_eq(error["error"s].get<string>(), "Precondition Failed"s);
+
+            auto [get_status, _unused_get_miss, _unused_hdr_miss, get_body] = make_request(
+                setup->port(), "GET"s, "/etagtest10missing/42"s, ""s
+            );
+            require_eq(get_status, "404"s);
+            require_true(get_body.find("Should Not Create"s) == std::string::npos);
+        };
+
+        section("PUT with stale If-Match after DELETE returns 412 (no resurrect)") = [setup]
+        {
+            auto [post_status, _unused_post_del, _unused_post_del2, post_body] = make_request(
+                setup->port(), "POST"s, "/etagtest10del"s, R"({"name":"To Be Deleted"})"s
+            );
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
+
+            auto [get_status, _unused_get_del, get_headers, _unused_get_body] = make_request(
+                setup->port(), "GET"s, "/etagtest10del/"s + std::to_string(doc_id), ""s
+            );
+            require_true(get_headers.contains("etag"s));
+            auto etag = get_headers["etag"s];
+
+            auto [del_status, _unused_del_r, _unused_del_h, _unused_del_b] = make_request(
+                setup->port(), "DELETE"s, "/etagtest10del/"s + std::to_string(doc_id), ""s
+            );
+            require_eq(del_status, "204"s);
+
+            // Stale ETag from before DELETE must not recreate the document.
+            auto custom_headers = std::map<string, string>{{"If-Match", etag}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "PUT"s, "/etagtest10del/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Resurrected"})"s
+            );
+
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+
+            auto [get_after, _unused_ga_r, _unused_ga_h, get_after_body] = make_request(
+                setup->port(), "GET"s, "/etagtest10del/"s + std::to_string(doc_id), ""s
+            );
+            require_eq(get_after, "404"s);
+            require_true(get_after_body.find("Resurrected"s) == std::string::npos);
+        };
+
         section("If-None-Match wildcard (*) fails if resource exists") = [setup]
         {
             // Create a document

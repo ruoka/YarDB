@@ -800,6 +800,36 @@ auto test_set()
             std::remove((std::string{test_file} + ".pid").c_str());
         };
 
+        section("NestedPathReadWorksWhenParentObjectIsIndexed") = []
+        {
+            // Customer/Country selectors must not choose the empty Customer
+            // secondary index when Customer values are nested objects.
+            const auto test_file = "./engine_nested_path_indexed_parent.db";
+            std::remove(test_file);
+            std::remove((std::string{test_file} + ".pid").c_str());
+
+            auto engine = yar::db::engine{test_file};
+            auto usa = object{
+                {"Customer"s, object{{"Country"s, "USA"s}, {"Name"s, "Acme"s}}}
+            };
+            auto uk = object{
+                {"Customer"s, object{{"Country"s, "UK"s}, {"Name"s, "Beta"s}}}
+            };
+            require_true(engine.create("NestedPathIdx"s, usa).has_value());
+            require_true(engine.create("NestedPathIdx"s, uk).has_value());
+            require_true(engine.index("NestedPathIdx"s, {"Customer"s}).has_value());
+
+            auto by_usa = object{{"Customer"s, object{{"Country"s, "USA"s}}}};
+            auto documents = object{};
+            require_true(engine.read("NestedPathIdx"s, by_usa, documents));
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(documents[0]["Customer"s]["Name"s].get<string>(), "Acme"s);
+            require_eq(engine.count("NestedPathIdx"s, by_usa), 1u);
+
+            std::remove(test_file);
+            std::remove((std::string{test_file} + ".pid").c_str());
+        };
+
         section("IndexOnlyCount") = [test_file]
         {
             auto engine = yar::db::engine{test_file};

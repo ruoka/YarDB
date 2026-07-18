@@ -260,6 +260,32 @@ auto test_set()
             require_eq(fixture.count(object{{"address"s, "plain"s}}), 1u);
             require_eq(fixture.view_count(object{{"address"s, "plain"s}}), 1u);
         };
+
+        section("NestedPathSelectorFallsBackWhenParentIsIndexed") = []
+        {
+            // Indexing the parent object field must not make Customer/Country
+            // queries false-empty: object values are skipped on insert, so the
+            // secondary map cannot answer nested document selectors.
+            index_fixture fixture{"./index_nested_path_fallback.db"s};
+            fixture.add_keys({"Customer"s});
+            fixture.insert(object{
+                {"Customer"s, object{{"Country"s, "USA"s}, {"Name"s, "Acme"s}}}
+            });
+            fixture.insert(object{
+                {"Customer"s, object{{"Country"s, "UK"s}, {"Name"s, "Beta"s}}}
+            });
+
+            const auto nested_usa = object{
+                {"Customer"s, object{{"Country"s, "USA"s}}}
+            };
+            require_eq(fixture.view_count(nested_usa), 2u);
+            require_eq(fixture.count(nested_usa), 1u);
+
+            const auto nested_uk = object{
+                {"Customer"s, object{{"Country"s, "UK"s}}}
+            };
+            require_eq(fixture.count(nested_uk), 1u);
+        };
     };
 
     return true;

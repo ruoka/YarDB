@@ -997,9 +997,14 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
             {
                 for(const auto& entry : pending)
                 {
+                    if(m_storage.fail())
+                        break;
+
                     m_storage.clear();
                     m_storage.seekp(entry.position, m_storage.beg);
                     m_storage << yar::db::updated;
+                    if(m_storage.fail())
+                        break;
                 }
                 m_storage.flush();
                 for(auto& entry : pending)
@@ -1034,11 +1039,20 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
 
     auto status_positions = std::vector<position_type>{};
     status_positions.reserve(pending.size());
+    // Do not clear() away a mid-loop tombstone failure (same discipline as the
+    // append loop above). A masked failure would let flush succeed and publish
+    // while some priors remain status=created beside durable successors.
     for(const auto& entry : pending)
     {
+        if(m_storage.fail())
+            break;
+
         m_storage.clear();
         m_storage.seekp(entry.position, m_storage.beg);
         m_storage << yar::db::updated;
+        if(m_storage.fail())
+            break;
+
         status_positions.push_back(entry.position);
     }
     m_storage.flush();
@@ -1062,9 +1076,14 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
                 // Re-assert updated markers so the live chain matches staged.
                 for(const auto position : status_positions)
                 {
+                    if(m_storage.fail())
+                        break;
+
                     m_storage.clear();
                     m_storage.seekp(position, m_storage.beg);
                     m_storage << yar::db::updated;
+                    if(m_storage.fail())
+                        break;
                 }
                 m_storage.flush();
             }
@@ -1169,11 +1188,20 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
     for(const auto& document : documents.get<yar::db::object::array>())
         staged_index.erase(document);
 
+    // Same failbit discipline as multi-update append: do not clear() away a
+    // mid-loop status write failure. Otherwise a later successful seekp/write
+    // masks the error, flush succeeds, and we publish a full delete while some
+    // rows remain status=created — they resurrect on reopen.
     for(const auto position : positions)
     {
+        if(m_storage.fail())
+            break;
+
         m_storage.clear();
         m_storage.seekp(position, m_storage.beg);
         m_storage << yar::db::deleted;
+        if(m_storage.fail())
+            break;
     }
     m_storage.flush();
     if(m_storage.fail())
@@ -1191,11 +1219,27 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
         {
             for(const auto position : positions)
             {
+                if(m_storage.fail())
+                    break;
+
                 m_storage.clear();
                 m_storage.seekp(position, m_storage.beg);
                 m_storage << yar::db::deleted;
+                if(m_storage.fail())
+                    break;
             }
             m_storage.flush();
+            if(m_storage.fail())
+            {
+                // Cannot prove every row is tombstoned. Refuse further writes;
+                // still publish staged so durable deletes are not served live.
+                m_writable = false;
+                m_index = std::move(staged);
+                return std::unexpected{db_error(
+                    db_error_code::rollback_failure,
+                    db_operation::destroy,
+                    "Delete markers could not be fully re-asserted after a failed status restore"s)};
+            }
             m_index = std::move(staged);
             return positions.size();
         }
@@ -1352,9 +1396,14 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
                 staged_index.insert(document, metadata.position);
                 for(const auto position : positions)
                 {
+                    if(m_storage.fail())
+                        break;
+
                     m_storage.clear();
                     m_storage.seekp(position, m_storage.beg);
                     m_storage << yar::db::updated;
+                    if(m_storage.fail())
+                        break;
                 }
                 m_storage.flush();
                 m_index = std::move(staged);
@@ -1384,11 +1433,17 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
     staged_index.insert(document, metadata.position);
 
     // Mark prior live versions as updated (not deleted) so history remains walkable.
+    // Failbit discipline: do not clear() away a failed tombstone before the next.
     for(const auto position : positions)
     {
+        if(m_storage.fail())
+            break;
+
         m_storage.clear();
         m_storage.seekp(position, m_storage.beg);
         m_storage << yar::db::updated;
+        if(m_storage.fail())
+            break;
     }
     m_storage.flush();
     if(m_storage.fail())
@@ -1409,9 +1464,14 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             {
                 for(const auto position : positions)
                 {
+                    if(m_storage.fail())
+                        break;
+
                     m_storage.clear();
                     m_storage.seekp(position, m_storage.beg);
                     m_storage << yar::db::updated;
+                    if(m_storage.fail())
+                        break;
                 }
                 m_storage.flush();
             }

@@ -12,6 +12,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |
 | **`$orderby` field sort** | Results sort by the named field (`asc`/`desc`); was previously only reversing `_id` walk order via `$desc` |
 
 ### Storage & tooling

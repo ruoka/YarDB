@@ -122,16 +122,41 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
     return wrapped;
 }
 
-inline auto strip_quoted_literal(std::string_view value)
+// OData string literals escape the delimiter by doubling it ('O''Brien' → O'Brien).
+inline auto unescape_odata_string(std::string_view text, char quote) -> std::string
+{
+    auto out = std::string{};
+    out.reserve(text.size());
+
+    for(std::size_t i = 0; i < text.size(); ++i)
+    {
+        if(text[i] == quote and i + 1 < text.size() and text[i + 1] == quote)
+        {
+            out.push_back(quote);
+            ++i;
+            continue;
+        }
+        out.push_back(text[i]);
+    }
+
+    return out;
+}
+
+// Strip surrounding quotes and unescape doubled delimiters. Returns owned text
+// because unescaping may shorten the literal ('' → ').
+inline auto strip_quoted_literal(std::string_view value) -> std::string
 {
     auto trimmed = utils::trim(value);
 
     if(trimmed.size() >= 2
         and ((trimmed.front() == '\'' and trimmed.back() == '\'')
             or (trimmed.front() == '"' and trimmed.back() == '"')))
-        return trimmed.substr(1, trimmed.size() - 2);
+    {
+        const auto quote = trimmed.front();
+        return unescape_odata_string(trimmed.substr(1, trimmed.size() - 2), quote);
+    }
 
-    return trimmed;
+    return std::string{trimmed};
 }
 
 inline auto parse_string_function_args(std::string_view inner)
@@ -140,21 +165,21 @@ inline auto parse_string_function_args(std::string_view inner)
     if(args.size() != 2)
         throw std::invalid_argument{"Invalid function arguments: "s + std::string{inner}};
 
-    auto field = utils::trim(args[0]);
+    auto field = std::string{utils::trim(args[0])};
     auto value = strip_quoted_literal(args[1]);
 
     if(field.empty())
         throw std::invalid_argument{"Field name cannot be empty in function arguments: "s + std::string{inner}};
 
-    return std::make_pair(field, value);
+    return std::make_pair(std::move(field), std::move(value));
 }
 
 // String filter function type for post-processing
 export struct string_filter
 {
     std::string_view function;  // "startswith", "contains", "endswith" (string literals)
-    std::string_view field;     // Field name (from parsed filter expression, points into original filter string)
-    std::string_view value;     // Filter value (from parsed filter expression, points into original filter string)
+    std::string field;          // Field name (copied; may be nested path)
+    std::string value;          // Filter value (owned so OData '' escapes can be unescaped)
 };
 
 // One branch of an OData OR expression (selector AND string filters within the branch)
@@ -188,23 +213,18 @@ inline auto parse_in_value_list(std::string_view list_content)
     for(const auto token : split_outside_quotes(list_content, ","sv))
     {
         saw_token = true;
-        auto is_string = false;
         auto raw = std::string_view{token};
 
         if(raw.size() >= 2 and
            ((raw.front() == '\'' and raw.back() == '\'') or
             (raw.front() == '"' and raw.back() == '"')))
         {
+            const auto quote = raw.front();
             raw = raw.substr(1, raw.size() - 2);
-            is_string = true;
-        }
-
-        if(is_string)
-        {
             if(kind and *kind != value_kind::string)
                 throw std::invalid_argument{"'in' operator values must be all strings or all numbers"};
             kind = value_kind::string;
-            values.emplace_back(utils::trim_end_to_string(raw));
+            values.emplace_back(unescape_odata_string(raw, quote));
         }
         else
         {
@@ -259,12 +279,12 @@ inline bool is_operator_constraint_map(const xson::object& value)
     if(not value.has_objects())
         return false;
 
-    for(const auto& [key, _] : value.get<db::object::map>())
-    {
-        if(not key.empty() and key.front() == '$')
-            return true;
-    }
-    return false;
+    return std::ranges::any_of(
+        value.get<db::object::map>(),
+        [](const auto& entry)
+        {
+            return not entry.first.empty() and entry.first.front() == '$';
+        });
 }
 
 inline xson::object as_operator_constraint_map(const xson::object& leaf)
@@ -551,17 +571,18 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     auto expr = utils::trim(filter_expr);
 
     // Handle 'in' operator: field in ('a','b') or field in (1, 2, 3)
+    // Quote-aware: plain find would hijack contains/eq leaves whose literals contain " in (".
     constexpr auto in_marker = " in ("sv;
-    if(const auto in_pos = expr.find(in_marker); in_pos != std::string_view::npos)
+    if(const auto in_pos = find_outside_quotes(expr, in_marker))
     {
         if(not expr.ends_with(')'))
             throw std::invalid_argument{"Invalid 'in' expression: "s + std::string{expr}};
 
-        auto field = utils::trim(expr.substr(0, in_pos));
+        auto field = utils::trim(expr.substr(0, *in_pos));
         if(field.empty())
             throw std::invalid_argument{"Field name cannot be empty in 'in' expression: "s + std::string{expr}};
 
-        const auto list_start = in_pos + in_marker.size();
+        const auto list_start = *in_pos + in_marker.size();
         const auto list_content = expr.substr(list_start, expr.size() - list_start - 1);
         const auto values = parse_in_value_list(list_content);
         return std::make_pair(make_in_selector(field, values), string_filters);
@@ -575,22 +596,22 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     if(expr.starts_with(startswith_prefix) and expr.back() == ')')
     {
         auto inner = expr.substr(startswith_prefix.size(), expr.size() - startswith_prefix.size() - 1);
-        const auto [field, value] = parse_string_function_args(inner);
-        string_filters.push_back({"startswith", field, value});
+        auto [field, value] = parse_string_function_args(inner);
+        string_filters.push_back(string_filter{"startswith"sv, std::move(field), std::move(value)});
         return std::make_pair(selector, string_filters);
     }
     else if(expr.starts_with(contains_prefix) and expr.back() == ')')
     {
         auto inner = expr.substr(contains_prefix.size(), expr.size() - contains_prefix.size() - 1);
-        const auto [field, value] = parse_string_function_args(inner);
-        string_filters.push_back({"contains", field, value});
+        auto [field, value] = parse_string_function_args(inner);
+        string_filters.push_back(string_filter{"contains"sv, std::move(field), std::move(value)});
         return std::make_pair(selector, string_filters);
     }
     else if(expr.starts_with(endswith_prefix) and expr.back() == ')')
     {
         auto inner = expr.substr(endswith_prefix.size(), expr.size() - endswith_prefix.size() - 1);
-        const auto [field, value] = parse_string_function_args(inner);
-        string_filters.push_back({"endswith", field, value});
+        auto [field, value] = parse_string_function_args(inner);
+        string_filters.push_back(string_filter{"endswith"sv, std::move(field), std::move(value)});
         return std::make_pair(selector, string_filters);
     }
     
@@ -624,16 +645,16 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     if(field.empty())
         throw std::invalid_argument{"Field name cannot be empty in filter expression: "s + std::string{expr}};
     
-    // Remove quotes from string values first
+    // Remove quotes from string values and unescape OData doubled delimiters
     auto is_string = false;
     if(value.size() >= 2 and value[0] == '\'' and value.back() == '\'')
     {
-        value = value.substr(1, value.size() - 2);
+        value = unescape_odata_string(std::string_view{value}.substr(1, value.size() - 2), '\'');
         is_string = true;
     }
     else if(value.size() >= 2 and value[0] == '"' and value.back() == '"')
     {
-        value = value.substr(1, value.size() - 2);
+        value = unescape_odata_string(std::string_view{value}.substr(1, value.size() - 2), '"');
         is_string = true;
     }
     
@@ -865,14 +886,13 @@ export inline void lower_startswith_filters(
             continue;
         }
 
-        const auto field = std::string{filter.field};
-        if(not indexed.contains(field) or selector.has(field))
+        if(not indexed.contains(filter.field) or selector.has(filter.field))
         {
             remaining.push_back(filter);
             continue;
         }
 
-        const auto prefix = std::string{filter.value};
+        const auto& prefix = filter.value;
         const auto upper = prefix_exclusive_upper_bound(prefix);
         if(not upper)
         {
@@ -882,7 +902,7 @@ export inline void lower_startswith_filters(
 
         set_nested_selector_leaf(
             selector,
-            field,
+            filter.field,
             xson::object{{"$gte"s, prefix}, {"$lt"s, *upper}});
     }
 
@@ -903,11 +923,11 @@ inline auto document_matches_string_filters(
         const auto field = field_value->get<std::string>();
 
         if(filter.function == "startswith"sv)
-            return field.starts_with(filter.value);
+            return field.starts_with(std::string_view{filter.value});
         if(filter.function == "contains"sv)
-            return field.contains(filter.value);
+            return field.contains(std::string_view{filter.value});
         if(filter.function == "endswith"sv)
-            return field.ends_with(filter.value);
+            return field.ends_with(std::string_view{filter.value});
 
         throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
     });
@@ -1190,31 +1210,30 @@ inline auto pluralize_collection_name(std::string_view singular)
     if(singular.size() >= 2 and singular.ends_with('y'))
     {
         const auto before = static_cast<char>(std::tolower(static_cast<unsigned char>(singular[singular.size() - 2])));
-        if(before != 'a' and before != 'e' and before != 'i' and before != 'o' and before != 'u')
+        if(not "aeiou"sv.contains(before))
             return std::string{singular.substr(0, singular.size() - 1)} + "ies";
     }
     return std::string{singular} + "s";
 }
 
+inline auto is_expand_navigation_name(std::string_view name)
+{
+    if(name.empty() or name[0] < 'a' or name[0] > 'z')
+        return false;
+
+    return std::ranges::all_of(name, [](char c)
+    {
+        return (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
+    });
+}
+
 inline auto parse_expand_navigations(std::string_view expand_value)
 {
-    auto navigations = std::vector<std::string>{};
-    for(const auto part : split_outside_quotes(expand_value, ","sv))
-    {
-        auto name = utils::trim(part);
-        if(name.empty())
-            continue;
-        if(name[0] < 'a' or name[0] > 'z')
-            continue;
-        const auto valid = std::ranges::all_of(name, [](char c)
-        {
-            return (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
-        });
-        if(not valid)
-            continue;
-        navigations.emplace_back(name);
-    }
-    return navigations;
+    return split_outside_quotes(expand_value, ","sv)
+        | std::views::transform([](const auto part) { return utils::trim(part); })
+        | std::views::filter(is_expand_navigation_name)
+        | std::views::transform([](const auto name) { return std::string{name}; })
+        | std::ranges::to<std::vector<std::string>>();
 }
 
 inline void expand_document(xson::object& document, std::string_view navigation, yar::db::engine& engine)

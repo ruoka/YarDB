@@ -554,28 +554,35 @@ inline void set_nested_selector_leaf(xson::object& selector, std::string_view pa
         merge_selector_into(selector, top);
 }
 
-// Resolve nested document field for string filter post-processing
-inline const xson::object* get_field_by_path(const xson::object& document, std::string_view path)
+// Resolve OData nested path (Customer/Name) to a string leaf for post-filters.
+// Intermediate segments must be maps; missing path or non-string leaf → nullopt.
+inline std::optional<std::string_view> get_string_field_by_path(
+    const xson::object& document,
+    std::string_view path)
 {
     const auto segments = split_property_path(path);
-    const xson::object* current = &document;
+    const auto* current = &document;
 
-    for(std::size_t i = 0; i < segments.size(); ++i)
+    for(const auto& [index, segment] : segments | std::views::enumerate)
     {
-        if(not current->has(segments[i]))
-            return nullptr;
+        if(not current->has(segment))
+            return std::nullopt;
 
-        const auto& next = (*current)[segments[i]];
-        if(i + 1 == segments.size())
-            return &next;
+        const auto& next = (*current)[segment];
+        if(index + 1 == segments.size())
+        {
+            if(not next.is_string())
+                return std::nullopt;
+            return next.get<std::string>();
+        }
 
         if(not next.has_objects())
-            return nullptr;
+            return std::nullopt;
 
         current = &next;
     }
 
-    return nullptr;
+    return std::nullopt;
 }
 
 // Build xson $in map (xson match uses map keys, not arrays)
@@ -1033,18 +1040,16 @@ inline auto document_matches_string_filters(
 {
     return std::ranges::all_of(filters, [&](const string_filter& filter)
     {
-        const auto* field_value = get_field_by_path(doc, filter.field);
-        if(field_value == nullptr or not field_value->is_string())
+        const auto field = get_string_field_by_path(doc, filter.field);
+        if(not field)
             return false;
 
-        const auto& field = field_value->get<std::string>();
-
         if(filter.function == "startswith"sv)
-            return field.starts_with(filter.value);
+            return field->starts_with(filter.value);
         if(filter.function == "contains"sv)
-            return field.contains(filter.value);
+            return field->contains(filter.value);
         if(filter.function == "endswith"sv)
-            return field.ends_with(filter.value);
+            return field->ends_with(filter.value);
 
         throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
     });

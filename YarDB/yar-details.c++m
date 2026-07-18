@@ -531,30 +531,39 @@ inline auto make_error_response_simple(const std::string& status, const std::str
     return make_error_response<std::tuple<std::string, std::string>>(status, error_type, message);
 }
 
+// Strip a matching pair of surrounding quotes from a strong ETag.
+inline auto strip_etag_quotes(std::string_view etag)
+{
+    if(etag.size() >= 2 and etag.front() == '"' and etag.back() == '"')
+        return std::string{etag.substr(1, etag.size() - 2)};
+    return std::string{etag};
+}
+
+// Parse a quoted or bare position ETag. Invalid forms yield nullopt.
+inline std::optional<std::int64_t> parse_etag_position(std::string_view etag)
+{
+    try
+    {
+        return utils::stoll(strip_etag_quotes(etag));
+    }
+    catch(const std::exception&)
+    {
+        return std::nullopt;
+    }
+}
+
 // Build engine write preconditions from conditional HTTP headers.
 inline yar::db::write_preconditions write_preconditions_from_headers(const ::http::headers& headers)
 {
-    using namespace std::string_literals;
     auto pre = yar::db::write_preconditions{};
 
     if(headers.contains("if-match"s))
     {
         const auto& value = headers["if-match"s];
-        if(value != "*")
+        if(value != "*"s)
         {
-            auto etag = value;
-            if(not etag.empty() and etag.front() == '"')
-                etag.erase(0, 1);
-            if(not etag.empty() and etag.back() == '"')
-                etag.pop_back();
-            try
-            {
-                pre.if_match_position = utils::stoll(etag);
-            }
-            catch(const std::exception&)
-            {
-                pre.if_match_position = -1;
-            }
+            // Invalid ETag must fail If-Match (sentinel position never matches).
+            pre.if_match_position = parse_etag_position(value).value_or(-1);
         }
     }
 
@@ -576,7 +585,6 @@ inline yar::db::write_preconditions write_preconditions_from_headers(const ::htt
 // Build engine PUT preconditions from conditional HTTP headers.
 inline yar::db::put_preconditions put_preconditions_from_headers(const ::http::headers& headers)
 {
-    using namespace std::string_literals;
     auto pre = yar::db::put_preconditions{};
     pre.write = write_preconditions_from_headers(headers);
     pre.require_existing = headers.contains("if-match"s);
@@ -585,25 +593,10 @@ inline yar::db::put_preconditions put_preconditions_from_headers(const ::http::h
     {
         const auto& value = headers["if-none-match"s];
         if(value == "*"s)
-        {
             pre.if_none_match_star = true;
-        }
         else
-        {
-            auto etag = value;
-            if(not etag.empty() and etag.front() == '"')
-                etag.erase(0, 1);
-            if(not etag.empty() and etag.back() == '"')
-                etag.pop_back();
-            try
-            {
-                pre.if_none_match_position = utils::stoll(etag);
-            }
-            catch(const std::exception&)
-            {
-                // Invalid ETag never matches a live position; create/replace proceed.
-            }
-        }
+            // Invalid ETag never matches a live position; create/replace proceed.
+            pre.if_none_match_position = parse_etag_position(value);
     }
 
     return pre;
@@ -621,113 +614,94 @@ inline auto format_http_date(const std::chrono::system_clock::time_point& timest
     return utils::rfc1123_legacy(timestamp);
 }
 
-// Check If-Modified-Since header (for GET conditional requests)
-// Returns: std::nullopt if header not present, true if modified, false if not modified
-inline auto check_if_modified_since(const ::http::headers& headers, const std::chrono::system_clock::time_point& timestamp)
+// Shared If-Modified-Since / If-Unmodified-Since evaluation (second precision).
+// Returns nullopt when the header is absent.
+template<typename Compare>
+inline auto check_http_date_precondition(
+    const ::http::headers& headers,
+    const std::string& header_name,
+    const std::chrono::system_clock::time_point& timestamp,
+    Compare compare,
+    bool value_on_parse_error)
 {
-    using namespace std::string_literals;
     using namespace std::chrono;
-    if(not headers.contains("if-modified-since"s))
+    if(not headers.contains(header_name))
         return std::optional<bool>{};
-    
+
     try
     {
-        const auto if_modified_since_str = headers["if-modified-since"s];
-        // Parse RFC 1123 HTTP date format
-        const auto client_time = utils::parse_rfc1123_date(if_modified_since_str);
-        // Round timestamp to seconds for comparison (HTTP dates are second-precision)
-        // This ensures that timestamps formatted and parsed back match correctly
-        const auto timestamp_seconds = floor<seconds>(timestamp);
-        const auto client_time_seconds = floor<seconds>(client_time);
-        // Document is modified if timestamp is after client's time
-        return std::make_optional(timestamp_seconds > client_time_seconds);
+        const auto client_time = utils::parse_rfc1123_date(headers[header_name]);
+        const auto resource_seconds = floor<seconds>(timestamp);
+        const auto client_seconds = floor<seconds>(client_time);
+        return std::make_optional(compare(resource_seconds, client_seconds));
     }
     catch(const std::exception&)
     {
-        // Invalid date format - treat as modified (return fresh content)
-        return std::make_optional(true);
+        return std::make_optional(value_on_parse_error);
     }
+}
+
+// Check If-Modified-Since header (for GET conditional requests)
+// Returns: std::nullopt if header not present, true if modified, false if not modified
+inline auto check_if_modified_since(
+    const ::http::headers& headers,
+    const std::chrono::system_clock::time_point& timestamp)
+{
+    return check_http_date_precondition(
+        headers,
+        "if-modified-since"s,
+        timestamp,
+        [](auto resource, auto client) { return resource > client; },
+        true); // invalid date → treat as modified (return fresh content)
 }
 
 // Check If-Unmodified-Since header (for PUT/PATCH/DELETE conditional requests)
 // Returns: std::nullopt if header not present, true if unmodified, false if modified
-inline auto check_if_unmodified_since(const ::http::headers& headers, const std::chrono::system_clock::time_point& timestamp)
+inline auto check_if_unmodified_since(
+    const ::http::headers& headers,
+    const std::chrono::system_clock::time_point& timestamp)
 {
-    using namespace std::string_literals;
-    using namespace std::chrono;
-    if(not headers.contains("if-unmodified-since"s))
+    return check_http_date_precondition(
+        headers,
+        "if-unmodified-since"s,
+        timestamp,
+        [](auto resource, auto client) { return resource <= client; },
+        false); // invalid date → precondition fails
+}
+
+// Shared If-Match / If-None-Match evaluation against a server ETag.
+// star_result is the outcome for If-*: *; invert_match flips equality for If-None-Match.
+inline auto check_etag_precondition(
+    const ::http::headers& headers,
+    const std::string& header_name,
+    std::string_view server_etag,
+    bool star_result,
+    bool invert_match)
+{
+    if(not headers.contains(header_name))
         return std::optional<bool>{};
-    
-    try
-    {
-        const auto if_unmodified_since_str = headers["if-unmodified-since"s];
-        // Parse RFC 1123 HTTP date format
-        const auto client_time = utils::parse_rfc1123_date(if_unmodified_since_str);
-        // Round timestamp to seconds for comparison (HTTP dates are second-precision)
-        // This ensures that timestamps formatted and parsed back match correctly
-        const auto timestamp_seconds = floor<seconds>(timestamp);
-        const auto client_time_seconds = floor<seconds>(client_time);
-        // Document is unmodified if timestamp is before or equal to client's time
-        return std::make_optional(timestamp_seconds <= client_time_seconds);
-    }
-    catch(const std::exception&)
-    {
-        // Invalid date format - treat as no match (precondition fails)
-        return std::make_optional(false);
-    }
+
+    const auto& value = headers[header_name];
+    if(value == "*"s)
+        return std::make_optional(star_result);
+
+    const auto equal = strip_etag_quotes(server_etag) == strip_etag_quotes(value);
+    return std::make_optional(invert_match ? not equal : equal);
 }
 
 // Check If-Match header (for PUT/PATCH/DELETE conditional requests)
 // Returns: std::nullopt if header not present, true if ETag matches, false if no match
 inline auto check_if_match(const ::http::headers& headers, const std::string& etag)
 {
-    using namespace std::string_literals;
-    if(not headers.contains("if-match"s))
-        return std::optional<bool>{};
-    
-    const auto if_match_value = headers["if-match"s];
-    // If-Match can be "*" (match any) or a specific ETag
-    if(if_match_value == "*"s)
-        return std::make_optional(true);
-    
-    // Compare ETags (remove quotes if present)
-    auto server_etag = etag;
-    auto client_etag = std::string{if_match_value};
-    
-    // Remove quotes for comparison
-    if(server_etag.size() >= 2 and server_etag.front() == '"' and server_etag.back() == '"')
-        server_etag = server_etag.substr(1, server_etag.size() - 2);
-    if(client_etag.size() >= 2 and client_etag.front() == '"' and client_etag.back() == '"')
-        client_etag = client_etag.substr(1, client_etag.size() - 2);
-    
-    return std::make_optional(server_etag == client_etag);
+    return check_etag_precondition(headers, "if-match"s, etag, true, false);
 }
 
 // Check If-None-Match header (for GET conditional requests)
 // Returns: std::nullopt if header not present, true if ETag doesn't match, false if matches
 inline auto check_if_none_match(const ::http::headers& headers, const std::string& etag)
 {
-    using namespace std::string_literals;
-    if(not headers.contains("if-none-match"s))
-        return std::optional<bool>{};
-    
-    const auto if_none_match_value = headers["if-none-match"s];
-    // If-None-Match can be "*" (match any) or a specific ETag
-    if(if_none_match_value == "*"s)
-        return std::make_optional(false); // "*" means match any, so return false (not modified)
-    
-    // Compare ETags (remove quotes if present)
-    auto server_etag = etag;
-    auto client_etag = std::string{if_none_match_value};
-    
-    // Remove quotes for comparison
-    if(server_etag.size() >= 2 and server_etag.front() == '"' and server_etag.back() == '"')
-        server_etag = server_etag.substr(1, server_etag.size() - 2);
-    if(client_etag.size() >= 2 and client_etag.front() == '"' and client_etag.back() == '"')
-        client_etag = client_etag.substr(1, client_etag.size() - 2);
-    
-    // If-None-Match: return true if NOT matching (document is modified)
-    return std::make_optional(server_etag != client_etag);
+    // "*" matches any representation → not modified (false)
+    return check_etag_precondition(headers, "if-none-match"s, etag, false, true);
 }
 
 // Parse query parameters from URI into a map

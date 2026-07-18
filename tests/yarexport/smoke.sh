@@ -515,6 +515,7 @@ main() {
   test_export_stdout_full
   test_import_refuses_live_lock
   test_export_refuses_live_lock
+  test_export_holds_lock
   test_missing_file
   test_help
 

@@ -233,7 +233,7 @@ inline auto parse_in_value_list(std::string_view list_content)
                 if(kind and *kind != value_kind::integer)
                     throw std::invalid_argument{"'in' operator values must be all strings or all numbers"};
                 kind = value_kind::integer;
-                values.emplace_back(utils::stoll(std::string{raw}));
+                values.emplace_back(utils::stoll(raw));
             }
             catch(const std::invalid_argument&)
             {
@@ -719,20 +719,22 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     if(not op_pos)
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
-    auto field = utils::trim_end_to_string(expr.substr(0, *op_pos));
-    auto value = utils::trim_start_to_string(expr.substr(*op_pos + op.size() + 1));
-    
+    const auto field = utils::trim_end(expr.substr(0, *op_pos));
+    const auto value_view = utils::trim_start(expr.substr(*op_pos + op.size() + 1));
+
     // Validate field name is not empty
     if(field.empty())
         throw std::invalid_argument{"Field name cannot be empty in filter expression: "s + std::string{expr}};
-    
-    // Quoted values stay strings (including empty ''); strip + unescape via shared helper
-    const auto is_string = value.size() >= 2
-        and ((value.front() == '\'' and value.back() == '\'')
-            or (value.front() == '"' and value.back() == '"'));
-    if(is_string)
-        value = strip_quoted_literal(value);
-    
+
+    // Quoted values stay strings (including empty ''); strip + unescape into owned text
+    const auto is_string = value_view.size() >= 2
+        and ((value_view.front() == '\'' and value_view.back() == '\'')
+            or (value_view.front() == '"' and value_view.back() == '"'));
+    const auto unescaped = is_string
+        ? std::optional{strip_quoted_literal(value_view)}
+        : std::nullopt;
+    const auto value = is_string ? std::string_view{*unescaped} : value_view;
+
     // Validate value is not empty (empty strings are allowed for string comparisons)
     if(value.empty() and not is_string)
         throw std::invalid_argument{"Filter value cannot be empty in filter expression: "s + std::string{expr}};
@@ -740,7 +742,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     // Unquoted literals: true/false/null, integer, or floating-point. Quoted
     // values stay strings. Bare identifiers that are not literals become strings
     // (legacy); boolean/null must not be stringified or they never match JSON.
-    const auto parse_unquoted_literal = [](const std::string& literal)
+    const auto parse_unquoted_literal = [](std::string_view literal)
     {
         const auto box = [](const auto& v)
         {
@@ -749,11 +751,11 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
             return value;
         };
 
-        if(literal == "true"s)
+        if(literal == "true"sv)
             return box(true);
-        if(literal == "false"s)
+        if(literal == "false"sv)
             return box(false);
-        if(literal == "null"s)
+        if(literal == "null"sv)
             return box(nullptr);
 
         try
@@ -771,7 +773,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         if(ec == std::errc{} and ptr == end)
             return box(number);
 
-        return box(literal);
+        return box(std::string{literal});
     };
 
     const auto require_numeric_literal = [&](std::string_view op_name)
@@ -788,19 +790,19 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
                 + "' requires numeric value in filter expression: "s + std::string{expr}};
         return literal;
     };
-    
+
     // Convert to selector format (supports nested paths: Customer/Country)
     if(op == "eq")
     {
         if(is_string)
-            set_nested_selector_leaf(selector, field, xson::object{value});
+            set_nested_selector_leaf(selector, field, xson::object{*unescaped});
         else
             set_nested_selector_leaf(selector, field, parse_unquoted_literal(value));
     }
     else if(op == "ne")
     {
         if(is_string)
-            set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, value}});
+            set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, *unescaped}});
         else
             set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, parse_unquoted_literal(value)}});
     }
@@ -1034,14 +1036,14 @@ inline auto document_matches_string_filters(
         if(field_value == nullptr or not field_value->is_string())
             return false;
 
-        const auto field = field_value->get<std::string>();
+        const auto& field = field_value->get<std::string>();
 
         if(filter.function == "startswith"sv)
-            return field.starts_with(std::string_view{filter.value});
+            return field.starts_with(filter.value);
         if(filter.function == "contains"sv)
-            return field.contains(std::string_view{filter.value});
+            return field.contains(filter.value);
         if(filter.function == "endswith"sv)
-            return field.ends_with(std::string_view{filter.value});
+            return field.ends_with(filter.value);
 
         throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
     });
@@ -1466,30 +1468,28 @@ export struct orderby_result
 // Throws std::invalid_argument if value is invalid (empty field name or too long)
 export inline auto parse_orderby(std::string_view orderby_value)
 {
-    auto orderby_view = std::string_view{orderby_value};
-    
     // Check for suffix on original value (before trimming) to handle cases like " desc" or " asc"
     auto field_name = std::string_view{};
-    if(orderby_view.ends_with(" desc"sv))
+    if(orderby_value.ends_with(" desc"sv))
     {
-        field_name = utils::trim(orderby_view.substr(0, orderby_view.size() - 5));
+        field_name = utils::trim(orderby_value.substr(0, orderby_value.size() - 5));
     }
-    else if(orderby_view.ends_with(" asc"sv))
+    else if(orderby_value.ends_with(" asc"sv))
     {
-        field_name = utils::trim(orderby_view.substr(0, orderby_view.size() - 4));
+        field_name = utils::trim(orderby_value.substr(0, orderby_value.size() - 4));
     }
     else
     {
         // No suffix, field_name is the whole trimmed value
-        field_name = utils::trim(orderby_view);
+        field_name = utils::trim(orderby_value);
     }
-    
+
     // Validate field name (must not be empty after trimming)
     if(field_name.empty())
         throw std::invalid_argument{"$orderby field name cannot be empty"};
-    
+
     // Use trimmed value for further processing
-    auto orderby = utils::trim(orderby_view);
+    auto orderby = utils::trim(orderby_value);
     
     if(field_name.size() > yar::db::max_field_name_length)
         throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"};

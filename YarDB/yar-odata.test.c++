@@ -477,6 +477,32 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter ANDs two overlapping 'in' lists on one field") = []
+            {
+                then("Intersects membership instead of last-write-wins") = []
+                {
+                    const auto [selector, filters] =
+                        parse_and_filter("status in ('a','b') and status in ('b','c')"sv);
+                    require_true(filters.empty());
+                    require_true(selector.has("status"s));
+                    require_true(selector["status"s].has("$in"s));
+                    const auto& in_map = selector["status"s]["$in"s];
+                    require_eq(in_map.size(), 1u);
+                    require_eq(in_map["0"s].get<string>(), "b"s);
+
+                    require_true(object{{"status"s, "b"s}}.match(selector));
+                    require_false(object{{"status"s, "a"s}}.match(selector));
+                    require_false(object{{"status"s, "c"s}}.match(selector));
+
+                    const auto [empty_sel, empty_filters] =
+                        parse_and_filter("status in ('a') and status in ('b')"sv);
+                    require_true(empty_filters.empty());
+                    require_eq(empty_sel["status"s]["$in"s].size(), 0u);
+                    require_false(object{{"status"s, "a"s}}.match(empty_sel));
+                    require_false(object{{"status"s, "b"s}}.match(empty_sel));
+                };
+            };
+
             when("Filter uses empty 'in' list") = []
             {
                 then("Throws invalid_argument") = []
@@ -774,6 +800,40 @@ auto register_odata_tests()
                     const auto& items = docs.get<object::array>();
                     require_eq(items.size(), 1u);
                     require_eq(items[0]["name"s].get<string>(), "high"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("Overlapping 'in' lists are AND-combined on status") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("users"s, {"status"s}).has_value());
+
+                auto a = object{{"name"s, "A"s}, {"status"s, "a"s}};
+                auto b = object{{"name"s, "B"s}, {"status"s, "b"s}};
+                auto c = object{{"name"s, "C"s}, {"status"s, "c"s}};
+                require_true(engine.create("users"s, a).has_value());
+                require_true(engine.create("users"s, b).has_value());
+                require_true(engine.create("users"s, c).has_value());
+
+                // Last-write-wins would keep only ('b','c') and return B+C.
+                const auto parsed =
+                    parse_filter("status in ('a','b') and status in ('b','c')"sv);
+                const auto docs = read_with_parsed_filter(engine, "users"s, object{}, parsed);
+                const auto count = count_with_parsed_filter(engine, "users"s, object{}, parsed);
+
+                then("Returns only the intersection member") = [docs, count, test_file]
+                {
+                    require_eq(count, 1u);
+                    require_true(docs.is_array());
+                    const auto& items = docs.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "B"s);
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());

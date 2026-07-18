@@ -189,6 +189,29 @@ auto selector_count_keys(const yar::db::object& selector)
 // exactly (view size == match count). Multi-op maps from AND-merged $filter
 // are not always safe: query_analysis_* lets $eq overwrite prior bounds, and
 // $gt/$gte (or $lt/$lte) are if/else-if so only one bound per side is applied.
+// Secondary indexes store primitives only (see insert()). Nested document
+// selectors such as Customer/Country → {Customer:{Country:...}} use ordinary
+// field names under the indexed parent; those cannot be probed as secondary
+// keys and must fall back to a primary scan + match().
+bool secondary_field_selector_usable(const yar::db::object& field_selector)
+{
+    if(field_selector.has_value())
+        return true;
+
+    if(not field_selector.has_objects())
+        return false;
+
+    // Operator maps ($eq/$gt/$in/...) are leaf constraints the secondary
+    // analysis understands (or safely over-scans then match()-filters).
+    // Any non-$ key is a nested document path.
+    return std::ranges::all_of(
+        field_selector.get<yar::db::object::map>(),
+        [](const auto& entry)
+        {
+            return not entry.first.empty() and entry.first.front() == '$';
+        });
+}
+
 bool index_only_field_selector(const yar::db::object& field_selector)
 {
     if(field_selector.has_value())
@@ -323,7 +346,12 @@ yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
     if(secondary_key(selector))
         for(const auto& entry : m_secondary_keys)
             if(selector.has(entry.first))
-                return query_analysis_secondary(selector[entry.first], entry.second);
+            {
+                const auto& field_selector = selector[entry.first];
+                if(secondary_field_selector_usable(field_selector))
+                    return query_analysis_secondary(field_selector, entry.second);
+                break;
+            }
 
     if(not selector.has("$desc"s))
         return {std::ranges::cbegin(m_primary_keys), std::ranges::cend(m_primary_keys)};

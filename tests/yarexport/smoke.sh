@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
     --case) shift; SELECTED_CASE="${1:-}" ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME]"
-      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, import_refuses_live_lock, missing_file, help"
+      echo "cases: export_empty, export_seeded, export_live, compact_roundtrip, force_preserves_on_bad_input, force_overwrite_ok, export_stdout_full, import_refuses_live_lock, export_refuses_live_lock, export_holds_lock, missing_file, help"
       exit 0
       ;;
     *)
@@ -412,6 +412,60 @@ test_export_refuses_live_lock() {
 
   rm -f "${target_db}" "${target_db}.pid"
   end_case export_refuses_live_lock
+}
+
+test_export_holds_lock() {
+  should_run export_holds_lock || return 0
+  begin_case export_holds_lock
+  # History export must claim .pid before reading. A FIFO blocks on open after
+  # the lock is taken, so we can observe exclusive ownership mid-export.
+  local fifo_db export_pid writer_pid attempt
+  fifo_db="$(mktemp -u "${TMPDIR:-/tmp}/yarexport_fifo.XXXXXX.db")"
+  rm -f "${fifo_db}" "${fifo_db}.pid"
+  mkfifo "${fifo_db}"
+
+  set +e
+  "${YAREXPORT_BIN}" --file="${fifo_db}" >/dev/null 2>"${fifo_db}.err" &
+  export_pid=$!
+  set -e
+
+  attempt=0
+  while [[ ${attempt} -lt 50 ]]; do
+    if [[ -e "${fifo_db}.pid" ]]; then
+      break
+    fi
+    if ! kill -0 "${export_pid}" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+    attempt=$((attempt + 1))
+  done
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ -e "${fifo_db}.pid" ]] && kill -0 "${export_pid}" 2>/dev/null; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"export_holds_pid_lock\"}"
+  else
+    fail "expected history export to create ${fifo_db}.pid while blocked on FIFO open"
+  fi
+
+  # Unblock the FIFO reader; ignore write/decode outcome.
+  set +e
+  : >"${fifo_db}" &
+  writer_pid=$!
+  wait "${export_pid}" 2>/dev/null
+  wait "${writer_pid}" 2>/dev/null
+  set -e
+
+  TESTS_RUN=$((TESTS_RUN + 1))
+  if [[ ! -e "${fifo_db}.pid" ]]; then
+    jsonl_emit "{\"type\":\"smoke_assert_passed\",\"matcher\":\"export_releases_pid_lock\"}"
+  else
+    fail "expected history export to release ${fifo_db}.pid after exit"
+    rm -f "${fifo_db}.pid"
+  fi
+
+  rm -f "${fifo_db}" "${fifo_db}.err"
+  end_case export_holds_lock
 }
 
 test_missing_file() {

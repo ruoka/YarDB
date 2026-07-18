@@ -778,6 +778,9 @@ auto test_set()
             require_eq(engine.count("IndexOnlyCount"s, not_deleted), 3u);
         };
 
+#ifndef NDEBUG
+        // Fault-injection sections: require debug-only fail_* seams (omitted
+        // under NDEBUG / release builds).
         section("CreateWriteFailureRollsBack") = []
         {
             const auto test_file = "./engine_create_failure_test.db";
@@ -1161,6 +1164,7 @@ auto test_set()
             require_true(result.error().code == yar::db::db_error_code::io_failure);
             require_true(engine.indexed_keys("IndexFailure"s).empty());
         };
+#endif
 
         section("UpsertCreateReturnsCreatedDocument") = []
         {

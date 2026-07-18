@@ -268,8 +268,11 @@ yar::db::engine::engine(yar::db::engine&& e) :
     m_lock{std::move(e.m_lock)},
     m_index{std::move(e.m_index)},
     m_storage{std::move(e.m_storage)},
+#ifndef NDEBUG
     m_writes_until_failure{std::exchange(e.m_writes_until_failure, 0)},
     m_fail_rollback_status{std::exchange(e.m_fail_rollback_status, false)},
+    m_fail_truncate{std::exchange(e.m_fail_truncate, false)},
+#endif
     m_writable{std::exchange(e.m_writable, false)}
 {}
 
@@ -303,6 +306,8 @@ bool yar::db::engine::preconditions_met(
     return true;
 }
 
+#ifndef NDEBUG
+// Test-only: arm synthetic I/O failures for unit tests. Omitted from release.
 void yar::db::fail_next_write(yar::db::engine& engine)
 {
     engine.m_writes_until_failure = 1;
@@ -322,22 +327,35 @@ void yar::db::fail_next_truncate(yar::db::engine& engine)
 {
     engine.m_fail_truncate = true;
 }
+#endif
 
 bool yar::db::engine::consume_write_failure()
 {
+#ifndef NDEBUG
     if(m_writes_until_failure == 0)
         return false;
     return --m_writes_until_failure == 0;
+#else
+    return false;
+#endif
 }
 
 bool yar::db::engine::consume_rollback_status_failure()
 {
+#ifndef NDEBUG
     return std::exchange(m_fail_rollback_status, false);
+#else
+    return false;
+#endif
 }
 
 bool yar::db::engine::consume_truncate_failure()
 {
+#ifndef NDEBUG
     return std::exchange(m_fail_truncate, false);
+#else
+    return false;
+#endif
 }
 
 void yar::db::engine::setup_index_structure()

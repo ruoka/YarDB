@@ -36,6 +36,12 @@ yar::db::index_view query_analysis_primary(const yar::db::object& selector, cons
         end = keys.upper_bound(key);
     }
 
+    // AND-merged OData ranges can be empty/inverted (age gt 10 and age lt 5).
+    // flat_map iterators are random-access; walking an inverted [begin, end)
+    // via distance/advance is undefined behavior.
+    if(begin > end)
+        begin = end;
+
     if(selector.has("$eq"s))
     {
         const auto key = make_key(selector["$eq"s]);
@@ -140,6 +146,11 @@ yar::db::index_view query_analysis_secondary(
         const auto key = make_secondary_key(selector);
         std::tie(key_begin, key_end) = keys.equal_range(key);
     }
+
+    // Same inverted-range guard as primary: secondary_position_iterator::skip_empty
+    // increments key iterators until key_end and must not walk past cend().
+    if(key_begin > key_end)
+        key_begin = key_end;
 
     auto pos_begin = yar::db::secondary_position_iterator{key_begin, key_end};
     auto pos_end = yar::db::secondary_position_iterator{key_end, key_end};

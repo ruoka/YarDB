@@ -166,6 +166,33 @@ auto test_set()
             require_eq(fixture.view_count(after_first), 2u);
         };
 
+        section("InvertedPrimaryRangeIsEmpty") = []
+        {
+            // AND-merged OData can produce {_id:{$gt:10,$lt:5}}; walking that
+            // iterator pair without clamping is undefined behavior on flat_map.
+            index_fixture fixture{"./index_inverted_id_range.db"s};
+            fixture.insert(object{{"name"s, "first"s}});
+            fixture.insert(object{{"name"s, "second"s}});
+            fixture.insert(object{{"name"s, "third"s}});
+
+            const auto inverted = object{{"_id"s, object{{"$gt"s, 10ll}, {"$lt"s, 5ll}}}};
+            require_eq(fixture.view_count(inverted), 0u);
+            require_eq(fixture.count(inverted), 0u);
+        };
+
+        section("InvertedSecondaryRangeIsEmpty") = []
+        {
+            index_fixture fixture{"./index_inverted_age_range.db"s};
+            fixture.add_keys({"age"s});
+            fixture.insert(object{{"age"s, 20ll}});
+            fixture.insert(object{{"age"s, 30ll}});
+            fixture.insert(object{{"age"s, 40ll}});
+
+            const auto inverted = object{{"age"s, object{{"$gt"s, 35ll}, {"$lt"s, 25ll}}}};
+            require_eq(fixture.view_count(inverted), 0u);
+            require_eq(fixture.count(inverted), 0u);
+        };
+
         section("CountNeUsesScanFallback") = []
         {
             index_fixture fixture{"./index_count_ne.db"s};

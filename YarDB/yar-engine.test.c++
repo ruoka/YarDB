@@ -644,6 +644,32 @@ auto test_set()
             require_eq(documents[0]["name"s].get<string>(), "victim"s);
         };
 
+        section("ReplaceRejectsMultiMatchSelector") = []
+        {
+            // replace appends one successor. A broad selector must not tombstone
+            // every match while leaving only a single replacement document.
+            const auto test_file = "./engine_replace_multi_match_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto first = object{{"name"s, "alpha"s}},
+                second = object{{"name"s, "beta"s}},
+                documents = object{};
+            require_true(engine.create("ReplaceMulti"s, first).has_value());
+            require_true(engine.create("ReplaceMulti"s, second).has_value());
+
+            auto replacement = object{{"name"s, "only-one"s}};
+            const auto result = engine.replace("ReplaceMulti"s, object{}, replacement);
+
+            require_false(result.has_value());
+            require_true(result.error().code == yar::db::db_error_code::conflict);
+            require_true(engine.read("ReplaceMulti"s, object{}, documents));
+            require_eq(documents.size(), 2u);
+            require_true(engine.read("ReplaceMulti"s, object{{"_id"s, first["_id"s]}}, documents));
+            require_eq(documents[0]["name"s].get<string>(), "alpha"s);
+            require_true(engine.read("ReplaceMulti"s, object{{"_id"s, second["_id"s]}}, documents));
+            require_eq(documents[0]["name"s].get<string>(), "beta"s);
+        };
+
         section("ReplacePreservesHistoryChain") = [test_file]
         {
             // create → update → replace must keep a walkable history (not sever
@@ -917,6 +943,41 @@ auto test_set()
             require_true(reopened.read("ReplaceStatusRestoreFailure"s, object{}, documents));
             require_eq(documents.size(), 1u);
             require_eq(documents[0]["value"s], xson::integer_type{9});
+        };
+
+        section("UpdateTruncateFailureAfterRestoreCommitsDurableUpdate") = []
+        {
+            // Successor is flushed; status restore succeeds; truncate of the
+            // append fails. Reporting rollback_failure left dual-live on disk
+            // while the API served the old index — reopen then superseded to
+            // the new value (phantom commit). Publish staged instead.
+            const auto test_file = "./engine_update_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    updates = object{{"value"s, 2ll}},
+                    documents = object{};
+                require_true(engine.create("UpdateTruncateFailure"s, document).has_value());
+                const auto selector = object{{"_id"s, document["_id"s]}};
+
+                fail_write(engine, 2);
+                fail_next_truncate(engine);
+                const auto result = engine.update("UpdateTruncateFailure"s, selector, updates);
+
+                require_true(result.has_value());
+                require_eq(result.value(), 1u);
+                require_true(engine.read("UpdateTruncateFailure"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{2});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("UpdateTruncateFailure"s, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{2});
         };
 
         section("DestroyStatusRestoreFailureCommitsDurableDelete") = []

@@ -2926,6 +2926,57 @@ auto test_set()
             require_eq(status, "200"s); // Should succeed because resource exists
         };
 
+        section("PUT with If-None-Match * on existing resource returns 412") = [setup]
+        {
+            // Create-only PUT must not overwrite when the resource already exists.
+            auto [post_status, _u1, _u2, post_body] = make_request(
+                setup->port(), "POST"s, "/etagtestnone"s, R"({"name":"Keep Me"})"s
+            );
+            require_eq(post_status, "201"s);
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
+
+            auto custom_headers = std::map<string, string>{{"If-None-Match", "*"s}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "PUT"s, "/etagtestnone/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Overwrite"})"s
+            );
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+
+            auto [get_status, _g1, _g2, get_body] = make_request(
+                setup->port(), "GET"s, "/etagtestnone/"s + std::to_string(doc_id), ""s
+            );
+            require_eq(get_status, "200"s);
+            require_true(get_body.find("Keep Me"s) != std::string::npos);
+            require_true(get_body.find("Overwrite"s) == std::string::npos);
+        };
+
+        section("PUT with matching If-None-Match ETag returns 412") = [setup]
+        {
+            auto [post_status, _u1, _u2, post_body] = make_request(
+                setup->port(), "POST"s, "/etagtestnone2"s, R"({"name":"Original"})"s
+            );
+            require_eq(post_status, "201"s);
+            auto created = json::parse(post_body);
+            auto doc_id = static_cast<xson::integer_type>(created["_id"s]);
+
+            auto [get_status, _g1, get_headers, _g2] = make_request(
+                setup->port(), "GET"s, "/etagtestnone2/"s + std::to_string(doc_id), ""s
+            );
+            require_eq(get_status, "200"s);
+            require_true(get_headers.contains("etag"s));
+            const auto etag = get_headers["etag"];
+
+            auto custom_headers = std::map<string, string>{{"If-None-Match", etag}};
+            auto [status, reason, headers, body] = make_request_with_headers(
+                setup->port(), "PUT"s, "/etagtestnone2/"s + std::to_string(doc_id), custom_headers,
+                R"({"name":"Changed"})"s
+            );
+            require_eq(status, "412"s);
+            require_eq(reason, "Precondition Failed"s);
+        };
+
         section("PUT with If-Match on missing resource returns 412 (no upsert)") = [setup]
         {
             // Conditional PUT must not create when If-Match requires a current representation.

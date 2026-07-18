@@ -1268,8 +1268,27 @@ private:
             auto response_headers = ::http::headers{};
             const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
             const auto preconditions = write_preconditions_from_headers(headers);
+            const auto resource_exists = exists and not existing_docs.get<xson::object::array>().empty();
 
-            if(exists and not existing_docs.get<xson::object::array>().empty())
+            // If-None-Match on PUT: reject modification when the current
+            // representation matches (RFC 9110 create-only / not-modified).
+            // Checked before replace so If-None-Match: * cannot overwrite.
+            if(resource_exists and headers.contains("if-none-match"s))
+            {
+                auto current_etag = ""s;
+                if(auto position = m_engine.metadata_position(collection, selector))
+                    current_etag = generate_etag(*position);
+                const auto none_match = check_if_none_match(headers, current_etag);
+                if(none_match.has_value() and not none_match.value())
+                {
+                    return database_error_response({
+                        yar::db::db_error_code::precondition_failed,
+                        yar::db::db_operation::replace,
+                        "Write preconditions were not met"s});
+                }
+            }
+
+            if(resource_exists)
             {
                 // Persist the request body only — OData response annotations are
                 // added after replace, matching POST/PATCH.

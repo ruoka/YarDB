@@ -24,6 +24,10 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **`replace` rejects multi-match selectors** | `engine::replace` returns `conflict` when the selector matches more than one live row instead of tombstoning every match while appending a single successor |
+| **Update/replace commit when truncate fails after restore** | If successors are durable, status restore succeeds, but truncating appends fails, update/replace publish the staged index (and re-tombstone priors) instead of reporting failure while reopen would apply the new version |
+| **Destroy re-asserts tombstones after failed status restore** | After a failed/partial status restore, destroy rewrites `deleted` markers before publishing the staged index so partially revived rows cannot resurrect on reopen |
+| **PUT honors `If-None-Match`** | Conditional PUT returns `412` when `If-None-Match: *` or a matching ETag would be violated, so create-only clients cannot silently overwrite |
 | **`yarexport --live` uses engine** | Live export opens through `engine` so dual-live crash windows export one current document per `_id` (stale pre-images are not resurrected into compaction JSONL) |
 | **Dual-live crash recovery** | If a crash leaves two `created` rows for one `_id` (successor appended, prior not yet tombstoned), reopen/reindex supersede the earlier row — drop stale secondary hits and heal the prior status to `updated` |
 | **Update/replace commit when status restore fails** | If successors are durable but rollback cannot restore prior rows to `created`, update/replace publish the staged index (durable write won) instead of returning failure while live reads keep serving tombstoned pre-images |

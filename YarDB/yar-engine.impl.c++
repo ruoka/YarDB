@@ -18,11 +18,16 @@ bool reopen(std::fstream& storage, const std::string& db)
 // Distinguish status-restore failure from truncate/reopen failure so destroy /
 // update / replace can publish the durable outcome instead of reporting failure
 // while API and disk disagree.
+//
+// truncate_failed: resize_file failed — appends past original_size remain.
+// reopen_failed: resize succeeded but the stream could not be reopened — file
+// matches the pre-image size; callers must not publish successor indexes.
 enum class rollback_result
 {
     ok,
     status_restore_failed,
-    truncate_failed
+    truncate_failed,
+    reopen_failed
 };
 
 rollback_result rollback(
@@ -30,7 +35,8 @@ rollback_result rollback(
     const std::string& db,
     std::uintmax_t original_size,
     const std::vector<yar::db::position_type>& status_positions,
-    bool inject_status_failure = false)
+    bool inject_status_failure = false,
+    bool inject_truncate_failure = false)
 {
     using xson::fson::operator <<;
 
@@ -65,12 +71,24 @@ rollback_result rollback(
     }
 
     storage.close();
+    if(inject_truncate_failure)
+    {
+        // Leave appends in place (same as a failed resize_file) and reopen.
+        reopen(storage, db);
+        return rollback_result::truncate_failed;
+    }
+
     auto resize_error = std::error_code{};
     std::filesystem::resize_file(db, original_size, resize_error);
-    const auto reopened = reopen(storage, db);
-    if(not resize_error and reopened)
+    if(resize_error)
+    {
+        reopen(storage, db);
+        return rollback_result::truncate_failed;
+    }
+
+    if(reopen(storage, db))
         return rollback_result::ok;
-    return rollback_result::truncate_failed;
+    return rollback_result::reopen_failed;
 }
 
 void validate_and_recover_storage(std::fstream& storage, const std::string& db)
@@ -300,6 +318,11 @@ void yar::db::fail_next_rollback_status(yar::db::engine& engine)
     engine.m_fail_rollback_status = true;
 }
 
+void yar::db::fail_next_truncate(yar::db::engine& engine)
+{
+    engine.m_fail_truncate = true;
+}
+
 bool yar::db::engine::consume_write_failure()
 {
     if(m_writes_until_failure == 0)
@@ -310,6 +333,11 @@ bool yar::db::engine::consume_write_failure()
 bool yar::db::engine::consume_rollback_status_failure()
 {
     return std::exchange(m_fail_rollback_status, false);
+}
+
+bool yar::db::engine::consume_truncate_failure()
+{
+    return std::exchange(m_fail_truncate, false);
 }
 
 void yar::db::engine::setup_index_structure()
@@ -834,16 +862,31 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
     if(m_storage.fail())
     {
         // Successors were flushed. If undo cannot restore created on prior
-        // rows, reopen indexes the new versions while a stale m_index would
-        // keep serving tombstoned pre-images — publish staged instead.
+        // rows, or restore succeeds but truncating appends fails, reopen would
+        // index the successors (supersede dual-live) while a stale m_index /
+        // error return would disagree — publish staged instead.
         const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
             status_positions,
-            consume_rollback_status_failure());
-        if(rolled_back == rollback_result::status_restore_failed)
+            consume_rollback_status_failure(),
+            consume_truncate_failure());
+        if(rolled_back == rollback_result::status_restore_failed
+            or rolled_back == rollback_result::truncate_failed)
         {
+            if(rolled_back == rollback_result::truncate_failed)
+            {
+                // Status restore left priors created beside durable successors.
+                // Re-assert updated markers so the live chain matches staged.
+                for(const auto position : status_positions)
+                {
+                    m_storage.clear();
+                    m_storage.seekp(position, m_storage.beg);
+                    m_storage << yar::db::updated;
+                }
+                m_storage.flush();
+            }
             for(auto& entry : pending)
                 documents += std::move(entry.new_document);
             m_index = std::move(staged);
@@ -956,15 +999,24 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
     {
         // Delete markers were flushed. If undo cannot restore created, durable
         // tombstones remain and reopen would drop the docs while we reported
-        // failure — commit the staged index so API and disk agree.
+        // failure — commit the staged index so API and disk agree. Re-assert
+        // deleted markers in case a partial restore revived some rows.
         const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
             positions,
-            consume_rollback_status_failure());
+            consume_rollback_status_failure(),
+            consume_truncate_failure());
         if(rolled_back == rollback_result::status_restore_failed)
         {
+            for(const auto position : positions)
+            {
+                m_storage.clear();
+                m_storage.seekp(position, m_storage.beg);
+                m_storage << yar::db::deleted;
+            }
+            m_storage.flush();
             m_index = std::move(staged);
             return positions.size();
         }
@@ -1042,6 +1094,14 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     if(positions.empty())
         return 0;
 
+    // replace appends a single successor. Matching multiple live rows would
+    // tombstone every match while only one document remains — silent data loss.
+    if(positions.size() > 1)
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::replace,
+            "Replace requires a selector that matches exactly one document"s)};
+
     auto file_size_error = std::error_code{};
     const auto original_size = std::filesystem::file_size(m_db, file_size_error);
     if(file_size_error)
@@ -1112,16 +1172,29 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     if(m_storage.fail())
     {
         // Replacement was flushed. If undo cannot restore created on prior
-        // rows, reopen indexes the successor while a stale m_index would keep
-        // serving tombstoned pre-images — publish staged instead.
+        // rows, or restore succeeds but truncating the successor fails, reopen
+        // indexes the successor while a stale m_index / error return would
+        // disagree — publish staged instead.
         const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
             positions,
-            consume_rollback_status_failure());
-        if(rolled_back == rollback_result::status_restore_failed)
+            consume_rollback_status_failure(),
+            consume_truncate_failure());
+        if(rolled_back == rollback_result::status_restore_failed
+            or rolled_back == rollback_result::truncate_failed)
         {
+            if(rolled_back == rollback_result::truncate_failed)
+            {
+                for(const auto position : positions)
+                {
+                    m_storage.clear();
+                    m_storage.seekp(position, m_storage.beg);
+                    m_storage << yar::db::updated;
+                }
+                m_storage.flush();
+            }
             m_index = std::move(staged);
             return positions.size();
         }

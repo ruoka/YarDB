@@ -980,6 +980,114 @@ auto test_set()
             require_eq(documents[0]["value"s], xson::integer_type{2});
         };
 
+        section("CreateTruncateFailureCommitsDurableAppend") = []
+        {
+            // Create append is flushed; truncating that append on rollback fails.
+            // Reporting failure omitted the row from the live index while reopen
+            // indexed it — phantom create (and duplicate on retry without _id).
+            const auto test_file = "./engine_create_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            const auto created_id = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    documents = object{};
+
+                fail_next_write(engine);
+                fail_next_truncate(engine);
+                const auto result = engine.create("CreateTruncateFailure"s, document);
+
+                require_true(result.has_value());
+                require_true(engine.read("CreateTruncateFailure"s, object{}, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{1});
+                return static_cast<xson::integer_type>(document["_id"s]);
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read(
+                "CreateTruncateFailure"s,
+                object{{"_id"s, created_id}},
+                documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{1});
+        };
+
+        section("UpdateAppendTruncateFailureCommitsDurableUpdate") = []
+        {
+            // Update successors are flushed; truncating them fails before any
+            // status markers are written. Publish staged and tombstone priors so
+            // the API does not keep serving the pre-image while reopen applies
+            // the successor.
+            const auto test_file = "./engine_update_append_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    updates = object{{"value"s, 2ll}},
+                    documents = object{};
+                require_true(engine.create("UpdateAppendTruncateFailure"s, document).has_value());
+                const auto selector = object{{"_id"s, document["_id"s]}};
+
+                fail_write(engine, 1);
+                fail_next_truncate(engine);
+                const auto result = engine.update("UpdateAppendTruncateFailure"s, selector, updates);
+
+                require_true(result.has_value());
+                require_eq(result.value(), 1u);
+                require_true(engine.read("UpdateAppendTruncateFailure"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{2});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("UpdateAppendTruncateFailure"s, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{2});
+        };
+
+        section("ReplaceAppendTruncateFailureCommitsDurableReplace") = []
+        {
+            // Replacement is flushed; truncating it fails before prior rows are
+            // marked updated. Publish staged so replace is not a phantom commit
+            // after restart.
+            const auto test_file = "./engine_replace_append_truncate_failure_test.db";
+            const auto setup = fixture{test_file};
+            [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto document = object{{"value"s, 1ll}},
+                    documents = object{};
+                require_true(engine.create("ReplaceAppendTruncateFailure"s, document).has_value());
+                const auto selector = object{{"_id"s, document["_id"s]}};
+                auto replacement = object{
+                    {"_id"s, document["_id"s]},
+                    {"value"s, 9ll}};
+
+                fail_next_write(engine);
+                fail_next_truncate(engine);
+                const auto result = engine.replace(
+                    "ReplaceAppendTruncateFailure"s,
+                    selector,
+                    replacement);
+
+                require_true(result.has_value());
+                require_eq(result.value(), 1u);
+                require_true(engine.read("ReplaceAppendTruncateFailure"s, selector, documents));
+                require_eq(documents.size(), 1u);
+                require_eq(documents[0]["value"s], xson::integer_type{9});
+            }();
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_true(reopened.read("ReplaceAppendTruncateFailure"s, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["value"s], xson::integer_type{9});
+        };
+
         section("DestroyStatusRestoreFailureCommitsDurableDelete") = []
         {
             // Delete markers are flushed, then status restore fails. Reporting

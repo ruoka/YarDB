@@ -531,12 +531,30 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
     m_storage.seekp(0, m_storage.end);
     index.update(document);
     m_storage << metadata << document;
+    // Flush before synthetic failure so rollback exercises truncating a durable
+    // append (same model as status-phase inject), not merely an unflushed buffer.
+    m_storage.flush();
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);
-    m_storage.flush();
     if(m_storage.fail())
     {
-        if(rollback(m_storage, m_db, original_size, {}) != rollback_result::ok)
+        const auto rolled_back = rollback(
+            m_storage,
+            m_db,
+            original_size,
+            {},
+            false,
+            consume_truncate_failure());
+        // Durable append remains when truncate fails. Reporting failure would
+        // omit the document from the live index while reopen indexes it
+        // (phantom create / duplicate on retry without a client _id).
+        if(rolled_back == rollback_result::truncate_failed)
+        {
+            index.insert(document, metadata.position);
+            m_index = std::move(staged);
+            return {};
+        }
+        if(rolled_back != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -826,12 +844,37 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         m_storage << entry.metadata_record << entry.new_document;
         staged_index.insert(entry.new_document, entry.metadata_record.position);
     }
+    // Flush before synthetic failure so append-phase rollback sees durable
+    // successors (mirrors status-phase inject ordering).
+    m_storage.flush();
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);
-    m_storage.flush();
     if(m_storage.fail())
     {
-        if(rollback(m_storage, m_db, original_size, {}) != rollback_result::ok)
+        const auto rolled_back = rollback(
+            m_storage,
+            m_db,
+            original_size,
+            {},
+            false,
+            consume_truncate_failure());
+        // Successors remain on disk. Without publishing staged, live reads keep
+        // the pre-image while reopen supersedes to the new version.
+        if(rolled_back == rollback_result::truncate_failed)
+        {
+            for(const auto& entry : pending)
+            {
+                m_storage.clear();
+                m_storage.seekp(entry.position, m_storage.beg);
+                m_storage << yar::db::updated;
+            }
+            m_storage.flush();
+            for(auto& entry : pending)
+                documents += std::move(entry.new_document);
+            m_index = std::move(staged);
+            return pending.size();
+        }
+        if(rolled_back != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(
@@ -1139,12 +1182,36 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
     m_storage << metadata << document;
+    // Flush before synthetic failure so append-phase rollback sees a durable
+    // successor (mirrors status-phase inject ordering).
+    m_storage.flush();
     if(consume_write_failure())
         m_storage.setstate(std::ios::badbit);
-    m_storage.flush();
     if(m_storage.fail())
     {
-        if(rollback(m_storage, m_db, original_size, {}) != rollback_result::ok)
+        const auto rolled_back = rollback(
+            m_storage,
+            m_db,
+            original_size,
+            {},
+            false,
+            consume_truncate_failure());
+        // Successor remains on disk. Publish staged (and tombstone the prior)
+        // so API and reopen agree instead of a phantom replace after restart.
+        if(rolled_back == rollback_result::truncate_failed)
+        {
+            staged_index.insert(document, metadata.position);
+            for(const auto position : positions)
+            {
+                m_storage.clear();
+                m_storage.seekp(position, m_storage.beg);
+                m_storage << yar::db::updated;
+            }
+            m_storage.flush();
+            m_index = std::move(staged);
+            return positions.size();
+        }
+        if(rolled_back != rollback_result::ok)
         {
             m_writable = false;
             return std::unexpected{db_error(

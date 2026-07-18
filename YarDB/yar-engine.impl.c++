@@ -279,6 +279,14 @@ auto metadata_value(
     return std::nullopt;
 }
 
+void assign_revision(yar::db::document_revision* revision, const yar::db::metadata& metadata_record)
+{
+    if(revision == nullptr)
+        return;
+    revision->position = metadata_record.position;
+    revision->timestamp = metadata_record.timestamp;
+}
+
 const yar::db::index* find_index(
     const std::flat_map<std::string, yar::db::index>& indexes,
     std::string_view collection)
@@ -655,15 +663,24 @@ yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::ve
     return {};
 }
 
-yar::db::db_result<> yar::db::engine::create(std::string_view collection, yar::db::object& document)
+yar::db::db_result<> yar::db::engine::create(
+    std::string_view collection,
+    yar::db::object& document,
+    yar::db::document_revision* revision)
 {
     auto lock = std::unique_lock{m_rwlock};
-    return create_impl(collection, document);
+    return create_impl(collection, document, revision);
 }
 
-yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, yar::db::object& document)
+yar::db::db_result<> yar::db::engine::create_impl(
+    std::string_view collection,
+    yar::db::object& document,
+    yar::db::document_revision* revision)
 {
     using xson::fson::operator <<;
+
+    if(revision != nullptr)
+        *revision = {};
 
     if(not m_writable)
         return std::unexpected{db_error(
@@ -730,6 +747,7 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
             {
                 index.insert(document, metadata.position);
                 m_index = std::move(staged);
+                assign_revision(revision, metadata);
                 return {};
             }
             // Incomplete tail cannot publish. Neutralize any complete prefix so
@@ -757,6 +775,7 @@ yar::db::db_result<> yar::db::engine::create_impl(std::string_view collection, y
 
     index.insert(document, metadata.position);
     m_index = std::move(staged);
+    assign_revision(revision, metadata);
     return {};
 }
 
@@ -816,10 +835,24 @@ void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, 
     });
 }
 
-bool yar::db::engine::read(std::string_view collection, const yar::db::object& selector, yar::db::object& documents)
+bool yar::db::engine::read(
+    std::string_view collection,
+    const yar::db::object& selector,
+    yar::db::object& documents)
+{
+    auto unused = document_revision{};
+    return read(collection, selector, documents, unused);
+}
+
+bool yar::db::engine::read(
+    std::string_view collection,
+    const yar::db::object& selector,
+    yar::db::object& documents,
+    yar::db::document_revision& revision)
 {
     using xson::fson::operator >>;
 
+    revision = {};
     auto lock = std::shared_lock{m_rwlock};
     const auto* index = find_index(m_index, collection);
     if(index == nullptr)
@@ -862,6 +895,11 @@ bool yar::db::engine::read(std::string_view collection, const yar::db::object& s
                 // every match instead.
                 if(top == 0)
                     break;
+
+                // Capture under this shared lock so body and ETag/Last-Modified
+                // cannot come from different live versions.
+                if(not revision.position.has_value())
+                    assign_revision(&revision, metadata);
 
                 documents += std::move(document);
                 success = true;
@@ -932,10 +970,11 @@ yar::db::db_result<std::size_t> yar::db::engine::update(
     const yar::db::object& selector,
     const yar::db::object& updates,
     yar::db::object& documents,
-    write_preconditions preconditions)
+    write_preconditions preconditions,
+    yar::db::document_revision* revision)
 {
     auto lock = std::unique_lock{m_rwlock};
-    return update_impl(collection, selector, updates, documents, preconditions);
+    return update_impl(collection, selector, updates, documents, preconditions, revision);
 }
 
 yar::db::db_result<std::size_t> yar::db::engine::update_impl(
@@ -943,10 +982,14 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
     const yar::db::object& selector,
     const yar::db::object& updates,
     yar::db::object& documents,
-    write_preconditions preconditions)
+    write_preconditions preconditions,
+    yar::db::document_revision* revision)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
+
+    if(revision != nullptr)
+        *revision = {};
 
     if(not m_writable)
         return std::unexpected{db_error(
@@ -1077,6 +1120,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
                 for(auto& entry : pending)
                     documents += std::move(entry.new_document);
                 m_index = std::move(staged);
+                assign_revision(revision, pending.front().metadata_record);
                 return pending.size();
             }
             // N-1 complete + torn last: delete-mark the complete prefix so reopen
@@ -1148,6 +1192,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
             for(auto& entry : pending)
                 documents += std::move(entry.new_document);
             m_index = std::move(staged);
+            assign_revision(revision, pending.front().metadata_record);
             return pending.size();
         }
         if(rolled_back != rollback_result::ok)
@@ -1167,6 +1212,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
     for(auto& entry : pending)
         documents += std::move(entry.new_document);
     m_index = std::move(staged);
+    assign_revision(revision, pending.front().metadata_record);
     return pending.size();
 }
 
@@ -1300,12 +1346,16 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     std::string_view collection,
     const yar::db::object& selector,
     yar::db::object& document,
-    write_preconditions preconditions)
+    write_preconditions preconditions,
+    yar::db::document_revision* revision)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
 
     auto lock = std::unique_lock{m_rwlock};
+
+    if(revision != nullptr)
+        *revision = {};
 
     if(not m_writable)
         return std::unexpected{db_error(
@@ -1430,6 +1480,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
                 }
                 m_storage.flush();
                 m_index = std::move(staged);
+                assign_revision(revision, metadata);
                 return positions.size();
             }
             neutralize_appended_records(m_storage, m_db, original_size);
@@ -1491,6 +1542,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
                 m_storage.flush();
             }
             m_index = std::move(staged);
+            assign_revision(revision, metadata);
             return positions.size();
         }
         if(rolled_back != rollback_result::ok)
@@ -1508,6 +1560,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace(
     }
 
     m_index = std::move(staged);
+    assign_revision(revision, metadata);
     return positions.size();
 }
 

@@ -32,8 +32,7 @@
 				"C_Cpp.default.intelliSenseMode": "linux-clang-x64"
 			},
 			"extensions": [
-				"ms-vscode.cpptools",
-				"ms-vscode.makefile-tools"
+				"ms-vscode.cpptools"
 			]
 		},
 		"codespaces": {

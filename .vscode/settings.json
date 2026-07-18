@@ -3,35 +3,34 @@
         "*.hpp": "cpp",
         "*.cpp": "cpp",
         "*.c++": "cpp",
-        "*.c++m": "cpp"
+        "*.c++m": "cpp",
+        "*.test.c++": "cpp"
     },
-    "C_Cpp.default.compilerPath": "/usr/lib/llvm-20/bin/clang++",
+    "C_Cpp.default.compilerPath": "/usr/bin/clang++-21",
     "C_Cpp.default.compilerArgs": [
         "-std=c++23",
         "-stdlib=libc++",
         "-fexperimental-library",
         "-pthread",
         "-fPIC",
-        "-I/usr/include/c++/v1",
-        "-fprebuilt-module-path=${workspaceFolder}/build-linux/pcm"
+        "-nostdinc++",
+        "-isystem",
+        "/usr/lib/llvm-21/include/c++/v1",
+        "-fprebuilt-module-path=${workspaceFolder}/build-linux-debug/pcm"
     ],
     "C_Cpp.default.cppStandard": "c++23",
-    "C_Cpp.default.intelliSenseMode": "clang-x64",
+    "C_Cpp.default.intelliSenseMode": "linux-clang-x64",
     "C_Cpp.default.includePaths": [
         "${workspaceFolder}/YarDB",
-        "${workspaceFolder}/deps/net/include",
-        "${workspaceFolder}/deps/xson/include",
-        "/usr/include/c++/v1"
+        "${workspaceFolder}/deps/net/net",
+        "${workspaceFolder}/deps/xson/xson",
+        "${workspaceFolder}/deps/tester/tester",
+        "${workspaceFolder}/deps/cryptic/cryptic",
+        "/usr/lib/llvm-21/include/c++/v1"
     ],
     "C_Cpp.errorSquiggles": "enabled",
-    "C_Cpp.configurationProvider": "ms-vscode.makefile-tools",
-    "makefile.launchConfigurations": [
-        {
-            "cwd": "${workspaceFolder}",
-            "binaryPath": "${workspaceFolder}/build-linux/bin/yardb",
-            "binaryArgs": ["--help"]
-        }
-    ],
+    "C_Cpp.default.defines": [],
+    "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": false,
     "terminal.integrated.gpuAcceleration": "off",
     "terminal.integrated.defaultProfile.linux": "bash",
     "files.exclude": {
@@ -45,7 +44,5 @@
         "**/build-*/**": true,
         "**/obj/**": true,
         "**/pcm/**": true
-    },
-    "C_Cpp.default.defines": [],
-    "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": false
+    }
 }

@@ -9,50 +9,86 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Cache LLVM 21 + libc++
+    # Snapshot lives under the runner tool cache (user-writable). Caching paths
+    # under /usr fails on restore: tar cannot create root-owned symlinks
+    # (Permission denied on clang++-21 → ../lib/llvm-21/bin/clang++).
+    - name: Cache LLVM 21 toolchain snapshot
       id: cache
       uses: actions/cache@v4
       with:
-        path: |
-          /usr/lib/llvm-21
-          /usr/bin/clang-21
-          /usr/bin/clang++-21
-          /usr/bin/lld-21
-          /usr/bin/lldb-21
-          /usr/bin/clang-tidy-21
-        key: llvm-21-ubuntu-${{ runner.arch }}-2025-v1
-        restore-keys: |
-          llvm-21-ubuntu-${{ runner.arch }}-
-          llvm-21-ubuntu-
-          llvm-21-
+        path: ${{ runner.tool_cache }}/yardb-llvm-21
+        key: llvm-21-snapshot-${{ runner.os }}-${{ runner.arch }}-v2
 
-    - name: Ensure LLVM toolchain installed (install if missing)
+    - name: Ensure LLVM toolchain installed
       shell: bash
+      env:
+        LLVM_CACHE_ROOT: ${{ runner.tool_cache }}/yardb-llvm-21
+        LLVM_PACKAGES: ${{ inputs.packages }}
       run: |
         set -euo pipefail
 
-        # If clang++-21 is present, skip install; otherwise install requested packages.
-        if command -v clang++-21 >/dev/null 2>&1; then
-          echo "clang++-21 found; skipping apt install."
+        CACHE_FS="$LLVM_CACHE_ROOT/root"
+        CACHE_MARKER="$LLVM_CACHE_ROOT/.yardb-llvm-complete"
+
+        restore_from_cache()
+        {
+          if [[ ! -f "$CACHE_MARKER" || ! -d "$CACHE_FS" ]]; then
+            return 1
+          fi
+          echo "Restoring LLVM 21 snapshot from cache into / ..."
+          sudo cp -a "$CACHE_FS"/. /
+          command -v clang++-21 >/dev/null 2>&1
+        }
+
+        snapshot_to_cache()
+        {
+          echo "Saving LLVM 21 snapshot into cache directory..."
+          rm -rf "$LLVM_CACHE_ROOT"
+          mkdir -p "$CACHE_FS"
+
+          # Capture the llvm-21 prefix plus every file owned by the packages.
+          pkgs=()
+          read -r -a pkgs <<< "$LLVM_PACKAGES"
+          {
+            printf '%s\n' /usr/lib/llvm-21
+            for pkg in "${pkgs[@]}"; do
+              dpkg -L "$pkg" 2>/dev/null || true
+            done
+          } | sort -u | while IFS= read -r path; do
+            [[ -e "$path" || -L "$path" ]] || continue
+            dest="$CACHE_FS$path"
+            sudo mkdir -p "$(dirname "$dest")"
+            sudo cp -a "$path" "$dest"
+          done
+
+          sudo chown -R "$(id -u):$(id -g)" "$LLVM_CACHE_ROOT"
+          touch "$CACHE_MARKER"
+          echo "Snapshot saved ($(du -sh "$LLVM_CACHE_ROOT" | awk '{print $1}'))."
+        }
+
+        if restore_from_cache; then
+          echo "clang++-21 restored from cache; skipping apt install."
         else
-          echo "clang++-21 not found — installing LLVM 21 toolchain..."
+          echo "clang++-21 not available from cache — installing LLVM 21 toolchain..."
           sudo apt-get update -y
           sudo apt-get install -y wget gnupg ca-certificates lsb-release software-properties-common
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/apt-llvm.gpg
           echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/apt-llvm.org.list > /dev/null
           sudo apt-get update -y
-          sudo apt-get install -y ${{ inputs.packages }}
+          # shellcheck disable=SC2086
+          sudo apt-get install -y $LLVM_PACKAGES
+          snapshot_to_cache
         fi
 
-        # Ensure clang/clang++/lld alternatives point to the clang-21 binaries if present
-        if [ -x /usr/bin/clang-21 ]; then
+        if [[ -x /usr/bin/clang-21 ]]; then
           sudo update-alternatives --install /usr/bin/clang   clang   /usr/bin/clang-21   100 || true
         fi
-        if [ -x /usr/bin/clang++-21 ]; then
+        if [[ -x /usr/bin/clang++-21 ]]; then
           sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-21 100 || true
         fi
-        if [ -x /usr/bin/lld-21 ]; then
+        if [[ -x /usr/bin/lld-21 ]]; then
           sudo update-alternatives --install /usr/bin/lld     lld     /usr/bin/lld-21     100 || true
         fi
 
+        clang++-21 --version | head -1
         echo "LLVM setup complete."

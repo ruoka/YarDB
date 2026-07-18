@@ -8,65 +8,67 @@ auto make_primary_key = [](const xson::primitive& v){return std::get<xson::integ
 
 auto make_secondary_key = [](const xson::primitive& v){return v;};
 
-template<typename T, typename F>
-yar::db::index_view query_analysis_primary(const yar::db::object& selector, const T& keys, F make_key)
+// Shared $gt/$gte/$lt/$lte/$eq (and bare equality) bound resolution for primary
+// and secondary flat_maps. Callers apply $head/$tail and wrap iterators.
+template<typename Map, typename MakeKey>
+auto analyze_key_bounds(const yar::db::object& selector, const Map& keys, MakeKey make_key)
 {
-    auto begin = keys.cbegin(),
-         end   = keys.cend();
+    auto begin = keys.cbegin();
+    auto end = keys.cend();
 
     if(selector.has("$gt"s))
-    {
-        const auto key = make_key(selector["$gt"s]);
-        begin = keys.upper_bound(key);
-    }
+        begin = keys.upper_bound(make_key(selector["$gt"s]));
     else if(selector.has("$gte"s))
-    {
-        const auto key = make_key(selector["$gte"s]);
-        begin = keys.lower_bound(key);
-    }
+        begin = keys.lower_bound(make_key(selector["$gte"s]));
 
     if(selector.has("$lt"s))
-    {
-        const auto key = make_key(selector["$lt"s]);
-        end = keys.lower_bound(key);
-    }
+        end = keys.lower_bound(make_key(selector["$lt"s]));
     else if(selector.has("$lte"s))
-    {
-        const auto key = make_key(selector["$lte"s]);
-        end = keys.upper_bound(key);
-    }
+        end = keys.upper_bound(make_key(selector["$lte"s]));
+
+    if(selector.has("$eq"s))
+        std::tie(begin, end) = keys.equal_range(make_key(selector["$eq"s]));
+    else if(selector.has_value())
+        std::tie(begin, end) = keys.equal_range(make_key(selector));
 
     // AND-merged OData ranges can be empty/inverted (age gt 10 and age lt 5).
     // flat_map iterators are random-access; walking an inverted [begin, end)
-    // via distance/advance is undefined behavior.
+    // via distance/advance is undefined behavior. Secondary position iterators
+    // similarly must not walk key_begin past key_end.
     if(begin > end)
         begin = end;
 
-    if(selector.has("$eq"s))
+    return std::pair{begin, end};
+}
+
+template<typename Map, typename MakeKey>
+yar::db::index_view query_analysis_primary(
+    const yar::db::object& selector,
+    const Map& keys,
+    MakeKey make_key)
+{
+    auto [begin, end] = analyze_key_bounds(selector, keys, make_key);
+
+    // Primary applies $head/$tail on key iterators, and only when equality did
+    // not already replace the range (same exclusive chain as before).
+    if(not selector.has("$eq"s) and not selector.has_value())
     {
-        const auto key = make_key(selector["$eq"s]);
-        std::tie(begin, end) = keys.equal_range(key);
-    }
-    else if(selector.has("$head"s))
-    {
-        const xson::integer_type n = selector["$head"s];
-        const xson::integer_type len = std::ranges::distance(begin, end);
-        auto itr = begin;
-        std::ranges::advance(itr, std::min(n, len));
-        end = itr;
-    }
-    else if(selector.has("$tail"s))
-    {
-        const xson::integer_type n = selector["$tail"s];
-        const xson::integer_type len = std::ranges::distance(begin, end);
-        auto itr = end;
-        std::ranges::advance(itr, -std::min(n, len));
-        begin = itr;
-    }
-    else if(selector.has_value())
-    {
-        const auto key = make_key(selector);
-        std::tie(begin, end) = keys.equal_range(key);
+        if(selector.has("$head"s))
+        {
+            const xson::integer_type n = selector["$head"s];
+            const xson::integer_type len = std::ranges::distance(begin, end);
+            auto itr = begin;
+            std::ranges::advance(itr, std::min(n, len));
+            end = itr;
+        }
+        else if(selector.has("$tail"s))
+        {
+            const xson::integer_type n = selector["$tail"s];
+            const xson::integer_type len = std::ranges::distance(begin, end);
+            auto itr = end;
+            std::ranges::advance(itr, -std::min(n, len));
+            begin = itr;
+        }
     }
 
     const std::size_t known_size = std::ranges::distance(begin, end);
@@ -84,46 +86,7 @@ yar::db::index_view query_analysis_secondary(
     const yar::db::object& selector,
     const yar::db::secondary_index_type& keys)
 {
-    auto key_begin = keys.cbegin(),
-         key_end   = keys.cend();
-
-    if(selector.has("$gt"s))
-    {
-        const auto key = make_secondary_key(selector["$gt"s]);
-        key_begin = keys.upper_bound(key);
-    }
-    else if(selector.has("$gte"s))
-    {
-        const auto key = make_secondary_key(selector["$gte"s]);
-        key_begin = keys.lower_bound(key);
-    }
-
-    if(selector.has("$lt"s))
-    {
-        const auto key = make_secondary_key(selector["$lt"s]);
-        key_end = keys.lower_bound(key);
-    }
-    else if(selector.has("$lte"s))
-    {
-        const auto key = make_secondary_key(selector["$lte"s]);
-        key_end = keys.upper_bound(key);
-    }
-
-    if(selector.has("$eq"s))
-    {
-        const auto key = make_secondary_key(selector["$eq"s]);
-        std::tie(key_begin, key_end) = keys.equal_range(key);
-    }
-    else if(selector.has_value())
-    {
-        const auto key = make_secondary_key(selector);
-        std::tie(key_begin, key_end) = keys.equal_range(key);
-    }
-
-    // Same inverted-range guard as primary: secondary_position_iterator::skip_empty
-    // increments key iterators until key_end and must not walk past cend().
-    if(key_begin > key_end)
-        key_begin = key_end;
+    auto [key_begin, key_end] = analyze_key_bounds(selector, keys, make_secondary_key);
 
     auto pos_begin = yar::db::secondary_position_iterator{key_begin, key_end};
     auto pos_end = yar::db::secondary_position_iterator{key_end, key_end};
@@ -134,6 +97,7 @@ yar::db::index_view query_analysis_secondary(
             key_begin, key_end, std::size_t{0},
             [](std::size_t total, const auto& entry) { return total + entry.second.size(); });
 
+    // Secondary $head/$tail limit positions (one doc can share a key), not keys.
     if(selector.has("$head"s))
     {
         const xson::integer_type n = selector["$head"s];

@@ -24,6 +24,11 @@ struct document_revision
     std::optional<std::chrono::system_clock::time_point> timestamp;
 };
 
+// Sort a document array by a field (OData $orderby). Missing/non-primitive
+// values sort after present ones; ties break on _id ascending. When descending,
+// field order is reversed; missing values stay last.
+void apply_orderby(object& documents, std::string_view field, bool descending);
+
 // Database engine providing CRUD operations and indexing capabilities.
 // Read operations use shared locking; writes use exclusive locking.
 class engine
@@ -190,28 +195,7 @@ private:
         bool m_owns_lock = false;
     };
 
-#ifndef NDEBUG
-    // Test-only fault-injection seams. Free functions arm private flags so unit
-    // tests can force write / rollback-status / truncate / torn-append failures
-    // without exposing those knobs on the public engine API. Compiled out of
-    // release builds (CB passes -DNDEBUG for `release`).
-    friend void fail_next_write(engine&);
-    friend void fail_write(engine&, std::size_t);
-    friend void fail_next_rollback_status(engine&);
-    friend void fail_next_truncate(engine&);
-    friend void fail_next_torn_append(engine&);
-    friend void fail_torn_append_after(engine&, std::size_t);
-#endif
-
     [[nodiscard]] std::ifstream open_reader() const;
-    // Synthetic failure consumers for the seams above. Always return false when
-    // NDEBUG is set so release call sites compile to no-ops.
-    bool consume_write_failure();
-    bool consume_rollback_status_failure();
-    bool consume_truncate_failure();
-    bool consume_torn_append_failure();
-    bool inject_torn_append(std::uintmax_t original_size);
-    bool maybe_inject_torn_append_after(std::uintmax_t original_size, std::size_t appended);
     bool preconditions_met(const yar::db::metadata& metadata_record, const write_preconditions& preconditions) const;
 
     void setup_index_structure();
@@ -239,19 +223,7 @@ private:
     std::flat_map<std::string, yar::db::index> m_index;
     std::fstream m_storage;
     mutable std::shared_mutex m_rwlock;
-#ifndef NDEBUG
-    std::size_t m_writes_until_failure = 0;
-    bool m_fail_rollback_status = false;
-    bool m_fail_truncate = false;
-    bool m_fail_torn_append = false;
-    std::size_t m_torn_append_after = 0;
-#endif
     bool m_writable = true;
 };
-
-// Sort a document array by a field (OData $orderby). Missing/non-primitive
-// values sort after present ones; ties break on _id ascending. When descending,
-// field order is reversed; missing values stay last.
-void apply_orderby(object& documents, std::string_view field, bool descending);
 
 } // namespace yar::db

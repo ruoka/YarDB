@@ -1306,6 +1306,49 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter is not not status eq 'deleted'") = [docs]
+            {
+                then("Double negation restores positive comparison") = [docs]
+                {
+                    // Inner not yields and_negated_selectors; outer not must
+                    // restore the positive selector (not throw / match-all).
+                    const auto parsed = parse_filter("not not status eq 'deleted'"sv);
+                    require_false(parsed.has_or());
+                    require_true(parsed.and_negated_selectors.empty());
+                    require_true(parsed.and_selector.has("status"s));
+
+                    const auto result = filter_by_parsed(docs, parsed);
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "Bob"s);
+                };
+            };
+
+            when("Filter is not (age gt 5 and not age gt 10)") = []
+            {
+                then("De Morgan restores the inner not as a positive OR branch") = []
+                {
+                    // not (A and not B) = not A or B → age <= 5 or age > 10.
+                    // Dropping and_negated_selectors leaves only not A and
+                    // silently excludes ages above 10.
+                    auto age_docs = object{object::array{
+                        object{{"_id"s, 1ll}, {"name"s, "low"s}, {"age"s, 3ll}},
+                        object{{"_id"s, 2ll}, {"name"s, "mid"s}, {"age"s, 7ll}},
+                        object{{"_id"s, 3ll}, {"name"s, "high"s}, {"age"s, 15ll}}
+                    }};
+
+                    const auto parsed = parse_filter("not (age gt 5 and not age gt 10)"sv);
+                    require_true(parsed.has_or());
+                    require_eq(parsed.or_branches.size(), 2u);
+
+                    const auto result = filter_by_parsed(age_docs, parsed);
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 2u);
+                    require_eq(items[0]["name"s].get<string>(), "low"s);
+                    require_eq(items[1]["name"s].get<string>(), "high"s);
+                };
+            };
+
             when("Filter is not of two pairwise ORs") = [docs]
             {
                 then("De Morgan stays within the OR-branch budget") = [docs]

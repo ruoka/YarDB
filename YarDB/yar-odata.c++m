@@ -983,7 +983,9 @@ inline parsed_filter and_parsed_filters(parsed_filter left, parsed_filter right)
     return parsed_from_branches(std::move(combined));
 }
 
-// Negate a parsed filter via operator rewrites and De Morgan (not (A and B) → not A or not B).
+// Negate a parsed filter via De Morgan (not (A and B) → not A or not B).
+// Comparison `not` uses negated_selectors (!match); double-negating those
+// restores the positive selector (not(not P) → P).
 inline parsed_filter negate_parsed_filter(parsed_filter filter)
 {
     if(filter.has_or())
@@ -1005,7 +1007,9 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
     auto atoms = std::vector<std::pair<std::string, xson::object>>{};
     collect_selector_atoms(filter.and_selector, ""sv, atoms);
 
-    const auto atom_count = atoms.size() + filter.and_string_filters.size();
+    const auto atom_count = atoms.size()
+        + filter.and_string_filters.size()
+        + filter.and_negated_selectors.size();
     ensure_filter_or_branch_budget(atom_count);
 
     for(auto& [path, leaf] : atoms)
@@ -1013,6 +1017,10 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
 
     for(auto& string_filter : filter.and_string_filters)
         branches.push_back(negate_string_filter(std::move(string_filter)));
+
+    // not(not P): and_negated_selectors holds P → become positive selector branches.
+    for(auto& positive : filter.and_negated_selectors)
+        branches.push_back(filter_branch{std::move(positive), {}, {}});
 
     if(branches.empty())
         throw std::invalid_argument{"Cannot negate empty filter expression"};

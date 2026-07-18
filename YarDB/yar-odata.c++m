@@ -314,35 +314,37 @@ inline xson::object impossible_predicate()
     return xson::object{{"$eq"s, true}, {"$ne"s, true}};
 }
 
+inline bool map_contains_value(const xson::object& values, const xson::object& value)
+{
+    return std::ranges::any_of(
+        values.get<db::object::map>() | std::views::values,
+        [&](const auto& candidate) { return candidate == value; });
+}
+
 // AND of two $in maps is their value intersection. Empty intersection matches
 // nothing (xson $in any_of over an empty map is false).
 inline void intersect_in_maps(xson::object& target, const xson::object& source)
 {
     auto kept = xson::object{};
-    for(const auto& [_, value] : target.get<db::object::map>())
-    {
-        const auto present = std::ranges::any_of(
-            source.get<db::object::map>(),
-            [&](const auto& entry) { return entry.second == value; });
-        if(present)
-            kept[std::to_string(kept.size())] = value;
-    }
+    for(const auto& [index, value] : target.get<db::object::map>()
+            | std::views::values
+            | std::views::filter([&](const auto& value) { return map_contains_value(source, value); })
+            | std::views::enumerate)
+        kept[std::to_string(index)] = value;
     target = std::move(kept);
 }
 
 inline void add_unique_map_value(xson::object& values, const xson::object& value)
 {
-    const auto present = std::ranges::any_of(
-        values.get<db::object::map>(),
-        [&](const auto& entry) { return entry.second == value; });
-    if(not present)
+    if(not map_contains_value(values, value))
         values[std::to_string(values.size())] = value;
 }
 
 inline void union_nin_maps(xson::object& target, const xson::object& source)
 {
-    for(const auto& [_, value] : source.get<db::object::map>())
-        add_unique_map_value(target, value);
+    std::ranges::for_each(
+        source.get<db::object::map>() | std::views::values,
+        [&](const auto& value) { add_unique_map_value(target, value); });
 }
 
 // Promote a lone $ne into $nin (or add into an existing $nin) so AND of several
@@ -577,11 +579,11 @@ inline const xson::object* get_field_by_path(const xson::object& document, std::
 }
 
 // Build xson $in map (xson match uses map keys, not arrays)
-inline auto make_in_selector(std::string_view field, const std::vector<xson::object>& values)
+inline auto make_in_selector(std::string_view field, std::span<const xson::object> values)
 {
     auto in_map = xson::object{};
-    for(const auto& value : values)
-        in_map[std::to_string(in_map.size())] = value;
+    for(const auto& [index, value] : values | std::views::enumerate)
+        in_map[std::to_string(index)] = value;
 
     auto selector = xson::object{};
     set_nested_selector_leaf(selector, field, xson::object{{"$in"s, std::move(in_map)}});
@@ -890,12 +892,13 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
 
     if(find_outside_quotes_and_parens(expr, " or "sv))
     {
-        auto branches = std::vector<filter_branch>{};
-        for(const auto part : split_outside_quotes_and_parens(expr, " or "sv))
-        {
-            for(auto branch : as_or_branches(parse_filter(part)))
-                branches.push_back(std::move(branch));
-        }
+        // Flatten nested OR branches from each part (join of parse → as_or_branches).
+        auto branches = split_outside_quotes_and_parens(expr, " or "sv)
+            | std::views::transform([](std::string_view part) {
+                  return as_or_branches(parse_filter(part));
+              })
+            | std::views::join
+            | std::ranges::to<std::vector<filter_branch>>();
 
         // Delimiter-only " or " yields no branches; has_or() would be false and
         // the empty and_selector would match every document.
@@ -980,15 +983,13 @@ export inline std::optional<std::string> prefix_exclusive_upper_bound(std::strin
 
 // Lower startswith(field, prefix) to indexed {$gte, $lt} range when field is a top-level secondary key
 export inline void lower_startswith_filters(
-    yar::db::engine& engine,
-    std::string_view collection,
+    std::span<const std::string> indexed_keys,
     xson::object& selector,
     std::vector<string_filter>& string_filters)
 {
     if(string_filters.empty())
         return;
 
-    const auto indexed_keys = engine.indexed_keys(collection);
     const auto indexed = std::unordered_set<std::string>{std::from_range, indexed_keys};
 
     auto remaining = std::vector<string_filter>{};
@@ -1104,22 +1105,16 @@ export inline auto apply_top_skip(
     if(not documents.is_array())
         return documents;
 
-    auto& items = documents.get<xson::object::array>();
-
-    if(skip > 0)
+    const auto& items = documents.get<xson::object::array>();
+    auto skipped = items | std::views::drop(skip > 0 ? static_cast<std::size_t>(skip) : 0u);
+    if(top >= 0)
     {
-        if(static_cast<std::size_t>(skip) >= items.size())
-        {
-            documents = xson::object{xson::object::array{}};
-            return documents;
-        }
-        items.erase(items.begin(), items.begin() + static_cast<std::ptrdiff_t>(skip));
+        return xson::object{
+            skipped
+                | std::views::take(static_cast<std::size_t>(top))
+                | std::ranges::to<xson::object::array>()};
     }
-
-    if(top >= 0 and static_cast<std::size_t>(top) < items.size())
-        items.resize(static_cast<std::size_t>(top));
-
-    return documents;
+    return xson::object{skipped | std::ranges::to<xson::object::array>()};
 }
 
 // Peel OData paging/sort keys from a selector so callers can filter first,
@@ -1204,6 +1199,8 @@ export inline std::size_t count_with_parsed_filter(
     xson::object query_selector,
     const parsed_filter& filter)
 {
+    const auto indexed_keys = engine.indexed_keys(collection);
+
     if(filter.has_or())
     {
         auto merged = xson::object{xson::object::array{}};
@@ -1211,7 +1208,7 @@ export inline std::size_t count_with_parsed_filter(
 
         for(auto branch : filter.or_branches)
         {
-            lower_startswith_filters(engine, collection, branch.selector, branch.string_filters);
+            lower_startswith_filters(indexed_keys, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
             engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_string_filters(branch_docs, branch.string_filters);
@@ -1227,7 +1224,7 @@ export inline std::size_t count_with_parsed_filter(
     merge_selector_into(query_selector, filter.and_selector);
 
     auto string_filters = filter.and_string_filters;
-    lower_startswith_filters(engine, collection, query_selector, string_filters);
+    lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
     if(not string_filters.empty())
     {
@@ -1252,6 +1249,8 @@ export inline auto read_with_parsed_filter(
     xson::object query_selector,
     const parsed_filter& filter)
 {
+    const auto indexed_keys = engine.indexed_keys(collection);
+
     if(filter.has_or())
     {
         const auto paging = extract_and_strip_paging(query_selector);
@@ -1261,7 +1260,7 @@ export inline auto read_with_parsed_filter(
 
         for(auto branch : filter.or_branches)
         {
-            lower_startswith_filters(engine, collection, branch.selector, branch.string_filters);
+            lower_startswith_filters(indexed_keys, branch.selector, branch.string_filters);
             auto branch_docs = xson::object{};
             engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_string_filters(branch_docs, branch.string_filters);
@@ -1277,7 +1276,7 @@ export inline auto read_with_parsed_filter(
     merge_selector_into(query_selector, filter.and_selector);
 
     auto string_filters = filter.and_string_filters;
-    lower_startswith_filters(engine, collection, query_selector, string_filters);
+    lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
     // Post-filter functions (contains/endswith/non-indexed startswith) must run
     // before $top/$skip/$orderby. Otherwise paging is applied to the unfiltered

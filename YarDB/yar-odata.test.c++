@@ -1389,7 +1389,7 @@ auto register_odata_tests()
                 auto filters = std::vector<string_filter>{
                     {"startswith"sv, "Customer/Name"s, "Ac"s}
                 };
-                lower_startswith_filters(engine, "users"s, selector, filters);
+                lower_startswith_filters(engine.indexed_keys("users"s), selector, filters);
 
                 then("Keeps post-filter and leaves selector empty") = [selector, filters]
                 {
@@ -1411,7 +1411,7 @@ auto register_odata_tests()
                 auto filters = std::vector<string_filter>{
                     {"startswith"sv, "name"s, "Al"s}
                 };
-                lower_startswith_filters(engine, "users"s, selector, filters);
+                lower_startswith_filters(engine.indexed_keys("users"s), selector, filters);
 
                 then("Moves constraint into selector and clears string filter") = [selector, filters]
                 {

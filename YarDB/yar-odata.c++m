@@ -1703,13 +1703,18 @@ inline void accumulate_integer(aggregate_acc& acc, xson::integer_type value)
         return;
     }
 
-    if(acc.all_integer and acc.int_sum_ok)
+    // Min/max must track every integer even after sum overflows int64. Gating them
+    // on int_sum_ok left later values stuck at the pre-overflow extrema.
+    if(acc.all_integer)
     {
-        auto next = xson::integer_type{0};
-        if(checked_add_integer(acc.int_sum, value, next))
-            acc.int_sum = next;
-        else
-            acc.int_sum_ok = false;
+        if(acc.int_sum_ok)
+        {
+            auto next = xson::integer_type{0};
+            if(checked_add_integer(acc.int_sum, value, next))
+                acc.int_sum = next;
+            else
+                acc.int_sum_ok = false;
+        }
         acc.int_min = std::min(acc.int_min, value);
         acc.int_max = std::max(acc.int_max, value);
     }
@@ -1787,9 +1792,21 @@ inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method 
                 return result;
             case aggregate_method::average:
             {
-                if(acc.int_sum_ok and acc.count > 0 and (acc.int_sum % static_cast<xson::integer_type>(acc.count)) == 0)
+                // Prefer int_sum over the parallel double sum: values beyond 2^53
+                // already lost low bits in acc.sum, so a non-integral average must
+                // still be derived from the exact integer total.
+                if(acc.int_sum_ok and acc.count > 0)
                 {
-                    result = static_cast<xson::integer_type>(acc.int_sum / static_cast<xson::integer_type>(acc.count));
+                    const auto n = static_cast<xson::integer_type>(acc.count);
+                    if((acc.int_sum % n) == 0)
+                    {
+                        result = static_cast<xson::integer_type>(acc.int_sum / n);
+                        return result;
+                    }
+                    const auto quot = acc.int_sum / n;
+                    const auto rem = acc.int_sum % n;
+                    result = static_cast<xson::number_type>(
+                        static_cast<double>(quot) + static_cast<double>(rem) / static_cast<double>(n));
                     return result;
                 }
                 result = static_cast<xson::number_type>(acc.sum / static_cast<double>(acc.count));

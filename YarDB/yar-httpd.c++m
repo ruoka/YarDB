@@ -795,30 +795,10 @@ private:
             
             // Parse OData query parameters
             auto params = parse_query_params(uri);
-            
-            // Handle $count (OData: $count=true) - return count only
-            if(params.contains("$count"s) and params["$count"s] == "true"s)
-            {
-                // Build selector for counting (without $top/$skip to get full count)
-                auto count_selector = xson::object{};
-                const auto collection_name = validate_collection_name(uri.path[1]);
-                const auto count = [&]() -> std::size_t
-                {
-                    if(params.contains("$filter"s))
-                    {
-                        const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
-                        return yar::http::odata::count_with_parsed_filter(m_engine, collection_name, count_selector, parsed_filter);
-                    }
 
-                    return m_engine.count(collection_name, count_selector);
-                }();
-                
-                // Return count as JSON number (OData spec: $count=true returns just the number)
-                // JSON numbers are valid as plain strings (e.g., "42" is valid JSON)
-                return response_with_headers{::http::status_ok, std::to_string(static_cast<long long>(count)), std::optional<::http::headers>{}};
-            }
-
-            // Handle $apply (v1: groupby + aggregate). Optional $filter only.
+            // Handle $apply (v1: groupby + aggregate) before $count. Otherwise
+            // `$apply=…&$count=true` short-circuited to a bare document count and
+            // silently dropped aggregation (v1 rejects the combination with 422).
             if(params.contains("$apply"s))
             {
                 const auto incompatible = std::array{
@@ -863,6 +843,28 @@ private:
                         xson::json::stringify(error),
                         std::optional<::http::headers>{}};
                 }
+            }
+            
+            // Handle $count (OData: $count=true) - return count only
+            if(params.contains("$count"s) and params["$count"s] == "true"s)
+            {
+                // Build selector for counting (without $top/$skip to get full count)
+                auto count_selector = xson::object{};
+                const auto collection_name = validate_collection_name(uri.path[1]);
+                const auto count = [&]() -> std::size_t
+                {
+                    if(params.contains("$filter"s))
+                    {
+                        const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
+                        return yar::http::odata::count_with_parsed_filter(m_engine, collection_name, count_selector, parsed_filter);
+                    }
+
+                    return m_engine.count(collection_name, count_selector);
+                }();
+                
+                // Return count as JSON number (OData spec: $count=true returns just the number)
+                // JSON numbers are valid as plain strings (e.g., "42" is valid JSON)
+                return response_with_headers{::http::status_ok, std::to_string(static_cast<long long>(count)), std::optional<::http::headers>{}};
             }
 
             // Handle $top (OData: $top=n)

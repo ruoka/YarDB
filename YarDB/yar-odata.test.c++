@@ -2276,6 +2276,56 @@ auto register_odata_tests()
                     require_true(total > 0.0);
                 };
             };
+
+            when("Min after int64 sum overflow still sees later values") = []
+            {
+                // INT64_MAX + 1 overflows the running sum; a following smaller
+                // value must still win min (int_min must not freeze at overflow).
+                constexpr auto max_i = std::numeric_limits<integer_type>::max();
+                auto docs = object{object::array{
+                    object{{"amount"s, max_i}},
+                    object{{"amount"s, static_cast<integer_type>(1)}},
+                    object{{"amount"s, static_cast<integer_type>(-100)}},
+                }};
+                const auto query = parse_apply("aggregate(amount with min as Floor)"sv);
+                const auto result = apply_aggregation(docs, query);
+
+                then("Min is the true minimum including post-overflow values") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_true(rows[0]["Floor"s].is_integer());
+                    require_eq(static_cast<integer_type>(rows[0]["Floor"s]), -100);
+                };
+            };
+
+            when("Non-integral average of large integers uses exact int sum") = []
+            {
+                // 2^53+1 is not exact in double. Two copies plus 1: exact int
+                // sum is not divisible by 3, so average must not fall back to
+                // the corrupted double accumulator.
+                constexpr auto large = static_cast<integer_type>(9007199254740992LL + 1); // 2^53+1
+                auto docs = object{object::array{
+                    object{{"amount"s, large}},
+                    object{{"amount"s, large}},
+                    object{{"amount"s, static_cast<integer_type>(1)}},
+                }};
+                const auto query = parse_apply("aggregate(amount with average as Avg)"sv);
+                const auto result = apply_aggregation(docs, query);
+
+                then("Average matches quot + rem/count from int64 sum") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    const auto avg = static_cast<double>(
+                        static_cast<number_type>(rows[0]["Avg"s]));
+                    // (2*(2^53+1) + 1) / 3 = 6004799503160662 + 1/3
+                    constexpr auto expected = 6004799503160662.0 + 1.0 / 3.0;
+                    require_true(std::abs(avg - expected) < 1e-6);
+                };
+            };
         };
 
         given("An engine-backed collection") = []

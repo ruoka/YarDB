@@ -1836,6 +1836,22 @@ auto test_set()
             auto error = json::parse(body);
             require_true(error.has("message"s));
         };
+
+        section("GET $apply with $count=true is rejected not short-circuited") = [setup]
+        {
+            // $count=true must not win over $apply and return a bare document count.
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/orders?$apply=aggregate(amount%20with%20sum%20as%20Total)&$count=true"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().contains("$count"s));
+        };
     };
 
     test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes, [yardb]") = []

@@ -709,8 +709,12 @@ private:
             const auto id = utils::stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
+            auto revision = yar::db::document_revision{};
 
-            const auto found = m_engine.read(ctx.collection, selector, documents);
+            // Body + revision must be captured under one engine lock. A separate
+            // metadata_position/timestamp after read can observe a newer write and
+            // emit a stale body with a fresh ETag, defeating If-Match.
+            const auto found = m_engine.read(ctx.collection, selector, documents, revision);
 
             // Check if document was found
             if(not found or documents.get<xson::object::array>().empty())
@@ -730,15 +734,12 @@ private:
             // Add OData metadata if requested
             yar::http::odata::add_metadata_if_requested(document, headers, ctx.collection, id);
             
-            // Get actual document modification time and position from metadata
             auto response_headers = ::http::headers{};
-            auto metadata_timestamp = m_engine.metadata_timestamp(ctx.collection, selector);
-            auto metadata_position = m_engine.metadata_position(ctx.collection, selector);
             
-            // Generate ETag from position
-            if(metadata_position.has_value())
+            // Generate ETag from the revision that produced this body
+            if(revision.position.has_value())
             {
-                const auto etag = generate_etag(metadata_position.value());
+                const auto etag = generate_etag(revision.position.value());
                 response_headers.set("etag"s, etag);
                 
                 // Check If-None-Match conditional request (for GET/HEAD)
@@ -746,22 +747,22 @@ private:
                 if(none_match_check.has_value() and not none_match_check.value())
                 {
                     // ETag matches - resource not modified, return 304 Not Modified
-                    if(metadata_timestamp.has_value())
+                    if(revision.timestamp.has_value())
                     {
-                        const auto last_modified = format_http_date(metadata_timestamp.value());
+                        const auto last_modified = format_http_date(revision.timestamp.value());
                         response_headers.set("last-modified"s, last_modified);
                     }
                     return response_with_headers{status_not_modified, ""s, std::make_optional(response_headers)};
                 }
             }
             
-            if(metadata_timestamp.has_value())
+            if(revision.timestamp.has_value())
             {
-                const auto last_modified = format_http_date(metadata_timestamp.value());
+                const auto last_modified = format_http_date(revision.timestamp.value());
                 response_headers.set("last-modified"s, last_modified);
                 
                 // Check If-Modified-Since conditional request
-                const auto modified_check = check_if_modified_since(headers, metadata_timestamp.value());
+                const auto modified_check = check_if_modified_since(headers, revision.timestamp.value());
                 if(modified_check.has_value() and not modified_check.value())
                 {
                     // Document not modified since client's date - return 304 Not Modified
@@ -1296,7 +1297,9 @@ private:
             {
                 // Persist the request body only — OData response annotations are
                 // added after replace, matching POST/PATCH.
-                const auto replaced = m_engine.replace(collection, selector, document, preconditions);
+                auto revision = yar::db::document_revision{};
+                const auto replaced = m_engine.replace(
+                    collection, selector, document, preconditions, &revision);
                 if(not replaced)
                     return database_error_response(replaced.error());
                 if(*replaced == 0)
@@ -1314,10 +1317,9 @@ private:
                         std::optional<::http::headers>{}};
                 }
 
-                auto new_metadata_position = m_engine.metadata_position(collection, selector);
-                if(new_metadata_position.has_value())
+                if(revision.position.has_value())
                 {
-                    auto new_etag = generate_etag(new_metadata_position.value());
+                    auto new_etag = generate_etag(revision.position.value());
                     response_headers.set("etag"s, new_etag);
                 }
 
@@ -1340,14 +1342,14 @@ private:
 
             {
                 // Document doesn't exist - create it (response metadata only after persist)
-                const auto created = m_engine.create(collection, document);
+                auto revision = yar::db::document_revision{};
+                const auto created = m_engine.create(collection, document, &revision);
                 if(not created)
                     return database_error_response(created.error());
 
-                auto new_metadata_position = m_engine.metadata_position(collection, selector);
-                if(new_metadata_position.has_value())
+                if(revision.position.has_value())
                 {
-                    auto new_etag = generate_etag(new_metadata_position.value());
+                    auto new_etag = generate_etag(revision.position.value());
                     response_headers.set("etag"s, new_etag);
                 }
 
@@ -1399,7 +1401,9 @@ private:
             }
 
             const auto preconditions = write_preconditions_from_headers(headers);
-            const auto updated = m_engine.update(collection, selector, updates, documents, preconditions);
+            auto revision = yar::db::document_revision{};
+            const auto updated = m_engine.update(
+                collection, selector, updates, documents, preconditions, &revision);
             if(not updated)
                 return database_error_response(updated.error());
             if(*updated == 0)
@@ -1440,11 +1444,10 @@ private:
             auto response_headers = ::http::headers{};
             response_headers.set("content-location"s, "/"s + collection + "/"s + std::to_string(id));
             
-            // Get new ETag after update
-            auto new_metadata_position = m_engine.metadata_position(collection, selector);
-            if(new_metadata_position.has_value())
+            // ETag from the revision written with this update (not a later re-read)
+            if(revision.position.has_value())
             {
-                auto new_etag = generate_etag(new_metadata_position.value());
+                auto new_etag = generate_etag(revision.position.value());
                 response_headers.set("etag"s, new_etag);
             }
             

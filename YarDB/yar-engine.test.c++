@@ -1424,6 +1424,98 @@ auto test_set()
             require_eq(failures.load(), 0);
         };
 
+        section("ReadRevisionMatchesReturnedBodyUnderConcurrentReplace") = []
+        {
+            // Separate read() + metadata_position() can observe body from v1 and
+            // position from v2. Atomic read(..., revision) must keep them aligned
+            // so If-Match cannot be minted for a body the client never saw.
+            const auto test_file = "./engine_revision_toctou_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            constexpr auto collection = "RevisionToctou"s;
+
+            auto seed = object{{"value"s, 0ll}};
+            auto create_revision = yar::db::document_revision{};
+            require_true(engine.create(collection, seed, &create_revision).has_value());
+            require_true(create_revision.position.has_value());
+            const auto id = static_cast<xson::integer_type>(seed["_id"s]);
+            const auto selector = object{{"_id"s, id}};
+
+            auto mismatches = std::atomic<int>{0};
+            auto stop = std::atomic<bool>{false};
+            auto writer = std::jthread{[&]
+            {
+                auto next = 1ll;
+                while(not stop.load(std::memory_order_relaxed))
+                {
+                    auto replacement = object{{"_id"s, id}, {"value"s, next}};
+                    if(engine.replace(collection, selector, replacement).has_value())
+                        ++next;
+                }
+            }};
+
+            for(auto i = 0; i < 400; ++i)
+            {
+                auto documents = object{};
+                auto revision = yar::db::document_revision{};
+                require_true(engine.read(collection, selector, documents, revision));
+                require_true(revision.position.has_value());
+                require_false(documents.get<object::array>().empty());
+                const auto returned_value =
+                    static_cast<xson::integer_type>(documents[0]["value"s]);
+
+                using xson::fson::operator >>;
+                auto storage = std::ifstream{test_file, std::ios::binary};
+                require_true(storage.is_open());
+                storage.seekg(*revision.position, storage.beg);
+                auto metadata = yar::db::metadata{};
+                auto on_disk = object{};
+                storage >> metadata >> on_disk;
+                require_false(storage.fail());
+                if(static_cast<xson::integer_type>(on_disk["value"s]) != returned_value)
+                    ++mismatches;
+            }
+
+            stop.store(true, std::memory_order_relaxed);
+            writer.join();
+            require_eq(mismatches.load(), 0);
+        };
+
+        section("WriteRevisionMatchesCreatedAndReplacedPositions") = []
+        {
+            const auto test_file = "./engine_write_revision_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            constexpr auto collection = "WriteRevision"s;
+
+            auto document = object{{"name"s, "alpha"s}};
+            auto created_revision = yar::db::document_revision{};
+            require_true(engine.create(collection, document, &created_revision).has_value());
+            require_true(created_revision.position.has_value());
+            require_true(created_revision.timestamp.has_value());
+            const auto id = static_cast<xson::integer_type>(document["_id"s]);
+            const auto selector = object{{"_id"s, id}};
+            require_eq(*created_revision.position, *engine.metadata_position(collection, selector));
+
+            auto replacement = object{{"_id"s, id}, {"name"s, "beta"s}};
+            auto replaced_revision = yar::db::document_revision{};
+            require_true(
+                engine.replace(collection, selector, replacement, {}, &replaced_revision).has_value());
+            require_true(replaced_revision.position.has_value());
+            require_true(*replaced_revision.position != *created_revision.position);
+            require_eq(*replaced_revision.position, *engine.metadata_position(collection, selector));
+
+            auto documents = object{};
+            auto updated_revision = yar::db::document_revision{};
+            auto updates = object{{"name"s, "gamma"s}};
+            require_true(
+                engine.update(
+                    collection, selector, updates, documents, {}, &updated_revision).has_value());
+            require_true(updated_revision.position.has_value());
+            require_eq(*updated_revision.position, *engine.metadata_position(collection, selector));
+            require_eq(static_cast<string>(documents[0]["name"s]), "gamma"s);
+        };
+
         section("WritePreconditionRejectsStalePosition") = []
         {
             const auto test_file = "./engine_precondition_test.db";

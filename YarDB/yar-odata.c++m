@@ -304,10 +304,71 @@ inline void intersect_in_maps(xson::object& target, const xson::object& source)
     target = std::move(kept);
 }
 
+inline void add_unique_map_value(xson::object& values, const xson::object& value)
+{
+    const auto present = std::ranges::any_of(
+        values.get<db::object::map>(),
+        [&](const auto& entry) { return entry.second == value; });
+    if(not present)
+        values[std::to_string(values.size())] = value;
+}
+
+inline void union_nin_maps(xson::object& target, const xson::object& source)
+{
+    for(const auto& [_, value] : source.get<db::object::map>())
+        add_unique_map_value(target, value);
+}
+
+// Promote a lone $ne into $nin (or add into an existing $nin) so AND of several
+// inequalities can exclude every listed value. xson match supports one $ne key
+// and a $nin membership map.
+inline void merge_ne_into_nin(xson::object& target, const xson::object& excluded)
+{
+    if(target.has("$nin"s) and target["$nin"s].has_objects())
+    {
+        add_unique_map_value(target["$nin"s], excluded);
+        return;
+    }
+
+    if(target.has("$ne"s) and target["$ne"s] != excluded)
+    {
+        auto nin = xson::object{};
+        add_unique_map_value(nin, target["$ne"s]);
+        add_unique_map_value(nin, excluded);
+        target.get<db::object::map>().erase("$ne"s);
+        target["$nin"s] = std::move(nin);
+        return;
+    }
+
+    target["$ne"s] = excluded;
+}
+
+inline void merge_nin_constraint(xson::object& target, const xson::object& nin_values)
+{
+    if(target.has("$nin"s) and target["$nin"s].has_objects())
+    {
+        union_nin_maps(target["$nin"s], nin_values);
+        return;
+    }
+
+    if(target.has("$ne"s))
+    {
+        auto nin = xson::object{};
+        add_unique_map_value(nin, target["$ne"s]);
+        union_nin_maps(nin, nin_values);
+        target.get<db::object::map>().erase("$ne"s);
+        target["$nin"s] = std::move(nin);
+        return;
+    }
+
+    target["$nin"s] = nin_values;
+}
+
 // Merge $op maps on one field. Contradictory equalities become an impossible
 // predicate so `status eq 'a' and status eq 'b'` matches nothing. Same-operator
 // ranges tighten (max lower / min upper) instead of last-write-wins. Same-field
-// $in AND intersects membership sets instead of last-write-wins.
+// $in AND intersects membership sets instead of last-write-wins. Same-field $ne
+// AND unions exclusions into $nin instead of last-write-wins.
 inline void merge_operator_constraint_maps(xson::object& target, const xson::object& source)
 {
     if(target.has("$eq"s) and source.has("$eq"s) and target["$eq"s] != source["$eq"s])
@@ -319,6 +380,18 @@ inline void merge_operator_constraint_maps(xson::object& target, const xson::obj
 
     for(const auto& [key, value] : source.get<db::object::map>())
     {
+        if(key == "$ne"s)
+        {
+            merge_ne_into_nin(target, value);
+            continue;
+        }
+
+        if(key == "$nin"s and value.has_objects())
+        {
+            merge_nin_constraint(target, value);
+            continue;
+        }
+
         if(not target.has(key))
         {
             target[key] = value;

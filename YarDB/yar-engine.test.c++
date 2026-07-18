@@ -1195,6 +1195,119 @@ auto test_set()
             require_eq(all.size(), 1u);
             require_eq(static_cast<string>(all[0]["name"s]), "bob"s);
         };
+
+        section("DualLiveYarexportLiveOmitsStalePreImage") = []
+        {
+            // Same crash window as DualLiveCrashRecovery, but export --live
+            // without a prior engine reopen. Raw status=created scanning would
+            // emit both alice and bob; engine-backed --live must emit only bob.
+            const auto test_file = "./engine_dual_live_yarexport_test.db";
+            const auto export_file = "./engine_dual_live_yarexport_test.live.jsonl";
+            const auto setup = fixture{test_file};
+            filesystem::remove(export_file);
+
+            constexpr auto collection = "DualLiveExport"s;
+            const auto prior_position = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index(collection, {"name"s}).has_value());
+                auto document = object{{"name"s, "alice"s}};
+                require_true(engine.create(collection, document).has_value());
+                const auto id = static_cast<xson::integer_type>(document["_id"s]);
+                const auto selector = object{{"_id"s, id}};
+                const auto position = engine.metadata_position(collection, selector);
+                require_true(position.has_value());
+
+                auto updates = object{{"name"s, "bob"s}};
+                require_true(engine.update(collection, selector, updates).has_value());
+                return *position;
+            }();
+
+            {
+                auto storage = std::fstream{
+                    test_file,
+                    std::ios::out | std::ios::in | std::ios::binary};
+                require_true(storage.is_open());
+                storage.seekp(prior_position, storage.beg);
+                storage << yar::db::metadata{yar::db::metadata::created};
+                require_false(storage.fail());
+                storage.flush();
+            }
+
+            // Confirm the crash window is still dual-live on disk before export.
+            {
+                using xson::fson::operator >>;
+                auto created = 0;
+                auto storage = std::ifstream{test_file, std::ios::binary};
+                require_true(storage.is_open());
+                while(storage)
+                {
+                    auto metadata = yar::db::metadata{};
+                    auto document = object{};
+                    storage >> metadata >> document;
+                    if(not storage)
+                        break;
+                    if(metadata.collection == collection
+                        and metadata.status == yar::db::metadata::created)
+                        ++created;
+                }
+                require_eq(created, 2);
+            }
+
+            auto yarexport_bin = optional<string>{};
+            if(const auto* env = getenv("YAREXPORT_BIN"); env != nullptr and *env != '\0')
+                yarexport_bin = string{env};
+            else
+            {
+                for(const auto candidate : {
+                        "./build-linux-debug/bin/yarexport"sv,
+                        "./build-darwin-debug/bin/yarexport"sv,
+                        "./build-linux-release/bin/yarexport"sv,
+                        "./build-darwin-release/bin/yarexport"sv})
+                {
+                    error_code ec{};
+                    if(filesystem::exists(candidate, ec))
+                    {
+                        yarexport_bin = string{candidate};
+                        break;
+                    }
+                }
+            }
+            require_true(yarexport_bin.has_value());
+
+            const auto command =
+                *yarexport_bin
+                + " --file="s + test_file
+                + " --live > "s + export_file;
+            require_eq(std::system(command.c_str()), 0);
+
+            auto live_rows = 0;
+            auto saw_bob = false;
+            auto saw_alice = false;
+            auto input = std::ifstream{export_file};
+            require_true(input.is_open());
+            for(auto line = string{}; std::getline(input, line);)
+            {
+                if(line.empty())
+                    continue;
+                const auto row = json::parse(line);
+                require_true(row.has("collection"s));
+                require_true(row.has("document"s));
+                if(static_cast<string>(row["collection"s]) != collection)
+                    continue;
+                ++live_rows;
+                const auto name = static_cast<string>(row["document"s]["name"s]);
+                if(name == "bob"s)
+                    saw_bob = true;
+                if(name == "alice"s)
+                    saw_alice = true;
+            }
+
+            require_eq(live_rows, 1);
+            require_true(saw_bob);
+            require_false(saw_alice);
+            filesystem::remove(export_file);
+        };
     };
     return true;
 }

@@ -508,7 +508,7 @@ yarexport [--help] [--file=<name>] [--live]
 ### Options
 
 - `--file=<name>` - Database file to export (default: `yar.db`)
-- `--live` - Export only current documents (`status=created`); omit history, tombstones, and file positions
+- `--live` - Export only current documents via the database engine (heals dual-live crash windows); omit history, tombstones, and file positions
 - `--help` - Display usage information
 
 ### Output Format

@@ -72,6 +72,7 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 - Response for aggregate/groupby is a JSON **array** of group objects, e.g. `[{"status":"active","Total":42},…]`.
 - Group keys and compute operands are top-level fields only (no `Customer/Country` yet).
 - Aggregate methods: `sum`, `average`, `min`, `max`. Compute ops: `add`, `sub`, `mul`, `div`.
+- Compute/aggregate aliases cannot be `_id` (**422**). `filter(...)` / `compute(...)` / `aggregate(...)` / `groupby(...)` require a balanced closing `)` with no trailing junk.
 
 ```bash
 curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((status),aggregate(amount%20with%20sum%20as%20Total))"

@@ -2799,6 +2799,68 @@ auto register_odata_tests()
                     require_true(result.get<object::array>()[0]["Unit"s].is_null());
                 };
             };
+
+            when("Compute alias _id is rejected") = []
+            {
+                then("parse_compute throws") = []
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_compute("Price mul Qty as _id"sv);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains("_id"s));
+                    }
+                    require_true(threw);
+                };
+            };
+        };
+
+        given("Malformed filter(...) with trailing OR outside the call") = []
+        {
+            when("Parsing filter(a) or (b)/groupby(...)") = []
+            {
+                // Naive ends_with(')') + strip treated the final ')' of the
+                // trailing OR as the filter closer and silently produced a
+                // filter that matched nothing (200 + []).
+                then("parse_apply rejects trailing content after filter(...)") = []
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_apply(
+                            "filter(status eq 'active') or (status eq 'pending')/groupby((country),aggregate(amount with sum as Total))"sv);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains("Trailing"s));
+                    }
+                    require_true(threw);
+                };
+            };
+        };
+
+        given("Parenthesized OR inside filter(...)") = []
+        {
+            when("Parsing a balanced filter with nested parens") = []
+            {
+                const auto pipeline = parse_apply(
+                    "filter((status eq 'active') or (status eq 'pending'))/groupby((country),aggregate(amount with sum as Total))"sv);
+
+                then("Filter OR branches are preserved") = [pipeline]
+                {
+                    require_eq(pipeline.steps.size(), 2u);
+                    require_eq(
+                        static_cast<int>(pipeline.steps[0].kind),
+                        static_cast<int>(apply_step_kind::filter));
+                    require_true(pipeline.steps[0].filter.has_or());
+                    require_eq(pipeline.steps[0].filter.or_branches.size(), 2u);
+                };
+            };
         };
     };
 

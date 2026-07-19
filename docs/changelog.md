@@ -21,6 +21,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **`$apply` transform pipeline** | Slash-separated `filter(...)` / `compute(...)` / `groupby(...)` / `aggregate(...)` (e.g. `filter(status eq 'active')/groupby((country),aggregate(...))`) |
 | **`$compute` query option** | `$compute=Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div` on top-level numerics); before `$filter`/`$select`/paging; not combinable with `$apply` |
 | **`$compute` before `$filter`/`$count`** | `$filter=LineTotal gt 10` (and `$count=true` with that filter) sees aliases from `$compute=… as LineTotal` instead of silently matching only stored fields |
+| **`$apply` balanced `filter(...)` / reserved `_id` alias** | Trailing junk after `filter(...)` (e.g. `filter(a eq 1) or (b eq 2)`) is rejected instead of silently matching nothing; compute/aggregate aliases cannot be `_id` |
 | **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |
 | **Same-operator range AND** | `age gt 20 and age gt 10` keeps the tighter bound (`$gt:20`) instead of last-write-wins loosening the filter |
 | **Same-field `$in` AND** | `status in ('a','b') and status in ('b','c')` intersects membership (`b` only) instead of last-write-wins keeping the second list |

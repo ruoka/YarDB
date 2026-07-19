@@ -111,7 +111,7 @@ inline auto add_metadata_to_array(xson::object document, metadata_level level,
         auto& items = wrapped["value"s].get<xson::object::array>();
         for(auto& item : items)
         {
-            if(item.has("_id"s))
+            if(item.has("_id"s) and item["_id"s].is_integer())
             {
                 const xson::integer_type item_id = item["_id"s];
                 item = add_metadata(item, level, collection_name, item_id);
@@ -1318,7 +1318,7 @@ export inline void merge_or_branch_documents(
 
     for(const auto& doc : branch_docs.get<xson::object::array>())
     {
-        if(not doc.has("_id"s))
+        if(not doc.has("_id"s) or not doc["_id"s].is_integer())
             continue;
 
         const xson::integer_type id = doc["_id"s];
@@ -1412,7 +1412,9 @@ export inline auto filter_documents_by_or(
         }))
             continue;
 
-        if(doc.has("_id"s))
+        // Only integer primary keys participate in dedupe. Non-integer `_id`
+        // (e.g. a corrupted compute alias) must not throw via integer cast.
+        if(doc.has("_id"s) and doc["_id"s].is_integer())
         {
             const xson::integer_type id = doc["_id"s];
             if(not seen_ids.insert(id).second)
@@ -1826,6 +1828,81 @@ inline void validate_apply_identifier(std::string_view name, std::string_view wh
     }
 }
 
+// Compute/aggregate aliases must not overwrite the reserved primary key: post-compute
+// `$filter` dedupes via integer `_id` casts (bad_variant_access / silent drops).
+inline void validate_apply_alias(std::string_view alias, std::string_view what)
+{
+    validate_apply_identifier(alias, what);
+    if(alias == yar::db::reserved_field_id)
+        throw std::invalid_argument{std::string{what} + " cannot be _id"};
+}
+
+// Extract `inner` from `prefix(inner)` where `prefix` ends with '('.
+// The matching close paren must be the final character — naive `ends_with(')')`
+// + strip accepted `filter(a eq 1) or (b eq 2)` and silently mis-parsed it.
+inline std::string_view extract_apply_function_args(
+    std::string_view text,
+    std::string_view prefix)
+{
+    if(prefix.empty() or prefix.back() != '(' or not text.starts_with(prefix))
+        throw std::invalid_argument{"Invalid apply function expression"};
+
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+    auto depth = 0;
+    const auto open_idx = prefix.size() - 1;
+
+    for(auto i = open_idx; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+
+        if(in_quote)
+        {
+            if(c == quote_char
+                and i + 1 < text.size()
+                and text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+
+            if(c == quote_char)
+                in_quote = false;
+
+            continue;
+        }
+
+        if(c == '\'' or c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+
+        if(c == '(')
+        {
+            ++depth;
+            continue;
+        }
+
+        if(c == ')')
+        {
+            if(depth == 0)
+                throw std::invalid_argument{"Unbalanced ')' in apply function expression"};
+            --depth;
+            if(depth == 0)
+            {
+                if(i + 1 != text.size())
+                    throw std::invalid_argument{
+                        "Trailing content after apply function closing ')'"};
+                return utils::trim(text.substr(prefix.size(), i - prefix.size()));
+            }
+        }
+    }
+
+    throw std::invalid_argument{"Unbalanced '(' in apply function expression"};
+}
+
 inline aggregate_method parse_aggregate_method(std::string_view token)
 {
     if(token == "sum"sv)
@@ -1845,9 +1922,9 @@ export inline aggregate_clause parse_aggregate_clause(std::string_view expr)
 {
     auto text = utils::trim(expr);
     constexpr auto prefix = "aggregate("sv;
-    if(not text.starts_with(prefix) or not text.ends_with(')'))
+    if(not text.starts_with(prefix))
         throw std::invalid_argument{"Invalid aggregate(...) expression"};
-    auto inner = utils::trim(text.substr(prefix.size(), text.size() - prefix.size() - 1));
+    auto inner = extract_apply_function_args(text, prefix);
     constexpr auto with_tok = " with "sv;
     constexpr auto as_tok = " as "sv;
     const auto with_pos = inner.find(with_tok);
@@ -1861,7 +1938,7 @@ export inline aggregate_clause parse_aggregate_clause(std::string_view expr)
     auto method_tok = utils::trim(rest.substr(0, as_pos));
     auto alias = utils::trim(rest.substr(as_pos + as_tok.size()));
     validate_apply_identifier(field, "$apply aggregate field");
-    validate_apply_identifier(alias, "$apply aggregate alias");
+    validate_apply_alias(alias, "$apply aggregate alias");
     return aggregate_clause{std::string{field}, parse_aggregate_method(method_tok), std::string{alias}};
 }
 
@@ -1890,7 +1967,7 @@ export inline compute_clause parse_compute_clause(std::string_view expr)
         throw std::invalid_argument{"compute requires '<left> <op> <right> as <alias>'"};
     auto alias = utils::trim(text.substr(*as_pos + as_tok.size()));
     auto body = utils::trim(text.substr(0, *as_pos));
-    validate_apply_identifier(alias, "$compute alias");
+    validate_apply_alias(alias, "$compute alias");
 
     constexpr auto ops = std::array{" mul "sv, " add "sv, " sub "sv, " div "sv};
     std::optional<std::size_t> op_pos;
@@ -1947,11 +2024,11 @@ inline apply_query parse_apply_aggregate_segment(std::string_view apply_expr)
     }
 
     constexpr auto gb = "groupby("sv;
-    if(not text.starts_with(gb) or not text.ends_with(')'))
+    if(not text.starts_with(gb))
         throw std::invalid_argument{
             "$apply supports filter(...)/compute(...)/groupby((field),aggregate(...)) or aggregate(...)"};
 
-    auto inner = utils::trim(text.substr(gb.size(), text.size() - gb.size() - 1));
+    auto inner = extract_apply_function_args(text, gb);
     if(not inner.starts_with('('))
         throw std::invalid_argument{"$apply groupby requires ((field),aggregate(...))"};
     const auto field_end = inner.find(')');
@@ -1975,9 +2052,9 @@ inline apply_step parse_apply_segment(std::string_view segment)
         throw std::invalid_argument{"$apply pipeline segment cannot be empty"};
 
     constexpr auto filter_prefix = "filter("sv;
-    if(text.starts_with(filter_prefix) and text.ends_with(')'))
+    if(text.starts_with(filter_prefix))
     {
-        auto inner = utils::trim(text.substr(filter_prefix.size(), text.size() - filter_prefix.size() - 1));
+        auto inner = extract_apply_function_args(text, filter_prefix);
         return apply_step{
             apply_step_kind::filter,
             parse_filter(inner),
@@ -1986,9 +2063,9 @@ inline apply_step parse_apply_segment(std::string_view segment)
     }
 
     constexpr auto compute_prefix = "compute("sv;
-    if(text.starts_with(compute_prefix) and text.ends_with(')'))
+    if(text.starts_with(compute_prefix))
     {
-        auto inner = utils::trim(text.substr(compute_prefix.size(), text.size() - compute_prefix.size() - 1));
+        auto inner = extract_apply_function_args(text, compute_prefix);
         return apply_step{
             apply_step_kind::compute,
             {},

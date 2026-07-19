@@ -2526,6 +2526,43 @@ auto register_odata_tests()
                 };
             };
 
+            when("Grouping by mixed integer and floating JSON numbers") = []
+            {
+                // JSON `1` stores as integer_type; `1.0` as number_type.
+                // Splitting them under groupby disagrees with $filter/`match`
+                // (primitive_equal) and under-counts per-group aggregates.
+                auto docs = object{object::array{
+                    object{{"region"s, static_cast<integer_type>(1)}, {"amount"s, 100}},
+                    object{{"region"s, 1.0}, {"amount"s, 50}},
+                    object{{"region"s, static_cast<integer_type>(2)}, {"amount"s, 7}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((region),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("1 and 1.0 form one group with summed Total") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 2u);
+
+                    auto totals = std::map<integer_type, integer_type>{};
+                    for(const auto& row : rows)
+                    {
+                        const auto region = [&]() -> integer_type
+                        {
+                            if(row["region"s].is_integer())
+                                return static_cast<integer_type>(row["region"s]);
+                            return static_cast<integer_type>(
+                                static_cast<number_type>(row["region"s]));
+                        }();
+                        totals[region] = static_cast<integer_type>(row["Total"s]);
+                    }
+                    require_eq(totals[1], 150);
+                    require_eq(totals[2], 7);
+                };
+            };
+
             when("Applying whole-set aggregate without groupby") = []
             {
                 auto docs = object{object::array{

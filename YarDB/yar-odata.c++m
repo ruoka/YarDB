@@ -2118,7 +2118,23 @@ inline std::string group_key_string(const xson::object& value)
     if(value.is_integer())
         return "\0i:"s + std::to_string(static_cast<xson::integer_type>(value));
     if(value.is_number())
-        return "\0n:"s + std::format("{}", static_cast<xson::number_type>(value));
+    {
+        const auto n = static_cast<xson::number_type>(value);
+        // JSON `1` is integer_type and `1.0` is number_type. $filter uses
+        // primitive_equal (cross-type), so they match — groupby must too.
+        // Only normalize exact values inside the safe double mantissa so the
+        // int64 cast cannot lose bits or hit undefined conversion near ±2^63.
+        constexpr auto max_safe_int = 9007199254740992.0; // 2^53
+        constexpr auto min_safe_int = -9007199254740992.0;
+        if(std::isfinite(n)
+            and std::floor(n) == n
+            and n >= min_safe_int
+            and n <= max_safe_int)
+        {
+            return "\0i:"s + std::to_string(static_cast<xson::integer_type>(n));
+        }
+        return "\0n:"s + std::format("{}", n);
+    }
     if(value.is_string())
         return "\0s:"s + static_cast<std::string>(value);
     return "\0other"s;

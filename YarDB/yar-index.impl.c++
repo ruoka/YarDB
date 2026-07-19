@@ -325,12 +325,21 @@ yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
         std::ranges::crend(m_primary_keys)};
 }
 
-void yar::db::index::update(yar::db::object& document)
+bool yar::db::index::update(yar::db::object& document)
 {
     if(document.has("_id"s))
+    {
         m_sequence = std::max<yar::db::sequence_type>(m_sequence, document["_id"s]);
-    else
-        document["_id"s] = ++m_sequence;
+        return true;
+    }
+
+    // Client-/import-supplied _id of INT64_MAX raises m_sequence to the limit.
+    // A further auto-id create must not execute ++m_sequence (signed overflow).
+    if(m_sequence == std::numeric_limits<yar::db::sequence_type>::max())
+        return false;
+
+    document["_id"s] = ++m_sequence;
+    return true;
 }
 
 bool yar::db::index::contains_id(yar::db::primary_key_type id) const

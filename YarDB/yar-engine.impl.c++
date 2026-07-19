@@ -408,7 +408,7 @@ void yar::db::engine::setup_index_structure()
         if(m_storage.fail())
             break;
 
-        m_index[metadata.collection].update(document);
+        std::ignore = m_index[metadata.collection].update(document);
 
         if(metadata.collection == "_db"s)
         {
@@ -481,7 +481,7 @@ yar::db::db_result<> yar::db::engine::reindex()
         }
 
         auto& rebuilt_index = rebuilt[metadata.collection];
-        rebuilt_index.update(document);
+        std::ignore = rebuilt_index.update(document);
         if(metadata.status != metadata::deleted and metadata.status != metadata::updated)
         {
             // Rebuilds must not mutate durable statuses; reopen already heals
@@ -621,7 +621,11 @@ yar::db::db_result<> yar::db::engine::create_impl(
     auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
-    index.update(document);
+    if(not index.update(document))
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::create,
+            "Document _id sequence exhausted"s)};
     m_storage << metadata << document;
     m_storage.flush();
     if(m_storage.fail())
@@ -970,7 +974,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
             break;
 
         staged_index.erase(entry.old_document);
-        staged_index.update(entry.new_document);
+        std::ignore = staged_index.update(entry.new_document);
         m_storage.clear();
         m_storage.seekp(0, m_storage.end);
         m_storage << entry.metadata_record << entry.new_document;
@@ -1372,7 +1376,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             db_operation::replace,
             "Document with _id "s + std::to_string(new_id) + " already exists"s)};
 
-    staged_index.update(document);
+    std::ignore = staged_index.update(document);
 
     auto metadata = *chain_metadata;
     m_storage.clear();

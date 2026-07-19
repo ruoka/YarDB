@@ -358,10 +358,13 @@ public:
     // @return Number of matching documents
     std::size_t count(std::istream& storage, const xson::object& selector) const;
 
-    // Update document and assign _id if missing
-    // Increments sequence counter for new _id assignment
+    // Update document and assign _id if missing.
+    // When _id is absent, increments the per-collection sequence. Returns false
+    // without modifying document when the sequence is already at INT64_MAX so
+    // callers avoid signed overflow on ++m_sequence.
     // @param document Document to update (may be modified to add _id)
-    void update(xson::object& document);
+    // @return false when an auto-assigned _id cannot be generated
+    [[nodiscard]] bool update(xson::object& document);
 
     // True when a live primary-key entry already exists for id
     bool contains_id(primary_key_type id) const;

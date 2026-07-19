@@ -1065,6 +1065,34 @@ auto test_set()
             require_eq(static_cast<string>(documents[0]["name"s]), "alice"s);
         };
 
+        section("CreateRejectsAutoIdAfterMaxSequence") = []
+        {
+            // Creating with _id == INT64_MAX saturates the per-collection
+            // sequence. A following auto-id create must return conflict rather
+            // than overflowing ++m_sequence inside index::update.
+            const auto test_file = "./engine_sequence_exhaust_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            constexpr auto collection = "SequenceExhaust"s;
+            constexpr auto max_id = std::numeric_limits<xson::integer_type>::max();
+
+            auto max_document = object{{"_id"s, max_id}, {"name"s, "ceiling"s}};
+            require_true(engine.create(collection, max_document).has_value());
+
+            auto next = object{{"name"s, "overflow"s}};
+            auto result = engine.create(collection, next);
+            require_false(result.has_value());
+            require_eq(result.error().code, yar::db::db_error_code::conflict);
+            require_false(next.has("_id"s));
+
+            auto documents = object{};
+            require_true(engine.read(collection, object{}, documents));
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(
+                static_cast<xson::integer_type>(documents[0]["_id"s]),
+                max_id);
+        };
+
         section("CreateAllowsPreservedIdWhenAbsent") = []
         {
             const auto test_file = "./engine_preserved_id_test.db";

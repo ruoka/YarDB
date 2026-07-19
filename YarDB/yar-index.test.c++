@@ -42,7 +42,8 @@ public:
         using xson::fson::operator<<;
 
         auto metadata = yar::db::metadata{"index_test"s};
-        m_index.update(doc);
+        if(not m_index.update(doc))
+            throw std::logic_error("index::update failed to assign _id");
         m_storage.seekp(0, ios::end);
         const auto position = m_storage.tellp();
         m_index.insert(doc, position);
@@ -285,6 +286,20 @@ auto test_set()
                 {"Customer"s, object{{"Country"s, "UK"s}}}
             };
             require_eq(fixture.count(nested_uk), 1u);
+        };
+
+        section("UpdateRejectsAutoIdWhenSequenceIsExhausted") = []
+        {
+            // A client-supplied _id of INT64_MAX advances m_sequence to the
+            // limit. The next auto-id assignment must fail instead of
+            // overflowing signed ++m_sequence.
+            auto index = yar::db::index{};
+            auto max_id = object{{"_id"s, std::numeric_limits<xson::integer_type>::max()}};
+            require_true(index.update(max_id));
+
+            auto auto_id = object{{"name"s, "next"s}};
+            require_false(index.update(auto_id));
+            require_false(auto_id.has("_id"s));
         };
     };
 

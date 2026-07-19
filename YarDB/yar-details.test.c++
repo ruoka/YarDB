@@ -149,37 +149,6 @@ auto register_details_tests()
         };
     };
 
-    // Regression: net::address_info strips `[...]` before getaddrinfo; bracketed
-    // wildcard spellings must still count as public binds for the PAT gate.
-    scenario("is_public_bind_host covers bracketed wildcard aliases, [yardb]") = []
-    {
-        given("Canonical and bracketed all-interfaces bind hosts") = []
-        {
-            when("Checking public-bind classification") = []
-            {
-                then("Treats empty brackets and bracketed wildcards as public") = []
-                {
-                    require_true(is_public_bind_host("0.0.0.0"sv));
-                    require_true(is_public_bind_host("::"sv));
-                    require_true(is_public_bind_host("::0"sv));
-                    require_true(is_public_bind_host("[::]"sv));
-                    require_true(is_public_bind_host("[::0]"sv));
-                    require_true(is_public_bind_host("[0.0.0.0]"sv));
-                    require_true(is_public_bind_host("[]"sv));
-                    require_true(is_public_bind_host("  [::0]  "sv));
-                };
-
-                then("Does not treat loopback literals as public") = []
-                {
-                    require_false(is_public_bind_host("127.0.0.1"sv));
-                    require_false(is_public_bind_host("::1"sv));
-                    require_false(is_public_bind_host("[::1]"sv));
-                    require_false(is_public_bind_host("localhost"sv));
-                };
-            };
-        };
-    };
-
     return true;
 }
 

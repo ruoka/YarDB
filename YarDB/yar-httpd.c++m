@@ -105,6 +105,12 @@ inline auto ready_probe_body(server_state state) -> std::string
     }, 0);
 }
 
+// Public path classifier for PAT middleware (CLI / tests). Body stays in :details.
+export inline bool is_public_api_path(std::string_view uri)
+{
+    return yar::http::details::is_public_api_path(uri);
+}
+
 export class rest_api_server
 {
 public:

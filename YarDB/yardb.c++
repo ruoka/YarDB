@@ -146,7 +146,7 @@ auto validate_hashed_pat(const set<pat_hash>& hashed_values, string_view authori
 
 void validate_bind_policy(string_view bind_host, bool has_pat)
 {
-    if(yar::http::details::is_public_bind_host(bind_host) and not has_pat)
+    if(is_wildcard_bind_host(bind_host) and not has_pat)
         throw runtime_error{
             "refusing to bind to "s + string{bind_host}
             + " without PAT authentication; use --pat or --pat-file, or bind to 127.0.0.1"};
@@ -289,7 +289,7 @@ try
         }
 
         server.configure_authentication(
-            yar::http::details::is_public_api_path,
+            yar::http::is_public_api_path,
             std::move(validate_data),
             "YarDB API"sv,
             std::move(validate_admin)

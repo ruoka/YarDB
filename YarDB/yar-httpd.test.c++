@@ -4164,7 +4164,7 @@ auto test_set()
 
         const auto valid_pat = "Bearer smoke-test-pat"s;
         setup->get_server().configure_authentication(
-            yar::http::details::is_public_api_path,
+            yar::http::is_public_api_path,
             [valid_pat](string_view authorization) -> bool {
                 return authorization == valid_pat;
             },
@@ -4251,7 +4251,7 @@ auto test_set()
         const auto data_pat = "Bearer data-pat"s;
         const auto admin_pat = "Bearer admin-pat"s;
         setup->get_server().configure_authentication(
-            yar::http::details::is_public_api_path,
+            yar::http::is_public_api_path,
             [data_pat](string_view authorization) -> bool {
                 return authorization == data_pat;
             },

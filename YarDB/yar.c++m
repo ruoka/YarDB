@@ -1,5 +1,5 @@
 export module yar;
-export import :details;
+// :details stays internal — partitions/tests import :details; do not re-export.
 export import :httpd;
 export import :engine;
 export import :metadata;

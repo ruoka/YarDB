@@ -144,18 +144,9 @@ auto validate_hashed_pat(const set<pat_hash>& hashed_values, string_view authori
     return false;
 }
 
-auto is_public_bind(string_view host) -> bool
-{
-    const auto normalized = trim(host);
-    return normalized == "0.0.0.0"sv
-        or normalized == "::"sv
-        or normalized == "::0"sv
-        or normalized == "[::]"sv;
-}
-
 void validate_bind_policy(string_view bind_host, bool has_pat)
 {
-    if(is_public_bind(bind_host) and not has_pat)
+    if(yar::http::details::is_public_bind_host(bind_host) and not has_pat)
         throw runtime_error{
             "refusing to bind to "s + string{bind_host}
             + " without PAT authentication; use --pat or --pat-file, or bind to 127.0.0.1"};

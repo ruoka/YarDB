@@ -433,6 +433,25 @@ inline bool is_admin_api_path(std::string_view uri)
     return not segment.empty() and segment.starts_with('_');
 }
 
+// True when --bind would listen on a wildcard / all-interfaces address.
+// Must stay aligned with net::address_info: a matching `[...]` pair is stripped
+// before resolution, and empty / 0.0.0.0 / :: (/ ::0) become AI_PASSIVE ANY.
+inline auto is_public_bind_host(std::string_view host) -> bool
+{
+    auto normalized = utils::trim(host);
+    if(normalized.size() >= 2
+       and normalized.front() == '['
+       and normalized.back() == ']')
+    {
+        normalized.remove_prefix(1);
+        normalized.remove_suffix(1);
+    }
+    return normalized.empty()
+        or normalized == "0.0.0.0"sv
+        or normalized == "::"sv
+        or normalized == "::0"sv;
+}
+
 // Collection name validation
 inline auto validate_collection_name(std::string_view collection_name)
 {

@@ -192,9 +192,10 @@ YarDB implements OData-compliant query parameters for advanced querying:
 
 - **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.
 
-- **`$compute`** — project arithmetic aliases before `$select` / paging:
-  - Example: `GET /lines?$compute=Price mul Qty as LineTotal&$select=LineTotal`
+- **`$compute`** — project arithmetic aliases before `$filter` / `$select` / paging (OData evaluation order):
+  - Example: `GET /lines?$compute=Price mul Qty as LineTotal&$filter=LineTotal gt 10&$select=LineTotal`
   - Operators: `add`, `sub`, `mul`, `div` (top-level numeric fields)
+  - Works with `$count=true` (count after compute + optional `$filter` on aliases)
   - Not combined with `$apply` (422); use `compute(...)` inside `$apply` instead
 
 - **`$apply`** — slash-separated transform pipeline:

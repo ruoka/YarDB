@@ -2004,6 +2004,59 @@ auto test_set()
             require_false(row.has("Price"s));
         };
 
+        section("GET $compute before $filter on computed alias") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/cart"s,
+                    R"({"Price":10,"Qty":2,"name":"keep"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/cart"s,
+                    R"({"Price":1,"Qty":2,"name":"drop"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/cart?$compute=Price%20mul%20Qty%20as%20LineTotal&$filter=LineTotal%20gt%2010&$select=name,LineTotal"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 1u);
+            const auto& row = rows.get<object::array>()[0];
+            require_eq(row["name"s].get<string>(), "keep"s);
+            require_eq(static_cast<integer_type>(row["LineTotal"s]), 20);
+        };
+
+        section("GET $count with $compute filters on computed alias") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/billed"s,
+                    R"({"Price":10,"Qty":2})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/billed"s,
+                    R"({"Price":1,"Qty":2})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/billed?$count=true&$compute=Price%20mul%20Qty%20as%20LineTotal&$filter=LineTotal%20gt%2010"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            require_eq(body, "1"s);
+        };
+
         section("GET $compute with $apply is rejected") = [setup]
         {
             auto [status, reason, headers, body] = make_request(

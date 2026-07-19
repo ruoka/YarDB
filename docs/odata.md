@@ -14,7 +14,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$select` | Projection; `_id` always included |
 | `$count=true` | Returns a JSON number; works with `$filter` |
 | `$expand` | v1: `{singular}_id` → plural collection `_id` |
-| `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after filter/expand, before `$select` / paging |
+| `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
 | `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max` |
 
 ### `$filter`

@@ -854,6 +854,43 @@ private:
                 // Build selector for counting (without $top/$skip to get full count)
                 auto count_selector = xson::object{};
                 const auto collection_name = validate_collection_name(uri.path[1]);
+                // $compute runs before $filter (OData). Counting a computed alias such as
+                // `$count=true&$compute=Price mul Qty as LineTotal&$filter=LineTotal gt 10`
+                // must project first; the index/count path only sees stored fields.
+                if(params.contains("$compute"s))
+                {
+                    try
+                    {
+                        auto documents = xson::object{};
+                        m_engine.read(collection_name, count_selector, documents);
+                        const auto clauses = yar::http::odata::parse_compute(params["$compute"s]);
+                        documents = yar::http::odata::apply_compute(documents, clauses);
+                        if(params.contains("$filter"s))
+                        {
+                            const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
+                            documents = yar::http::odata::filter_documents_by_parsed(
+                                documents, parsed_filter);
+                        }
+                        const auto count = documents.is_array()
+                            ? documents.get<xson::object::array>().size()
+                            : std::size_t{0};
+                        return response_with_headers{
+                            ::http::status_ok,
+                            std::to_string(static_cast<long long>(count)),
+                            std::optional<::http::headers>{}};
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        auto error = xson::object{
+                            {"error", "Unprocessable Entity"s},
+                            {"message", std::string{e.what()}}
+                        };
+                        return response_with_headers{
+                            status_unprocessable_entity,
+                            xson::json::stringify(error),
+                            std::optional<::http::headers>{}};
+                    }
+                }
                 const auto count = [&]() -> std::size_t
                 {
                     if(params.contains("$filter"s))
@@ -932,9 +969,11 @@ private:
             }
             const auto collection_name = validate_collection_name(uri.path[1]);
 
-            // $compute must run before $orderby/$top/$skip (OData evaluation order).
-            // Strip paging from the engine selector and re-apply after compute.
+            // $compute must run before $filter/$orderby/$top/$skip (OData evaluation
+            // order). Strip paging from the engine selector and defer $filter when
+            // compute is present so aliases like LineTotal are visible to $filter.
             auto compute_paging = std::optional<yar::http::odata::query_paging>{};
+            auto deferred_filter = std::optional<yar::http::odata::parsed_filter>{};
             if(params.contains("$compute"s))
             {
                 compute_paging = yar::http::odata::extract_and_strip_paging(selector);
@@ -943,7 +982,16 @@ private:
             if(params.contains("$filter"s))
             {
                 const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
-                document = yar::http::odata::read_with_parsed_filter(m_engine, collection_name, selector, parsed_filter);
+                if(params.contains("$compute"s))
+                {
+                    deferred_filter = parsed_filter;
+                    m_engine.read(collection_name, selector, document);
+                }
+                else
+                {
+                    document = yar::http::odata::read_with_parsed_filter(
+                        m_engine, collection_name, selector, parsed_filter);
+                }
             }
             else
             {
@@ -956,7 +1004,7 @@ private:
                 document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
             }
 
-            // $compute after filter/read/expand, before select/page.
+            // $compute after read/expand, before filter/select/page.
             // Not combinable with $apply (rejected above).
             if(params.contains("$compute"s))
             {
@@ -964,6 +1012,11 @@ private:
                 {
                     const auto clauses = yar::http::odata::parse_compute(params["$compute"s]);
                     document = yar::http::odata::apply_compute(document, clauses);
+                    if(deferred_filter)
+                    {
+                        document = yar::http::odata::filter_documents_by_parsed(
+                            document, *deferred_filter);
+                    }
                     if(compute_paging)
                     {
                         if(not compute_paging->orderby_field.empty())

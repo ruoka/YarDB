@@ -298,7 +298,7 @@ inline auto split_property_path(std::string_view path)
         | std::views::split('/')
         | std::views::transform([](const auto part)
         {
-            return utils::trim_end_to_string(std::string_view{part});
+            return utils::trim_right_to_string(std::string_view{part});
         })
         | std::ranges::to<std::vector<std::string>>();
 
@@ -824,8 +824,8 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     if(not op_pos)
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
-    const auto field = utils::trim_end(expr.substr(0, *op_pos));
-    const auto value_view = utils::trim_start(expr.substr(*op_pos + op.size() + 1));
+    const auto field = utils::trim_right(expr.substr(0, *op_pos));
+    const auto value_view = utils::trim_left(expr.substr(*op_pos + op.size() + 1));
 
     // Validate field name is not empty
     if(field.empty())

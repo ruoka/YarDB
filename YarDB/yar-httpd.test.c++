@@ -1,5 +1,6 @@
 module yar;
 import :httpd;
+import :details; // internal partition — visible to module yar implementation TUs
 import tester;
 import std;
 import net;
@@ -12,7 +13,7 @@ using namespace std::string_literals;
 using namespace std::chrono_literals;
 using namespace net;
 using namespace xson;
-using namespace yar::http::details; // For stoll() and other details
+using namespace yar::http::details;
 
 class fixture
 {
@@ -4164,7 +4165,7 @@ auto test_set()
 
         const auto valid_pat = "Bearer smoke-test-pat"s;
         setup->get_server().configure_authentication(
-            yar::http::is_public_api_path,
+            is_public_api_path,
             [valid_pat](string_view authorization) -> bool {
                 return authorization == valid_pat;
             },
@@ -4251,7 +4252,7 @@ auto test_set()
         const auto data_pat = "Bearer data-pat"s;
         const auto admin_pat = "Bearer admin-pat"s;
         setup->get_server().configure_authentication(
-            yar::http::is_public_api_path,
+            is_public_api_path,
             [data_pat](string_view authorization) -> bool {
                 return authorization == data_pat;
             },

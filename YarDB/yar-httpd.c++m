@@ -997,15 +997,14 @@ private:
             {
                 m_engine.read(collection_name, selector, document);
             }
-            
-            // Expand before $select so *_id reference fields are still present.
-            if(params.contains("$expand"s))
-            {
-                document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
-            }
 
-            // $compute after read/expand, before filter/select/page.
-            // Not combinable with $apply (rejected above).
+            // OData order with $compute: compute → filter → orderby/skip/top →
+            // $expand → $select. Expanding before a deferred $filter made
+            // navigation properties visible to $filter (unlike the non-compute
+            // path, which filters then expands), so e.g.
+            // `$expand=customer&$filter=customer/name eq 'Acme'&$compute=…`
+            // over-matched ref-only documents. Keep expand before $select so
+            // `*_id` reference fields are still present for nesting.
             if(params.contains("$compute"s))
             {
                 try
@@ -1041,6 +1040,11 @@ private:
                         xson::json::stringify(error),
                         std::optional<::http::headers>{}};
                 }
+            }
+
+            if(params.contains("$expand"s))
+            {
+                document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
             }
 
             if(params.contains("$select"s))

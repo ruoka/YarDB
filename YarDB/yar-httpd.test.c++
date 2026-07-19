@@ -2068,6 +2068,51 @@ auto test_set()
             require_eq(static_cast<integer_type>(row["LineTotal"s]), 20);
         };
 
+        section("GET $compute+$expand+$filter does not match via expanded nav") = [setup]
+        {
+            // Without $compute, $filter runs before $expand so customer/name
+            // cannot see the nested related document. Deferred $filter must
+            // keep that order — expanding first made ref-only rows match.
+            auto [c_status, c_reason, c_headers, c_body] = make_request(
+                setup->port(), "POST"s, "/customers"s,
+                R"({"name":"Acme"})"s);
+            require_eq(c_status, "201"s);
+            (void)c_reason;
+            (void)c_headers;
+            const auto customer_id = static_cast<integer_type>(json::parse(c_body)["_id"s]);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/shipments"s,
+                    R"({"Price":5,"Qty":3,"customer_id":)"s
+                        + std::to_string(customer_id) + "}"s)),
+                "201"s);
+
+            auto [plain_status, plain_reason, plain_headers, plain_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/shipments?$expand=customer&$filter=customer/name%20eq%20'Acme'"s,
+                ""s);
+            require_eq(plain_status, "200"s);
+            (void)plain_reason;
+            (void)plain_headers;
+            auto plain_rows = json::parse(plain_body);
+            require_true(plain_rows.is_array());
+            require_eq(plain_rows.get<object::array>().size(), 0u);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/shipments?$expand=customer&$filter=customer/name%20eq%20'Acme'"
+                "&$compute=Price%20mul%20Qty%20as%20LineTotal"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 0u);
+        };
+
         section("GET $count with $compute filters on computed alias") = [setup]
         {
             require_eq(

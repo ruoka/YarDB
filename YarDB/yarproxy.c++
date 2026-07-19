@@ -25,7 +25,10 @@ struct replica_backend
     string host_header;
 };
 
-using replica_set = lockable<list<replica_backend>>;
+struct replica_set : list<replica_backend>, mutex
+{
+    using list::list;
+};
 
 inline auto host_header_from_url(string_view replica_url) -> string
 {

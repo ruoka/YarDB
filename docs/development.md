@@ -264,8 +264,9 @@ Current shipped work and verification totals are maintained only in [changelog.m
 #### 0. 📊 OData query surface
 - **Checklist**: [odata.md](odata.md) — supported today vs pipeline
 - **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`)
-- **`$apply` groupby/aggregate**: ✅ v1 shipped — `groupby((field),aggregate(amount with sum as Total))` (+ `average`/`min`/`max`); optional `$filter` before aggregate
-- **Next**: deeper `$expand` (overrides, multi-valued refs) beyond `{singular}_id`; richer `$apply` (multi-key, transform chains)
+- **`$apply` groupby/aggregate**: ✅ shipped — `groupby`/`aggregate`; pipeline `filter(...)/compute(...)/groupby(...)`; methods `sum`/`average`/`min`/`max`
+- **`$compute`**: ✅ shipped — `Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div`); not combinable with `$apply`
+- **Next**: multi-key groupby, `$count` aggregate; deeper `$expand` later (v1 `{singular}_id` is enough for now)
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

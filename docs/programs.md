@@ -192,11 +192,20 @@ YarDB implements OData-compliant query parameters for advanced querying:
 
 - **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.
 
-- **`$apply`** (v1) — `groupby` + `aggregate`:
-  - Example: `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))`
-  - Methods: `sum`, `average`, `min`, `max`
-  - Optional `$filter` runs before aggregation
-  - Not combined with `$top` / `$skip` / `$orderby` / `$select` / `$expand` / `$count` (422)
+- **`$compute`** — project arithmetic aliases before `$select` / paging:
+  - Example: `GET /lines?$compute=Price mul Qty as LineTotal&$select=LineTotal`
+  - Operators: `add`, `sub`, `mul`, `div` (top-level numeric fields)
+  - Not combined with `$apply` (422); use `compute(...)` inside `$apply` instead
+
+- **`$apply`** — slash-separated transform pipeline:
+  - Examples:
+    - `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))`
+    - `GET /orders?$apply=filter(status eq 'active')/groupby((country),aggregate(amount with sum as Total))`
+    - `GET /lines?$apply=compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)`
+  - Steps: `filter(...)`, `compute(...)`, `groupby((field),aggregate(...))`, `aggregate(...)`
+  - Aggregate methods: `sum`, `average`, `min`, `max`
+  - Optional sibling `$filter` pre-filters the read; pipeline `filter(...)` narrows further
+  - Not combined with `$top` / `$skip` / `$orderby` / `$select` / `$expand` / `$count` / `$compute` (422)
   - Full supported-vs-pipeline list: [odata.md](odata.md)
 
 ### OData Metadata

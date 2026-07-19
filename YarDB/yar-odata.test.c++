@@ -2473,11 +2473,16 @@ auto register_odata_tests()
         {
             when("Parsing the $apply string") = []
             {
-                const auto query = parse_apply(
+                const auto pipeline = parse_apply(
                     "groupby((status),aggregate(amount with sum as Total))"sv);
 
-                then("Group field and sum aggregate are extracted") = [query]
+                then("Group field and sum aggregate are extracted") = [pipeline]
                 {
+                    require_eq(pipeline.steps.size(), 1u);
+                    require_eq(
+                        static_cast<int>(pipeline.steps[0].kind),
+                        static_cast<int>(apply_step_kind::aggregate));
+                    const auto& query = pipeline.steps[0].aggregate;
                     require_eq(query.group_fields.size(), 1u);
                     require_eq(query.group_fields[0], "status"s);
                     require_eq(query.aggregates.size(), 1u);
@@ -2500,9 +2505,9 @@ auto register_odata_tests()
                     object{{"status"s, "pending"s}, {"amount"s, 7}},
                     object{{"status"s, "pending"s}, {"amount"s, 3}},
                 }};
-                const auto query = parse_apply(
+                const auto pipeline = parse_apply(
                     "groupby((status),aggregate(amount with sum as Total))"sv);
-                const auto result = apply_aggregation(docs, query);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
 
                 then("Each status has the summed Total") = [result]
                 {
@@ -2527,8 +2532,8 @@ auto register_odata_tests()
                     object{{"amount"s, 10}},
                     object{{"amount"s, 5}},
                 }};
-                const auto query = parse_apply("aggregate(amount with sum as Total)"sv);
-                const auto result = apply_aggregation(docs, query);
+                const auto pipeline = parse_apply("aggregate(amount with sum as Total)"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
 
                 then("One row with the grand total") = [result]
                 {
@@ -2551,8 +2556,8 @@ auto register_odata_tests()
                 }};
                 const auto sum_query = parse_apply("aggregate(amount with sum as Total)"sv);
                 const auto max_query = parse_apply("aggregate(amount with max as Peak)"sv);
-                const auto sum_result = apply_aggregation(docs, sum_query);
-                const auto max_result = apply_aggregation(docs, max_query);
+                const auto sum_result = apply_aggregation(docs, sum_query.steps[0].aggregate);
+                const auto max_result = apply_aggregation(docs, max_query.steps[0].aggregate);
 
                 then("sum and max keep exact int64 results") = [=]
                 {
@@ -2582,8 +2587,8 @@ auto register_odata_tests()
                     object{{"amount"s, half}},
                     object{{"amount"s, half}},
                 }};
-                const auto query = parse_apply("aggregate(amount with sum as Total)"sv);
-                const auto result = apply_aggregation(docs, query);
+                const auto pipeline = parse_apply("aggregate(amount with sum as Total)"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
 
                 then("Overflowed int64 sum is not wrapped to a negative integer") = [result]
                 {
@@ -2608,8 +2613,8 @@ auto register_odata_tests()
                     object{{"amount"s, static_cast<integer_type>(1)}},
                     object{{"amount"s, static_cast<integer_type>(-100)}},
                 }};
-                const auto query = parse_apply("aggregate(amount with min as Floor)"sv);
-                const auto result = apply_aggregation(docs, query);
+                const auto pipeline = parse_apply("aggregate(amount with min as Floor)"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
 
                 then("Min is the true minimum including post-overflow values") = [result]
                 {
@@ -2632,8 +2637,8 @@ auto register_odata_tests()
                     object{{"amount"s, large}},
                     object{{"amount"s, static_cast<integer_type>(1)}},
                 }};
-                const auto query = parse_apply("aggregate(amount with average as Avg)"sv);
-                const auto result = apply_aggregation(docs, query);
+                const auto pipeline = parse_apply("aggregate(amount with average as Avg)"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
 
                 then("Average matches quot + rem/count from int64 sum") = [result]
                 {
@@ -2665,10 +2670,10 @@ auto register_odata_tests()
                 require_true(engine.create("orders"s, b).has_value());
                 require_true(engine.create("orders"s, c).has_value());
 
-                const auto query = parse_apply(
+                const auto pipeline = parse_apply(
                     "groupby((status),aggregate(amount with sum as Total))"sv);
                 const auto filter = parse_filter("amount gt 10"sv);
-                const auto result = read_with_apply(engine, "orders"s, query, filter);
+                const auto result = read_with_apply(engine, "orders"s, pipeline, filter);
 
                 then("Filter runs before aggregation") = [=]()
                 {
@@ -2680,6 +2685,118 @@ auto register_odata_tests()
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
+    scenario("$apply filter/compute pipeline and $compute, [yardb]") = []
+    {
+        given("A filter(...)/groupby(...) expression") = []
+        {
+            when("Parsing the pipeline") = []
+            {
+                const auto pipeline = parse_apply(
+                    "filter(status eq 'active')/groupby((country),aggregate(amount with sum as Total))"sv);
+
+                then("Filter and aggregate steps are present") = [pipeline]
+                {
+                    require_eq(pipeline.steps.size(), 2u);
+                    require_eq(
+                        static_cast<int>(pipeline.steps[0].kind),
+                        static_cast<int>(apply_step_kind::filter));
+                    require_false(pipeline.steps[0].filter.has_or());
+                    require_true(pipeline.steps[0].filter.and_selector.has("status"s));
+                    require_eq(
+                        static_cast<int>(pipeline.steps[1].kind),
+                        static_cast<int>(apply_step_kind::aggregate));
+                    require_eq(pipeline.steps[1].aggregate.group_fields[0], "country"s);
+                };
+            };
+
+            when("Executing filter then groupby") = []
+            {
+                auto docs = object{object::array{
+                    object{{"status"s, "active"s}, {"country"s, "US"s}, {"amount"s, 10}},
+                    object{{"status"s, "active"s}, {"country"s, "US"s}, {"amount"s, 5}},
+                    object{{"status"s, "pending"s}, {"country"s, "US"s}, {"amount"s, 100}},
+                    object{{"status"s, "active"s}, {"country"s, "UK"s}, {"amount"s, 7}},
+                }};
+                const auto pipeline = parse_apply(
+                    "filter(status eq 'active')/groupby((country),aggregate(amount with sum as Total))"sv);
+                const auto result = execute_apply_pipeline(docs, pipeline);
+
+                then("Only active rows are aggregated by country") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    auto totals = std::map<string, integer_type>{};
+                    for(const auto& row : rows)
+                        totals[row["country"s].get<string>()] =
+                            static_cast<integer_type>(row["Total"s]);
+                    require_eq(totals["US"s], 15);
+                    require_eq(totals["UK"s], 7);
+                };
+            };
+        };
+
+        given("A compute(...)/aggregate(...) expression") = []
+        {
+            when("Computing line totals then summing") = []
+            {
+                auto docs = object{object::array{
+                    object{{"Price"s, 10}, {"Qty"s, 2}},
+                    object{{"Price"s, 3}, {"Qty"s, 4}},
+                }};
+                const auto pipeline = parse_apply(
+                    "compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)"sv);
+                const auto result = execute_apply_pipeline(docs, pipeline);
+
+                then("Revenue is the sum of Price*Qty") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_eq(static_cast<integer_type>(rows[0]["Revenue"s]), 32);
+                };
+            };
+        };
+
+        given("Standalone $compute clauses") = []
+        {
+            when("Parsing and applying Price mul Qty as LineTotal") = []
+            {
+                const auto clauses = parse_compute("Price mul Qty as LineTotal"sv);
+                auto docs = object{object::array{
+                    object{{"_id"s, 1ll}, {"Price"s, 5}, {"Qty"s, 3}},
+                    object{{"_id"s, 2ll}, {"Price"s, 2}, {"Qty"s, 0}},
+                    object{{"_id"s, 3ll}, {"Price"s, 4}}, // missing Qty → null
+                }};
+                const auto result = apply_compute(docs, clauses);
+
+                then("LineTotal is projected on each row") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 3u);
+                    require_eq(static_cast<integer_type>(rows[0]["LineTotal"s]), 15);
+                    require_eq(static_cast<integer_type>(rows[1]["LineTotal"s]), 0);
+                    require_true(rows[2]["LineTotal"s].is_null());
+                };
+            };
+
+            when("Dividing by zero yields null") = []
+            {
+                const auto clauses = parse_compute("Price div Qty as Unit"sv);
+                auto docs = object{object::array{
+                    object{{"Price"s, 10}, {"Qty"s, 0}},
+                }};
+                const auto result = apply_compute(docs, clauses);
+
+                then("Unit is null") = [result]
+                {
+                    require_true(result.get<object::array>()[0]["Unit"s].is_null());
                 };
             };
         };

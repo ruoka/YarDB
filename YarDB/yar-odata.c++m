@@ -1352,7 +1352,7 @@ export inline auto apply_top_skip(
 
 // Peel OData paging/sort keys from a selector so callers can filter first,
 // then apply $orderby / $skip / $top (OR path and post-filter AND path).
-struct query_paging
+export struct query_paging
 {
     xson::integer_type top = std::numeric_limits<xson::integer_type>::max();
     xson::integer_type skip = 0;
@@ -1360,7 +1360,7 @@ struct query_paging
     bool descending = false;
 };
 
-inline query_paging extract_and_strip_paging(xson::object& selector)
+export inline query_paging extract_and_strip_paging(xson::object& selector)
 {
     auto paging = query_paging{};
 
@@ -1737,11 +1737,15 @@ export inline auto parse_orderby(std::string_view orderby_value)
     return orderby_result{std::string{field_name}, descending};
 }
 
-// --- $apply (v1): groupby + aggregate ---------------------------------------
-// Supports:
+// --- $apply / $compute -------------------------------------------------------
+// $apply pipeline (slash-separated outside quotes/parens):
+//   filter(<$filter-expr>)/groupby((field),aggregate(...))
+//   compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)
 //   groupby((status),aggregate(amount with sum as Total))
 //   aggregate(amount with sum as Total)
-// Methods: sum, average, min, max. Top-level fields only.
+// Standalone query option: $compute=Price mul Qty as LineTotal[, ...]
+// Methods: sum, average, min, max. Arithmetic: add, sub, mul, div.
+// Top-level fields only.
 
 export enum class aggregate_method
 {
@@ -1749,6 +1753,14 @@ export enum class aggregate_method
     average,
     min,
     max
+};
+
+export enum class compute_op
+{
+    add,
+    sub,
+    mul,
+    div
 };
 
 export struct aggregate_clause
@@ -1762,6 +1774,34 @@ export struct apply_query
 {
     std::vector<std::string> group_fields; // empty → whole-set aggregate
     std::vector<aggregate_clause> aggregates;
+};
+
+export struct compute_clause
+{
+    std::string left_field;
+    compute_op op;
+    std::string right_field;
+    std::string alias;
+};
+
+export enum class apply_step_kind
+{
+    filter,
+    compute,
+    aggregate
+};
+
+export struct apply_step
+{
+    apply_step_kind kind = apply_step_kind::aggregate;
+    parsed_filter filter{};
+    std::vector<compute_clause> computes{};
+    apply_query aggregate{};
+};
+
+export struct apply_pipeline
+{
+    std::vector<apply_step> steps;
 };
 
 inline void validate_apply_identifier(std::string_view name, std::string_view what)
@@ -1825,12 +1865,79 @@ export inline aggregate_clause parse_aggregate_clause(std::string_view expr)
     return aggregate_clause{std::string{field}, parse_aggregate_method(method_tok), std::string{alias}};
 }
 
-export inline apply_query parse_apply(std::string_view apply_expr)
+inline compute_op parse_compute_op(std::string_view token)
+{
+    if(token == "add"sv)
+        return compute_op::add;
+    if(token == "sub"sv)
+        return compute_op::sub;
+    if(token == "mul"sv)
+        return compute_op::mul;
+    if(token == "div"sv)
+        return compute_op::div;
+    throw std::invalid_argument{
+        "Unsupported compute operator '"s + std::string{token}
+        + "' (supports add, sub, mul, div)"s};
+}
+
+// Parse one clause: `Price mul Qty as LineTotal`
+export inline compute_clause parse_compute_clause(std::string_view expr)
+{
+    auto text = utils::trim(expr);
+    constexpr auto as_tok = " as "sv;
+    const auto as_pos = find_outside_quotes_and_parens(text, as_tok);
+    if(not as_pos)
+        throw std::invalid_argument{"compute requires '<left> <op> <right> as <alias>'"};
+    auto alias = utils::trim(text.substr(*as_pos + as_tok.size()));
+    auto body = utils::trim(text.substr(0, *as_pos));
+    validate_apply_identifier(alias, "$compute alias");
+
+    constexpr auto ops = std::array{" mul "sv, " add "sv, " sub "sv, " div "sv};
+    std::optional<std::size_t> op_pos;
+    std::string_view op_tok;
+    for(const auto candidate : ops)
+    {
+        if(const auto pos = find_outside_quotes_and_parens(body, candidate))
+        {
+            op_pos = *pos;
+            op_tok = candidate;
+            break;
+        }
+    }
+    if(not op_pos)
+        throw std::invalid_argument{"compute requires an operator (add, sub, mul, div)"};
+
+    auto left = utils::trim(body.substr(0, *op_pos));
+    auto right = utils::trim(body.substr(*op_pos + op_tok.size()));
+    validate_apply_identifier(left, "$compute left field");
+    validate_apply_identifier(right, "$compute right field");
+    const auto op = parse_compute_op(utils::trim(op_tok));
+    return compute_clause{std::string{left}, op, std::string{right}, std::string{alias}};
+}
+
+// `$compute=A mul B as X, C add D as Y` or inner of `compute(...)`
+export inline std::vector<compute_clause> parse_compute(std::string_view expr)
+{
+    auto text = utils::trim(expr);
+    if(text.empty())
+        throw std::invalid_argument{"$compute cannot be empty"};
+
+    auto clauses = std::vector<compute_clause>{};
+    for(const auto part : split_outside_quotes_and_parens(text, ","sv))
+    {
+        auto piece = utils::trim(part);
+        if(piece.empty())
+            continue;
+        clauses.push_back(parse_compute_clause(piece));
+    }
+    if(clauses.empty())
+        throw std::invalid_argument{"$compute cannot be empty"};
+    return clauses;
+}
+
+inline apply_query parse_apply_aggregate_segment(std::string_view apply_expr)
 {
     auto text = utils::trim(apply_expr);
-    if(text.empty())
-        throw std::invalid_argument{"$apply cannot be empty"};
-
     apply_query query{};
 
     if(text.starts_with("aggregate("sv))
@@ -1842,10 +1949,8 @@ export inline apply_query parse_apply(std::string_view apply_expr)
     constexpr auto gb = "groupby("sv;
     if(not text.starts_with(gb) or not text.ends_with(')'))
         throw std::invalid_argument{
-            "$apply v1 supports groupby((field),aggregate(...)) or aggregate(...)"};
+            "$apply supports filter(...)/compute(...)/groupby((field),aggregate(...)) or aggregate(...)"};
 
-    // groupby((status),aggregate(...)) → after stripping groupby( … ):
-    //   (status),aggregate(...)
     auto inner = utils::trim(text.substr(gb.size(), text.size() - gb.size() - 1));
     if(not inner.starts_with('('))
         throw std::invalid_argument{"$apply groupby requires ((field),aggregate(...))"};
@@ -1861,6 +1966,70 @@ export inline apply_query parse_apply(std::string_view apply_expr)
     query.group_fields.push_back(std::string{field});
     query.aggregates.push_back(parse_aggregate_clause(agg_text));
     return query;
+}
+
+inline apply_step parse_apply_segment(std::string_view segment)
+{
+    auto text = utils::trim(segment);
+    if(text.empty())
+        throw std::invalid_argument{"$apply pipeline segment cannot be empty"};
+
+    constexpr auto filter_prefix = "filter("sv;
+    if(text.starts_with(filter_prefix) and text.ends_with(')'))
+    {
+        auto inner = utils::trim(text.substr(filter_prefix.size(), text.size() - filter_prefix.size() - 1));
+        return apply_step{
+            apply_step_kind::filter,
+            parse_filter(inner),
+            {},
+            {}};
+    }
+
+    constexpr auto compute_prefix = "compute("sv;
+    if(text.starts_with(compute_prefix) and text.ends_with(')'))
+    {
+        auto inner = utils::trim(text.substr(compute_prefix.size(), text.size() - compute_prefix.size() - 1));
+        return apply_step{
+            apply_step_kind::compute,
+            {},
+            parse_compute(inner),
+            {}};
+    }
+
+    return apply_step{
+        apply_step_kind::aggregate,
+        {},
+        {},
+        parse_apply_aggregate_segment(text)};
+}
+
+export inline apply_pipeline parse_apply(std::string_view apply_expr)
+{
+    auto text = utils::trim(apply_expr);
+    if(text.empty())
+        throw std::invalid_argument{"$apply cannot be empty"};
+
+    auto pipeline = apply_pipeline{};
+    for(const auto part : split_outside_quotes_and_parens(text, "/"sv))
+    {
+        auto segment = utils::trim(part);
+        if(segment.empty())
+            continue;
+        pipeline.steps.push_back(parse_apply_segment(segment));
+    }
+    if(pipeline.steps.empty())
+        throw std::invalid_argument{"$apply cannot be empty"};
+
+    // Aggregate/groupby may appear at most once and only as the final step.
+    for(std::size_t i = 0; i < pipeline.steps.size(); ++i)
+    {
+        if(pipeline.steps[i].kind != apply_step_kind::aggregate)
+            continue;
+        if(i + 1 != pipeline.steps.size())
+            throw std::invalid_argument{
+                "$apply aggregate/groupby must be the final pipeline step"};
+    }
+    return pipeline;
 }
 
 inline std::string group_key_string(const xson::object& value)
@@ -2145,11 +2314,205 @@ export inline xson::object apply_aggregation(const xson::object& documents, cons
     return xson::object{std::move(result)};
 }
 
-// Read matching documents (optional $filter) and run $apply aggregation.
+export inline xson::object filter_documents_by_parsed(
+    const xson::object& documents,
+    const parsed_filter& filter)
+{
+    if(filter.has_or())
+        return filter_documents_by_or(documents, filter.or_branches);
+
+    const auto branches = std::vector<filter_branch>{
+        filter_branch{
+            filter.and_selector,
+            filter.and_string_filters,
+            filter.and_negated_selectors}};
+    return filter_documents_by_or(documents, branches);
+}
+
+inline bool checked_mul_integer(
+    xson::integer_type a,
+    xson::integer_type b,
+    xson::integer_type& out)
+{
+    if(a == 0 or b == 0)
+    {
+        out = 0;
+        return true;
+    }
+    if(a == -1 and b == std::numeric_limits<xson::integer_type>::min())
+        return false;
+    if(b == -1 and a == std::numeric_limits<xson::integer_type>::min())
+        return false;
+    if(a > 0)
+    {
+        if(b > 0)
+        {
+            if(a > std::numeric_limits<xson::integer_type>::max() / b)
+                return false;
+        }
+        else if(b < std::numeric_limits<xson::integer_type>::min() / a)
+            return false;
+    }
+    else
+    {
+        if(b > 0)
+        {
+            if(a < std::numeric_limits<xson::integer_type>::min() / b)
+                return false;
+        }
+        else if(b < std::numeric_limits<xson::integer_type>::max() / a)
+            return false;
+    }
+    out = a * b;
+    return true;
+}
+
+inline bool checked_sub_integer(
+    xson::integer_type a,
+    xson::integer_type b,
+    xson::integer_type& out)
+{
+    if(b > 0 and a < std::numeric_limits<xson::integer_type>::min() + b)
+        return false;
+    if(b < 0 and a > std::numeric_limits<xson::integer_type>::max() + b)
+        return false;
+    out = a - b;
+    return true;
+}
+
+inline std::optional<std::pair<bool, double>> numeric_field_as_double(
+    const xson::object& doc,
+    std::string_view field)
+{
+    if(not doc.has(std::string{field}))
+        return std::nullopt;
+    const auto& value = doc[std::string{field}];
+    if(value.is_null())
+        return std::nullopt;
+    if(value.is_integer())
+        return std::pair{true, static_cast<double>(static_cast<xson::integer_type>(value))};
+    if(value.is_number())
+        return std::pair{false, static_cast<double>(static_cast<xson::number_type>(value))};
+    return std::nullopt;
+}
+
+inline xson::object evaluate_compute_clause(const xson::object& doc, const compute_clause& clause)
+{
+    auto null_value = xson::object{};
+    null_value = nullptr;
+
+    const auto left = numeric_field_as_double(doc, clause.left_field);
+    const auto right = numeric_field_as_double(doc, clause.right_field);
+    if(not left or not right)
+        return null_value;
+
+    const auto left_int = left->first
+        and doc[clause.left_field].is_integer();
+    const auto right_int = right->first
+        and doc[clause.right_field].is_integer();
+
+    if(clause.op == compute_op::div)
+    {
+        if(right->second == 0.0)
+            return null_value;
+        auto result = xson::object{};
+        result = static_cast<xson::number_type>(left->second / right->second);
+        return result;
+    }
+
+    if(left_int and right_int)
+    {
+        const auto a = static_cast<xson::integer_type>(doc[clause.left_field]);
+        const auto b = static_cast<xson::integer_type>(doc[clause.right_field]);
+        auto out = xson::integer_type{0};
+        auto ok = false;
+        switch(clause.op)
+        {
+        case compute_op::add:
+            ok = checked_add_integer(a, b, out);
+            break;
+        case compute_op::sub:
+            ok = checked_sub_integer(a, b, out);
+            break;
+        case compute_op::mul:
+            ok = checked_mul_integer(a, b, out);
+            break;
+        case compute_op::div:
+            break;
+        }
+        if(ok)
+        {
+            auto result = xson::object{};
+            result = out;
+            return result;
+        }
+        // Overflow → best-effort floating result.
+    }
+
+    auto result = xson::object{};
+    switch(clause.op)
+    {
+    case compute_op::add:
+        result = static_cast<xson::number_type>(left->second + right->second);
+        break;
+    case compute_op::sub:
+        result = static_cast<xson::number_type>(left->second - right->second);
+        break;
+    case compute_op::mul:
+        result = static_cast<xson::number_type>(left->second * right->second);
+        break;
+    case compute_op::div:
+        result = static_cast<xson::number_type>(left->second / right->second);
+        break;
+    }
+    return result;
+}
+
+export inline xson::object apply_compute(
+    const xson::object& documents,
+    std::span<const compute_clause> clauses)
+{
+    if(clauses.empty() or not documents.is_array())
+        return documents;
+
+    auto result = xson::object::array{};
+    result.reserve(documents.get<xson::object::array>().size());
+    for(const auto& doc : documents.get<xson::object::array>())
+    {
+        auto row = doc;
+        for(const auto& clause : clauses)
+            row[clause.alias] = evaluate_compute_clause(doc, clause);
+        result.push_back(std::move(row));
+    }
+    return xson::object{std::move(result)};
+}
+
+export inline xson::object execute_apply_pipeline(
+    xson::object documents,
+    const apply_pipeline& pipeline)
+{
+    for(const auto& step : pipeline.steps)
+    {
+        switch(step.kind)
+        {
+        case apply_step_kind::filter:
+            documents = filter_documents_by_parsed(documents, step.filter);
+            break;
+        case apply_step_kind::compute:
+            documents = apply_compute(documents, step.computes);
+            break;
+        case apply_step_kind::aggregate:
+            return apply_aggregation(documents, step.aggregate);
+        }
+    }
+    return documents;
+}
+
+// Read matching documents (optional sibling $filter) and run the $apply pipeline.
 export inline xson::object read_with_apply(
     yar::db::engine& engine,
     std::string_view collection,
-    const apply_query& query,
+    const apply_pipeline& pipeline,
     std::optional<parsed_filter> filter = std::nullopt)
 {
     auto documents = xson::object{};
@@ -2157,7 +2520,7 @@ export inline xson::object read_with_apply(
         documents = read_with_parsed_filter(engine, collection, xson::object{}, *filter);
     else
         engine.read(collection, xson::object{}, documents);
-    return apply_aggregation(documents, query);
+    return execute_apply_pipeline(std::move(documents), pipeline);
 }
 
 // OData 4.01 JSON CSDL Metadata Generation

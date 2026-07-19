@@ -796,20 +796,23 @@ private:
             // Parse OData query parameters
             auto params = parse_query_params(uri);
 
-            // Handle $apply (v1: groupby + aggregate) before $count. Otherwise
-            // `$apply=…&$count=true` short-circuited to a bare document count and
-            // silently dropped aggregation (v1 rejects the combination with 422).
+            // Handle $apply (filter/compute/groupby pipeline) before $count.
+            // `$apply=…&$count=true` must not short-circuit to a bare document count.
             if(params.contains("$apply"s))
             {
                 const auto incompatible = std::array{
-                    "$top"sv, "$skip"sv, "$orderby"sv, "$select"sv, "$expand"sv, "$count"sv};
+                    "$top"sv, "$skip"sv, "$orderby"sv, "$select"sv, "$expand"sv,
+                    "$count"sv, "$compute"sv};
                 for(const auto name : incompatible)
                 {
                     if(params.contains(std::string{name}))
                     {
                         auto error = xson::object{
                             {"error", "Unprocessable Entity"s},
-                            {"message", "$apply v1 cannot be combined with "s + std::string{name}}
+                            {"message", "$apply cannot be combined with "s + std::string{name}
+                                + (name == "$compute"sv
+                                    ? " (use compute(...) inside $apply)"s
+                                    : ""s)}
                         };
                         return response_with_headers{
                             status_unprocessable_entity,
@@ -821,12 +824,12 @@ private:
                 try
                 {
                     const auto collection_name = validate_collection_name(uri.path[1]);
-                    const auto query = yar::http::odata::parse_apply(params["$apply"s]);
+                    const auto pipeline = yar::http::odata::parse_apply(params["$apply"s]);
                     auto filter = std::optional<yar::http::odata::parsed_filter>{};
                     if(params.contains("$filter"s))
                         filter = yar::http::odata::parse_filter(params["$filter"s]);
                     const auto document = yar::http::odata::read_with_apply(
-                        m_engine, collection_name, query, filter);
+                        m_engine, collection_name, pipeline, filter);
                     return response_with_headers{
                         ::http::status_ok,
                         xson::json::stringify(document),
@@ -928,6 +931,15 @@ private:
                 }
             }
             const auto collection_name = validate_collection_name(uri.path[1]);
+
+            // $compute must run before $orderby/$top/$skip (OData evaluation order).
+            // Strip paging from the engine selector and re-apply after compute.
+            auto compute_paging = std::optional<yar::http::odata::query_paging>{};
+            if(params.contains("$compute"s))
+            {
+                compute_paging = yar::http::odata::extract_and_strip_paging(selector);
+            }
+
             if(params.contains("$filter"s))
             {
                 const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
@@ -942,6 +954,40 @@ private:
             if(params.contains("$expand"s))
             {
                 document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
+            }
+
+            // $compute after filter/read/expand, before select/page.
+            // Not combinable with $apply (rejected above).
+            if(params.contains("$compute"s))
+            {
+                try
+                {
+                    const auto clauses = yar::http::odata::parse_compute(params["$compute"s]);
+                    document = yar::http::odata::apply_compute(document, clauses);
+                    if(compute_paging)
+                    {
+                        if(not compute_paging->orderby_field.empty())
+                        {
+                            yar::db::apply_orderby(
+                                document,
+                                compute_paging->orderby_field,
+                                compute_paging->descending);
+                        }
+                        document = yar::http::odata::apply_top_skip(
+                            document, compute_paging->skip, compute_paging->top);
+                    }
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    auto error = xson::object{
+                        {"error", "Unprocessable Entity"s},
+                        {"message", std::string{e.what()}}
+                    };
+                    return response_with_headers{
+                        status_unprocessable_entity,
+                        xson::json::stringify(error),
+                        std::optional<::http::headers>{}};
+                }
             }
 
             if(params.contains("$select"s))

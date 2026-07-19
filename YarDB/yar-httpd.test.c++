@@ -1913,6 +1913,110 @@ auto test_set()
             require_true(error.has("message"s));
             require_true(error["message"s].get<string>().contains("$count"s));
         };
+
+        section("GET filter(...)/groupby(...) applies pipeline filter") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/sales"s,
+                    R"({"status":"active","country":"US","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/sales"s,
+                    R"({"status":"pending","country":"US","amount":50})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/sales"s,
+                    R"({"status":"active","country":"UK","amount":3})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/sales?$apply=filter(status%20eq%20'active')/groupby((country),aggregate(amount%20with%20sum%20as%20Total))"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto totals = std::map<string, integer_type>{};
+            for(const auto& row : rows.get<object::array>())
+                totals[row["country"s].get<string>()] = static_cast<integer_type>(row["Total"s]);
+            require_eq(totals.size(), 2u);
+            require_eq(totals["US"s], 10);
+            require_eq(totals["UK"s], 3);
+        };
+
+        section("GET compute(...)/aggregate(...) sums computed alias") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/lines"s,
+                    R"({"Price":10,"Qty":2})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/lines"s,
+                    R"({"Price":3,"Qty":4})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/lines?$apply=compute(Price%20mul%20Qty%20as%20LineTotal)/aggregate(LineTotal%20with%20sum%20as%20Revenue)"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 1u);
+            require_eq(
+                static_cast<integer_type>(rows.get<object::array>()[0]["Revenue"s]),
+                32);
+        };
+
+        section("GET $compute projects LineTotal before $select") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/priced"s,
+                    R"({"Price":5,"Qty":3,"name":"widget"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/priced?$compute=Price%20mul%20Qty%20as%20LineTotal&$select=name,LineTotal"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 1u);
+            const auto& row = rows.get<object::array>()[0];
+            require_eq(row["name"s].get<string>(), "widget"s);
+            require_eq(static_cast<integer_type>(row["LineTotal"s]), 15);
+            require_false(row.has("Price"s));
+        };
+
+        section("GET $compute with $apply is rejected") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/orders?$apply=aggregate(amount%20with%20sum%20as%20Total)&$compute=amount%20mul%20amount%20as%20Sq"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().contains("$compute"s));
+        };
     };
 
     test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes, [yardb]") = []

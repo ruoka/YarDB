@@ -18,6 +18,8 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **`$filter` OR-branch budget** | AND-over-OR distribution and De Morgan `not` of DNF formulas reject expressions that would exceed 64 OR branches (fail closed) instead of allocating a cartesian explosion that can OOM a single request |
 | **`$filter` `not` depth / length budget** | Unary `not` nesting beyond 64 and `$filter` strings longer than 8192 characters are rejected (fail closed) instead of recursing until a single GET can exhaust the request-thread stack |
 | **`$apply` groupby/aggregate (v1)** | `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))` — also `average`/`min`/`max` and whole-set `aggregate(...)`; optional `$filter` first; see [odata.md](odata.md) |
+| **`$apply` transform pipeline** | Slash-separated `filter(...)` / `compute(...)` / `groupby(...)` / `aggregate(...)` (e.g. `filter(status eq 'active')/groupby((country),aggregate(...))`) |
+| **`$compute` query option** | `$compute=Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div` on top-level numerics); before `$select`/paging; not combinable with `$apply` |
 | **Same-field AND `$filter`** | `age eq 10 and age gt 5` (and contradictory `status eq 'a' and status eq 'b'`) keep every predicate instead of last-write-wins clobbering earlier constraints |
 | **Same-operator range AND** | `age gt 20 and age gt 10` keeps the tighter bound (`$gt:20`) instead of last-write-wins loosening the filter |
 | **Same-field `$in` AND** | `status in ('a','b') and status in ('b','c')` intersects membership (`b` only) instead of last-write-wins keeping the second list |

@@ -1950,6 +1950,41 @@ auto test_set()
             require_eq(totals["UK"s], 3);
         };
 
+        section("GET $apply with sibling $filter uses aggregate aliases") = [setup]
+        {
+            // OData: $apply first, then $filter — Total is visible after groupby.
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/totals"s,
+                    R"({"status":"active","amount":20})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/totals"s,
+                    R"({"status":"active","amount":22})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/totals"s,
+                    R"({"status":"vip","amount":8})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/totals?$apply=groupby((status),aggregate(amount%20with%20sum%20as%20Total))&$filter=Total%20gt%2040"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            const auto& arr = rows.get<object::array>();
+            require_eq(arr.size(), 1u);
+            require_eq(arr[0]["status"s].get<string>(), "active"s);
+            require_eq(static_cast<integer_type>(arr[0]["Total"s]), 42);
+        };
+
         section("GET compute(...)/aggregate(...) sums computed alias") = [setup]
         {
             require_eq(

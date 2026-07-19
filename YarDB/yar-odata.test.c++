@@ -2672,10 +2672,12 @@ auto register_odata_tests()
 
                 const auto pipeline = parse_apply(
                     "groupby((status),aggregate(amount with sum as Total))"sv);
-                const auto filter = parse_filter("amount gt 10"sv);
+                // Sibling $filter runs after $apply (OData Aggregation). Pre-filter
+                // with amount gt 10 would miss source rows — use pipeline filter(...).
+                const auto filter = parse_filter("Total gt 40"sv);
                 const auto result = read_with_apply(engine, "orders"s, pipeline, filter);
 
-                then("Filter runs before aggregation") = [=]()
+                then("Sibling $filter runs after aggregation") = [=]()
                 {
                     require_true(result.is_array());
                     const auto& rows = result.get<object::array>();

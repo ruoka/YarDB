@@ -2585,7 +2585,10 @@ export inline xson::object execute_apply_pipeline(
     return documents;
 }
 
-// Read matching documents (optional sibling $filter) and run the $apply pipeline.
+// Read the collection, run the $apply pipeline, then apply optional sibling
+// `$filter` to the pipeline result. OData Aggregation evaluates `$apply` first
+// so aggregate aliases (e.g. Total) are visible to `$filter`; pre-aggregation
+// narrowing belongs in a pipeline `filter(...)` step.
 export inline xson::object read_with_apply(
     yar::db::engine& engine,
     std::string_view collection,
@@ -2593,11 +2596,11 @@ export inline xson::object read_with_apply(
     std::optional<parsed_filter> filter = std::nullopt)
 {
     auto documents = xson::object{};
+    engine.read(collection, xson::object{}, documents);
+    documents = execute_apply_pipeline(std::move(documents), pipeline);
     if(filter)
-        documents = read_with_parsed_filter(engine, collection, xson::object{}, *filter);
-    else
-        engine.read(collection, xson::object{}, documents);
-    return execute_apply_pipeline(std::move(documents), pipeline);
+        documents = filter_documents_by_parsed(documents, *filter);
+    return documents;
 }
 
 // OData 4.01 JSON CSDL Metadata Generation

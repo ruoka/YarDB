@@ -65,7 +65,7 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 ## Design notes for `$apply`
 
 - Slash-separated transforms outside quotes/parens: `filter(...)/compute(...)/groupby(...)`.
-- Sibling query `$filter` still pre-filters the read; a pipeline `filter(...)` narrows further.
+- Sibling query `$filter` runs **after** `$apply` (OData Aggregation evaluation order), so aggregate aliases like `Total` are filterable. Pre-aggregation narrowing uses a pipeline `filter(...)` step.
 - `compute(...)` inside `$apply` uses the same arithmetic as query `$compute`.
 - Query `$compute` cannot be combined with `$apply` (**422**) — use `compute(...)` in the pipeline.
 - `$apply` does **not** compose with `$expand`, `$select`, `$orderby`, `$top`, `$skip`, or `$count` (rejected with **422**).

@@ -1646,6 +1646,40 @@ private:
         m_server.get("/_reindex"s).response_with_headers(
             "application/json"sv,
             ::http::middleware::wrap(reindex_handler, reindex_middlewares));
+
+        // Explicit OPTIONS handlers: http::server must not answer CORS preflight by
+        // invoking GET/POST/PUT/etc (that mutates or leaks when cors_middleware is
+        // absent). Register a no-op per path; wrap with CORS when enabled so ACAO
+        // is still attached.
+        auto options_handler = []([[maybe_unused]] ::http::request_view request,
+                                  [[maybe_unused]] ::http::body_view body,
+                                  [[maybe_unused]] ::http::headers& headers)
+        {
+            return response_with_headers{status_no_content, ""s, std::optional<::http::headers>{}};
+        };
+        auto options_callback = handler{options_handler};
+        if(m_cors_enabled)
+        {
+            if(auto cors_mw = cors_middleware())
+            {
+                std::array<middleware_factory, 1> options_middlewares{*cors_mw};
+                options_callback = ::http::middleware::wrap(options_handler, options_middlewares);
+            }
+        }
+        for(const auto& path : {
+                collection_route,
+                collection_route_with_query,
+                collection_route_with_id,
+                "/"s,
+                "/health"s,
+                "/ready"s,
+                "/metrics"s,
+                "/\\$metadata"s,
+                "/_db/[a-z][a-z0-9]*"s,
+                "/_reindex"s})
+        {
+            m_server.options(path).response_with_headers("*/*"sv, options_callback);
+        }
     }
 
     std::string m_file;

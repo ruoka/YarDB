@@ -149,11 +149,11 @@ auto register_details_tests()
         };
     };
 
-    // Regression: net::address_info strips `[...]` before getaddrinfo; bracketed
-    // wildcard spellings must still count as public binds for the PAT gate.
-    scenario("is_public_bind_host covers bracketed wildcard aliases, [yardb]") = []
+    // Regression: classify by resolved sockaddr (same path as acceptor), not a
+    // fixed string list — getaddrinfo/inet_aton accept many ANY aliases.
+    scenario("is_public_bind_host covers all-interfaces bind aliases, [yardb]") = []
     {
-        given("Canonical and bracketed all-interfaces bind hosts") = []
+        given("Canonical, bracketed, and abbreviated all-interfaces bind hosts") = []
         {
             when("Checking public-bind classification") = []
             {
@@ -167,6 +167,29 @@ auto register_details_tests()
                     require_true(is_public_bind_host("[0.0.0.0]"sv));
                     require_true(is_public_bind_host("[]"sv));
                     require_true(is_public_bind_host("  [::0]  "sv));
+                };
+
+                then("Treats IPv4 abbreviated and star aliases as public") = []
+                {
+                    require_true(is_public_bind_host("0"sv));
+                    require_true(is_public_bind_host("0.0.0"sv));
+                    require_true(is_public_bind_host("00.0.0.0"sv));
+                    require_true(is_public_bind_host("*"sv));
+                };
+
+                then("Treats IPv6 unspecified aliases as public") = []
+                {
+                    require_true(is_public_bind_host("0::"sv));
+                    require_true(is_public_bind_host("0000::"sv));
+                    require_true(is_public_bind_host("0::0"sv));
+                    require_true(is_public_bind_host("::0000"sv));
+                    require_true(is_public_bind_host("::0.0.0.0"sv));
+                    require_true(is_public_bind_host("0:0:0:0:0:0:0:0"sv));
+                    require_true(is_public_bind_host("[0::]"sv));
+                    require_true(is_public_bind_host("[0:0:0:0:0:0:0:0]"sv));
+                    // IPv4-mapped any: Linux bind accepts IPv4 clients on all interfaces.
+                    require_true(is_public_bind_host("::ffff:0.0.0.0"sv));
+                    require_true(is_public_bind_host("[::ffff:0.0.0.0]"sv));
                 };
 
                 then("Does not treat loopback literals as public") = []

@@ -433,23 +433,64 @@ inline bool is_admin_api_path(std::string_view uri)
     return not segment.empty() and segment.starts_with('_');
 }
 
+// True when ai_addr is an all-interfaces bind: IPv4 INADDR_ANY, IPv6 ::, or
+// IPv4-mapped ::ffff:0.0.0.0 (Linux accepts IPv4 clients on that mapped any).
+inline auto is_unspecified_bind_address(const posix::addrinfo& ai) -> bool
+{
+    if(ai.ai_addr == nullptr)
+        return false;
+
+    if(ai.ai_family == posix::af_inet)
+    {
+        const auto& addr = reinterpret_cast<const posix::sockaddr_in*>(ai.ai_addr)->sin_addr;
+        return addr.s_addr == static_cast<decltype(addr.s_addr)>(posix::inaddr_any);
+    }
+
+    if(ai.ai_family == posix::af_inet6)
+    {
+        const auto& addr = reinterpret_cast<const posix::sockaddr_in6*>(ai.ai_addr)->sin6_addr;
+        const auto bytes = std::span{
+            reinterpret_cast<const std::uint8_t*>(&addr), sizeof(addr)};
+        if(bytes.size() != 16)
+            return false;
+        if(std::ranges::all_of(bytes, [](std::uint8_t b) { return b == 0; }))
+            return true;
+        // ::ffff:0.0.0.0
+        return std::ranges::equal(bytes.first(10), std::array<std::uint8_t, 10>{})
+            and bytes[10] == 0xff
+            and bytes[11] == 0xff
+            and bytes[12] == 0
+            and bytes[13] == 0
+            and bytes[14] == 0
+            and bytes[15] == 0;
+    }
+
+    return false;
+}
+
 // True when --bind would listen on a wildcard / all-interfaces address.
-// Must stay aligned with net::address_info: a matching `[...]` pair is stripped
-// before resolution, and empty / 0.0.0.0 / :: (/ ::0) become AI_PASSIVE ANY.
+// Resolve with the same address_info path the acceptor uses (bracket strip,
+// AI_PASSIVE, empty/0.0.0.0/:: → nullptr), then treat any unspecified result as
+// public. String equality alone misses aliases that still bind ANY: `0`, `*`,
+// `0.0.0`, `00.0.0.0`, `0::`, `0000::`, `[0:0:0:0:0:0:0:0]`, etc.
 inline auto is_public_bind_host(std::string_view host) -> bool
 {
-    auto normalized = utils::trim(host);
-    if(normalized.size() >= 2
-       and normalized.front() == '['
-       and normalized.back() == ']')
+    const auto normalized = utils::trim(host);
+    try
     {
-        normalized.remove_prefix(1);
-        normalized.remove_suffix(1);
+        const auto resolved = address_info{
+            normalized, "0"sv, posix::sock_stream, posix::ai_passive};
+        for(const auto& ai : resolved)
+        {
+            if(is_unspecified_bind_address(ai))
+                return true;
+        }
     }
-    return normalized.empty()
-        or normalized == "0.0.0.0"sv
-        or normalized == "::"sv
-        or normalized == "::0"sv;
+    catch(const std::runtime_error&)
+    {
+        return false;
+    }
+    return false;
 }
 
 // Collection name validation

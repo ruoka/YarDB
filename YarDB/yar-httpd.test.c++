@@ -352,6 +352,22 @@ auto test_set()
             require_true(error.has("message"s));
         };
 
+        // After a completed fraction, a bare "-" must not be accepted as 0 (stale
+        // m_has_seen_digit in xson). Reject with 400 instead of persisting discount:0.
+        section("POST with bare minus after fraction returns 400") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/testitems"s, R"({"subtotal":1.2,"discount":-})"s
+            );
+
+            require_eq(status, "400"s);
+            require_eq(reason, "Bad Request"s);
+
+            auto error = json::parse(response_body);
+            require_true(error.has("error"s));
+            require_eq(static_cast<string>(error["error"s]), "Bad Request"s);
+        };
+
         section("POST with oversized Content-Length returns 413 Payload Too Large") = [setup]
         {
             // Cap is enforced from Content-Length before allocate/read — declare

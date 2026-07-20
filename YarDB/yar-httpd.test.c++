@@ -3831,6 +3831,55 @@ auto test_set()
         };
     };
 
+    test_case("OPTIONS preflight must not mutate, [yardb]") = []
+    {
+        const auto test_file = "./httpd_options_preflight_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("OPTIONS with Access-Control-Request-Method does not create documents") = [setup]
+        {
+            const auto body = R"({"name":"preflight-must-not-create"})"s;
+            auto stream = connect("localhost"s, setup->port());
+            stream << "OPTIONS /users HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Access-Control-Request-Method: POST" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << body.size() << crlf
+                   << crlf
+                   << body
+                   << flush;
+
+            auto [status, reason, headers, response_body] = parse_http_response(stream, "OPTIONS"s);
+            require_eq(status, "204"s);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/users"s
+            );
+            require_eq(get_status, "200"s);
+            require_eq(get_body, "[]"s);
+        };
+
+        section("OPTIONS with Access-Control-Request-Method does not put indexes") = [setup]
+        {
+            const auto body = R"({"keys":["name"]})"s;
+            auto stream = connect("localhost"s, setup->port());
+            stream << "OPTIONS /_db/users HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Access-Control-Request-Method: PUT" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << body.size() << crlf
+                   << crlf
+                   << body
+                   << flush;
+
+            auto [status, reason, headers, response_body] = parse_http_response(stream, "OPTIONS"s);
+            // Must be a no-op preflight (204), not the PUT index handler (200 + JSON body).
+            require_eq(status, "204"s);
+            require_true(response_body.empty());
+            require_false(headers.contains("location"s));
+        };
+    };
+
     test_case("CORS middleware, [yardb]") = []
     {
         const auto test_file = "./httpd_cors_test.db";
@@ -3839,6 +3888,22 @@ auto test_set()
         // Configure CORS with default settings (allow all origins)
         setup->get_server().configure_cors();
         setup->get_server().rebuild_routes();
+
+        section("CORS preflight on collection path returns 204 with ACAO") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "OPTIONS /users HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Origin: https://example.com" << crlf
+                   << "Access-Control-Request-Method: POST" << crlf
+                   << "Access-Control-Request-Headers: content-type" << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, body] = parse_http_response(stream, "OPTIONS"s);
+            require_eq(status, "204"s);
+            require_eq(headers["access-control-allow-origin"s], "https://example.com"s);
+            require_true(headers["access-control-allow-methods"s].find("POST") != std::string::npos);
+        };
 
         section("CORS adds headers to responses") = [setup]
         {

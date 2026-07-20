@@ -10,6 +10,7 @@ This directory contains comprehensive project documentation organized by topic a
 - **[changelog.md](changelog.md)** - **Shipped features and smoke coverage** (completed work)
 - **[project_organization.md](project_organization.md)** - Project structure and P1204R0 compliance
 - **[clang_module_flags.md](clang_module_flags.md)** - C++23 module handling in C++ Builder
+- **[json4cpp.md](json4cpp.md)** - Pointer to json4cpp (`deps/xson`) docs (assessment lives upstream)
 
 ### 🚀 Operations & Deployment
 - **[programs.md](programs.md)** - Detailed documentation for all executables (`yardb`, `yarsh`, `yarproxy`, etc.)
@@ -22,7 +23,6 @@ This directory contains comprehensive project documentation organized by topic a
 - **[archive/](archive/)** - Completed/historical documentation
   - **[odata-metadata-plan.md](archive/odata-metadata-plan.md)** - ✅ **COMPLETED** OData /$metadata endpoint implementation (December 2025)
   - **[rest_api_evaluation.md](archive/rest_api_evaluation.md)** - Historical REST API design evaluation
-
 ## 🎯 Current Development Focus
 
 See the canonical **[development roadmap](development.md#development-roadmap)**. Shipped work belongs in **[changelog.md](changelog.md)**.

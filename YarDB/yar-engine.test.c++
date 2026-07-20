@@ -523,6 +523,33 @@ auto test_set()
             require_eq(documents.get<object::array>().size(), 2u);
         };
 
+        section("DestroyLargeInt64DoesNotCollapseNeighbors") = [test_file]
+        {
+            // int64 equality via double made 2^53 and 2^53+1 match, so a
+            // destroy/update selector for one value could hit both documents.
+            constexpr auto exact = 9007199254740992ll; // 2^53
+            constexpr auto next = exact + 1;
+
+            auto engine = yar::db::engine{test_file};
+            auto document1 = object{{"serial"s, exact}, {"name"s, "exact"s}};
+            auto document2 = object{{"serial"s, next}, {"name"s, "next"s}};
+            auto documents = object{};
+            require_true(engine.create("LargeInt64Destroy"s, document1).has_value());
+            require_true(engine.create("LargeInt64Destroy"s, document2).has_value());
+
+            require_eq(
+                engine.destroy("LargeInt64Destroy"s, object{{"serial"s, exact}}, documents).value(),
+                1u);
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "exact"s);
+
+            documents = object{};
+            require_true(engine.read("LargeInt64Destroy"s, object{}, documents));
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["serial"s]), next);
+            require_eq(documents[0]["name"s].get<string>(), "next"s);
+        };
+
         section("Utf8StringSurvivesRestart") = []
         {
             // FAST string terminator cleared high bits; without escape/unescape,

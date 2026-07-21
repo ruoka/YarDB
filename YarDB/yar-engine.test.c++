@@ -1238,7 +1238,7 @@ auto test_set()
                 auto created = 0;
                 auto storage = std::ifstream{test_file, std::ios::binary};
                 require_true(storage.is_open());
-                while(storage)
+                while(storage.peek() != std::char_traits<char>::eof())
                 {
                     auto metadata = yar::db::metadata{};
                     auto document = object{};

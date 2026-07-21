@@ -107,7 +107,7 @@ auto export_history(const string& file)
     if(not storage.is_open())
         throw runtime_error{"file "s + file + " not found"s};
 
-    while(storage)
+    while(storage.peek() != std::char_traits<char>::eof())
     {
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};

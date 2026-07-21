@@ -403,7 +403,8 @@ void yar::db::engine::setup_index_structure()
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
 
-    while(m_storage)
+    // Empty files: do not invoke FSON decode (empty input is an error).
+    while(m_storage.peek() != std::char_traits<char>::eof())
     {
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};
@@ -434,7 +435,8 @@ void yar::db::engine::populate_indexes()
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
 
-    while(m_storage)
+    // Empty files: do not invoke FSON decode (empty input is an error).
+    while(m_storage.peek() != std::char_traits<char>::eof())
     {
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};

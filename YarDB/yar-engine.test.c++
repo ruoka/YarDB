@@ -381,6 +381,36 @@ auto test_set()
             clog << "Hstory:"s << xson::json::stringify(history) << endl;
         };
 
+        section("HistoryFiltersUnindexedSelector") = []
+        {
+            // Without a secondary index, view() scans every primary key. history()
+            // must still match() the live row or unrelated version chains leak.
+            const auto test_file = "./engine_history_unindexed_selector_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto ada = object{{"name"s, "Ada"s}, {"role"s, "admin"s}},
+                bob = object{{"name"s, "Bob"s}, {"role"s, "user"s}},
+                history = object{};
+            require_true(engine.create("HistoryFilter"s, ada).has_value());
+            require_true(engine.create("HistoryFilter"s, bob).has_value());
+            require_true(
+                engine.update(
+                    "HistoryFilter"s,
+                    object{{"_id"s, ada["_id"s]}},
+                    object{{"name"s, "Ada"s}, {"role"s, "owner"s}}).value() > 0);
+
+            require_true(engine.history("HistoryFilter"s, object{{"name"s, "Ada"s}}, history));
+            require_eq(history.size(), 2u);
+            for(const auto& item : history.get<object::array>())
+                require_eq(item["name"s].get<string>(), "Ada"s);
+
+            history = object{};
+            require_true(engine.history("HistoryFilter"s, object{{"name"s, "Bob"s}}, history));
+            require_eq(history.size(), 1u);
+            require_eq(history[0]["name"s].get<string>(), "Bob"s);
+            require_eq(history[0]["role"s].get<string>(), "user"s);
+        };
+
 
         section("Create2Collections") = [test_file]
         {

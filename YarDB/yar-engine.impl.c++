@@ -1595,18 +1595,35 @@ bool yar::db::engine::history(std::string_view collection, const yar::db::object
     auto success = false;
     auto reader = open_reader();
 
-    for(auto position : index->view(selector))
+    // view() may over-scan (unindexed fields fall back to the full primary
+    // range; some secondary ops are approximate). read/update/destroy/replace
+    // all post-filter with match(); history must do the same or a selector
+    // like {"name":"Ada"} returns every document's version chain.
+    for(const auto live_position : index->view(selector))
+    {
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        reader.clear();
+        reader.seekg(live_position, reader.beg);
+        reader >> metadata >> document;
+        if(not document.match(selector))
+            continue;
+
+        auto position = live_position;
         while(position >= 0)
         {
-            auto metadata = yar::db::metadata{};
-            auto document = yar::db::object{};
+            documents += std::move(document);
+            success = true;
+            position = metadata.previous;
+            if(position < 0)
+                break;
+            metadata = {};
+            document = {};
             reader.clear();
             reader.seekg(position, reader.beg);
             reader >> metadata >> document;
-            position = metadata.previous;
-            documents += std::move(document);
-            success = true;
         }
+    }
 
     return success;
 }

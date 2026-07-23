@@ -1617,8 +1617,8 @@ bool yar::db::engine::history(std::string_view collection, const yar::db::object
             position = metadata.previous;
             if(position < 0)
                 break;
-            metadata = {};
-            document = {};
+            metadata = yar::db::metadata{};
+            document = yar::db::object{};
             reader.clear();
             reader.seekg(position, reader.beg);
             reader >> metadata >> document;

@@ -10,7 +10,7 @@ Requires: pip install -r tools/requirements-mcp-sse.txt
 Environment:
   YARDB_URL              Base yardb URL (default http://127.0.0.1:2112)
   YARDB_PAT              Optional Bearer token
-  YARDB_MCP_SSE_HOST     Bind host (default 127.0.0.1)
+  YARDB_MCP_SSE_HOST     Bind host (default 127.0.0.1; 0.0.0.0/:: refused)
   YARDB_MCP_SSE_PORT     Bind port (default 8000)
 
 Endpoints:
@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import TextContent, Tool
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -44,9 +45,74 @@ import yardb_mcp
 HOST = os.environ.get("YARDB_MCP_SSE_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("YARDB_MCP_SSE_PORT") or "8000")
 
+
+def _is_wildcard_bind_host(host: str) -> bool:
+    """Match yardb/net wildcard bind policy (public any-address binds)."""
+    normalized = host.strip().lower()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    return normalized in {"0.0.0.0", "::", "*"}
+
+
+def _is_loopback_bind_host(host: str) -> bool:
+    normalized = host.strip().lower()
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    return normalized in {"127.0.0.1", "localhost", "::1"}
+
+
+def _transport_security_settings(host: str) -> TransportSecuritySettings:
+    """
+    Enable MCP DNS-rebinding protection (Host/Origin checks).
+
+    The bridge holds YARDB_PAT and exposes full CRUD over unauthenticated HTTP;
+    without these checks a browser/DNS-rebinding client can drive tools as the
+    bridge. Mirrors FastMCP localhost defaults, plus the configured bind host.
+    """
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    allowed_origins = [
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+    ]
+    if not _is_loopback_bind_host(host):
+        # Exact host + any-port form so reverse-proxy / LAN binds still work.
+        bare = host.strip()
+        if bare.startswith("[") and bare.endswith("]"):
+            allowed_hosts.append(f"{bare}:*")
+            allowed_origins.append(f"http://{bare}:*")
+        else:
+            allowed_hosts.append(f"{bare}:*")
+            allowed_hosts.append(bare)
+            allowed_origins.append(f"http://{bare}:*")
+            allowed_origins.append(f"http://{bare}")
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+
+
+def _validate_bind_policy(host: str) -> None:
+    # Unlike yardb, this process has no client auth of its own — a wildcard bind
+    # would publish a PAT-injecting CRUD proxy to every interface.
+    if _is_wildcard_bind_host(host):
+        raise SystemExit(
+            f"refusing to bind MCP SSE to {host} without bridge authentication; "
+            "use YARDB_MCP_SSE_HOST=127.0.0.1 (default), or bind a specific "
+            "non-wildcard address"
+        )
+
+
+# Fail closed even when launched via `uvicorn yardb_mcp_sse:app` (bypasses main).
+_validate_bind_policy(HOST)
+
 mcp_server = Server("yardb")
 # Relative path advertised over SSE for JSON-RPC POSTs (must match Mount below).
-sse_transport = SseServerTransport("/messages/")
+sse_transport = SseServerTransport(
+    "/messages/",
+    security_settings=_transport_security_settings(HOST),
+)
 
 
 @mcp_server.list_tools()
@@ -113,6 +179,7 @@ app = Starlette(
 def main() -> None:
     import uvicorn
 
+    _validate_bind_policy(HOST)
     yardb_mcp._log(
         f"YarDB MCP SSE on http://{HOST}:{PORT}/sse (yardb={yardb_mcp.BASE})"
     )

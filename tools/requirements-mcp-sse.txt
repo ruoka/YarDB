@@ -1,0 +1,5 @@
+# Optional deps for tools/yardb_mcp_sse.py (stdio bridge needs none).
+mcp>=1.0
+uvicorn>=0.30
+starlette>=0.38
+# mcp pulls httpx / sse-starlette; listed for clarity when installing.

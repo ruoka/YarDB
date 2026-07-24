@@ -36,6 +36,11 @@ tools/cb
 .cursor/*
 !.cursor/mcp.json
 
+# Optional local venv for MCP SSE bridge deps
+tools/.venv-mcp-sse/
+**/__pycache__/
+*.py[cod]
+
 # Vim
 *.swp
 *.swo

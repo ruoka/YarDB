@@ -139,17 +139,24 @@ Export FSON records as JSONL (`yarexport`, including `--live` for current docs o
 
 ### MCP server - Agent / IDE bridge
 
-Stdio MCP server that wraps a running `yardb` HTTP API (health, collections, OData query, CRUD, indexes). Requires Python 3 and a live `yardb`. See [MCP bridge documentation](docs/programs.md#mcp-bridge---cursor--stdio-client).
+MCP bridges that wrap a running `yardb` HTTP API (health, collections, OData query, CRUD, indexes). Requires Python 3 and a live `yardb`. See [MCP bridge documentation](docs/programs.md#mcp-bridge---cursor--agent-client).
+
+| Transport | Entry | Notes |
+|-----------|-------|-------|
+| **stdio** | `tools/yardb_mcp.py` | Default; stdlib only |
+| **HTTP/SSE** | `tools/yardb_mcp_sse.py` | `pip install -r tools/requirements-mcp-sse.txt`; client URL `http://127.0.0.1:8000/sse` |
 
 ```bash
-# Start yardb, then point the bridge at it (defaults shown)
+# Start yardb, then either:
 YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
+# or:
+YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp_sse.py
 
-# Smoke tests
+# Smoke tests (sse case skips if optional deps missing)
 ./tests/mcp/smoke.sh
 ```
 
-Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) automatically in this workspace (`YARDB_URL` / `YARDB_PAT` from the environment).
+Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) (`yardb` stdio + optional `yardb-sse`).
 
 ## Operations
 

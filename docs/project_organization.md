@@ -10,9 +10,11 @@ YarDB/
 ├── LICENSE                      # Project license
 ├── CONTRIBUTING.md              # Contribution guidelines
 ├── AGENTS.md                    # AI/CI JSONL build and test triage
-├── tools/                       # Build tools and MCP bridge
+├── tools/                       # Build tools and MCP bridges
 │   ├── CB.sh                    # C++ Builder bootstrap script
-│   └── yardb_mcp.py             # MCP stdio server (REST/OData bridge)
+│   ├── yardb_mcp.py             # MCP stdio server (REST/OData bridge)
+│   ├── yardb_mcp_sse.py         # MCP HTTP/SSE server (Starlette)
+│   └── requirements-mcp-sse.txt # Optional deps for SSE bridge
 ├── .cursor/
 │   └── mcp.json                 # Cursor MCP server registration
 ├── .gitignore                   # Git ignore rules
@@ -49,7 +51,6 @@ YarDB/
 │   ├── yarproxy/                # yarproxy smoke tests
 │   │   ├── lib.sh
 │   │   └── smoke.sh
-│   ├── example.html             # Example/test HTML
 │   └── yar.sh                   # Manual multi-server demo script
 │
 ├── build-{os}-{config}/         # Build artifacts (gitignored, e.g., build-darwin-debug/, build-linux-release/)

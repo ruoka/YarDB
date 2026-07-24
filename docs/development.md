@@ -41,7 +41,7 @@ sudo apt-get install clang-21 libc++-21-dev libc++abi-21-dev lld-21
 - Add new unit test: Create `.test.c++` file next to source (tag `[yardb]`)
 - Add new program: Create `.c++` file in `YarDB/` directory (C++ Builder will automatically detect it)
 - Run piped `yarsh` smoke tests: `./tests/yarsh/smoke.sh` (see `tests/yarsh/smoke.sh --help`)
-- Run MCP bridge smoke tests: `./tests/mcp/smoke.sh` (see `tests/mcp/smoke.sh --help`)
+- Run MCP bridge smoke tests: `./tests/mcp/smoke.sh` (stdio + optional SSE; see `tests/mcp/smoke.sh --help`)
 - Run OData performance bench (manual, not CI): `./tests/perf/bench.sh --jsonl` (see [`tests/perf/README.md`](../tests/perf/README.md))
 
 ## Logging Standards

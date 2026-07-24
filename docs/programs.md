@@ -415,37 +415,68 @@ Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines
 
 Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `filter_or`, `filter_startswith`, `head`, `if_none_match`, `bad_json`, `auth_required`, `auth_crud`.
 
-## MCP bridge - Cursor / stdio client
+## MCP bridge - Cursor / agent client
 
-YarDB ships an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) stdio server that exposes a running `yardb` HTTP/OData API as agent tools. The bridge is stdlib Python only (`tools/yardb_mcp.py`); it does not embed the database — start `yardb` separately and point the bridge at it.
+YarDB ships [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) bridges that expose a running `yardb` HTTP/OData API as agent tools. Neither bridge embeds the database — start `yardb` separately and point the bridge at it (`YARDB_URL` / optional `YARDB_PAT`).
+
+| Transport | File | Deps |
+|-----------|------|------|
+| **stdio** (default) | `tools/yardb_mcp.py` | stdlib only |
+| **HTTP/SSE** | `tools/yardb_mcp_sse.py` | `pip install -r tools/requirements-mcp-sse.txt` (`mcp`, `uvicorn`, `starlette`) |
 
 ### Purpose
 
 - Let IDEs and agents (Cursor, Claude Desktop, custom MCP clients) query and mutate YarDB without a hand-written HTTP client
 - Keep auth and bind policy on `yardb` (`--pat`, loopback defaults); the bridge forwards `Authorization: Bearer` when `YARDB_PAT` is set
 
-### Usage
+### Stdio usage
 
 ```bash
 # Terminal 1 — database
 ./build-darwin-debug/bin/yardb --clog 2112   # or build-linux-debug/...
 
-# Terminal 2 — MCP stdio server (clients spawn this; useful for manual checks)
+# Terminal 2 — MCP stdio server (clients usually spawn this)
 YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
+```
+
+Wire format: JSON-RPC 2.0 with LSP-style `Content-Length` framing on stdin/stdout. Logging goes to stderr only.
+
+### SSE usage
+
+HTTP/SSE needs two routes: the client opens `GET /sse` and posts JSON-RPC to `POST /messages/`.
+
+```bash
+# One-time deps (venv recommended)
+python3 -m venv tools/.venv-mcp-sse
+tools/.venv-mcp-sse/bin/pip install -r tools/requirements-mcp-sse.txt
+
+# Terminal 1 — database
+./build-darwin-debug/bin/yardb --clog 2112
+
+# Terminal 2 — MCP SSE server
+YARDB_URL=http://127.0.0.1:2112 tools/.venv-mcp-sse/bin/python tools/yardb_mcp_sse.py
+# listens on http://127.0.0.1:8000/sse by default
 ```
 
 | Environment | Meaning |
 |-------------|---------|
-| `YARDB_URL` | Base URL (default `http://127.0.0.1:2112`) |
+| `YARDB_URL` | Base yardb URL (default `http://127.0.0.1:2112`) |
 | `YARDB_PAT` | Optional Bearer token when `yardb --pat` is configured |
+| `YARDB_MCP_SSE_HOST` | SSE bind host (default `127.0.0.1`) |
+| `YARDB_MCP_SSE_PORT` | SSE bind port (default `8000`) |
 
-Wire format: JSON-RPC 2.0 with LSP-style `Content-Length` framing on stdin/stdout. Logging goes to stderr only.
+Point the AI client at the **SSE URL** (not the root): `http://127.0.0.1:8000/sse`.
 
 ### Cursor
 
-This repo registers the server in [`.cursor/mcp.json`](../.cursor/mcp.json). Set `YARDB_URL` / `YARDB_PAT` in the environment (or Cursor MCP env UI) so the bridge can reach your `yardb` instance.
+[`.cursor/mcp.json`](../.cursor/mcp.json) registers:
+
+- `yardb` — stdio (`tools/yardb_mcp.py`); set `YARDB_URL` / `YARDB_PAT` in the environment
+- `yardb-sse` — SSE at `http://127.0.0.1:8000/sse` (start `yardb_mcp_sse.py` first; disable this entry if unused)
 
 ### Tools
+
+Same tool set for both transports:
 
 | Tool | HTTP |
 |------|------|
@@ -462,10 +493,11 @@ Document and patch arguments accept JSON objects (preferred) or JSON strings.
 ```bash
 ./tests/mcp/smoke.sh
 ./tests/mcp/smoke.sh --case crud
-./tests/mcp/smoke.sh --jsonl   # machine-readable output for CI
+./tests/mcp/smoke.sh --case sse   # optional; needs MCP SSE deps
+./tests/mcp/smoke.sh --jsonl      # machine-readable output for CI
 ```
 
-Cases: `tools_list`, `probes`, `crud`, `filter`, `indexes`.
+Cases: `tools_list`, `probes`, `crud`, `filter`, `indexes`, `sse` (skipped when SSE deps are missing).
 
 ## yarproxy - HTTP Fan-out Proxy
 

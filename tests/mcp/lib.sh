@@ -7,6 +7,9 @@ MCP_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${MCP_LIB_DIR}/../yarsh/lib.sh"
 
 MCP_PY="${MCP_PY:-${YARSH_ROOT_DIR}/tools/yardb_mcp.py}"
+MCP_SSE_PY="${MCP_SSE_PY:-${YARSH_ROOT_DIR}/tools/yardb_mcp_sse.py}"
+# Optional venv/interpreter with mcp+uvicorn+starlette (SSE smoke skips if unset/unusable).
+MCP_SSE_PYTHON="${MCP_SSE_PYTHON:-}"
 
 require_mcp_bins() {
   if [[ ! -x "${YARDB_BIN}" ]]; then
@@ -17,6 +20,10 @@ require_mcp_bins() {
     log "MCP bridge not found at ${MCP_PY}"
     exit 1
   fi
+  if [[ ! -f "${MCP_SSE_PY}" ]]; then
+    log "MCP SSE bridge not found at ${MCP_SSE_PY}"
+    exit 1
+  fi
   if ! command -v python3 >/dev/null 2>&1; then
     log "python3 is required for MCP smoke tests"
     exit 1
@@ -25,6 +32,29 @@ require_mcp_bins() {
     log "curl is required for readiness checks"
     exit 1
   fi
+}
+
+mcp_sse_python() {
+  if [[ -n "${MCP_SSE_PYTHON}" ]]; then
+    printf '%s\n' "${MCP_SSE_PYTHON}"
+    return 0
+  fi
+  if [[ -x "${YARSH_ROOT_DIR}/tools/.venv-mcp-sse/bin/python" ]]; then
+    printf '%s\n' "${YARSH_ROOT_DIR}/tools/.venv-mcp-sse/bin/python"
+    return 0
+  fi
+  printf '%s\n' "python3"
+}
+
+# Returns 0 if SSE deps (mcp, uvicorn, starlette) import cleanly.
+mcp_sse_deps_available() {
+  local py
+  py="$(mcp_sse_python)"
+  "${py}" - <<'PY' >/dev/null 2>&1
+import starlette
+import mcp.server.sse
+import uvicorn
+PY
 }
 
 # Run one MCP case against the live yardb. Case logic lives in the Python driver.
@@ -272,6 +302,176 @@ finally:
 # Communicate check count to the shell via a final marker line on stderr-safe channel:
 # print counts as a single JSON object on the last stdout line always (bash parses it).
 print(json.dumps({"type": "smoke_case_stats", "name": CASE, "checks": checks, "failures": failures}), flush=True)
+sys.exit(1 if failures else 0)
+PY
+}
+
+# Optional SSE smoke: starts yardb_mcp_sse.py and exercises tools/list + health via MCP SSE client.
+# Emits smoke_assert_* / smoke_case_stats like run_mcp_case. Skips (exit 0, checks=0, skipped=1) if deps missing.
+run_mcp_sse_case() {
+  local py
+  py="$(mcp_sse_python)"
+  JSONL_MODE="${JSONL_MODE}" \
+  YARDB_URL="${YARDB_URL}" \
+  YARDB_PAT="${YARDB_PAT:-}" \
+    "${py}" - "${MCP_SSE_PY}" <<'PY'
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+
+MCP_SSE_PY = sys.argv[1]
+BASE = (os.environ.get("YARDB_URL") or "http://127.0.0.1:2112").rstrip("/")
+JSONL = os.environ.get("JSONL_MODE", "0") == "1"
+failures = 0
+checks = 0
+
+
+def emit(obj: dict) -> None:
+    if JSONL:
+        print(json.dumps(obj, separators=(",", ":")), flush=True)
+
+
+def log(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
+
+
+def ok(cond: bool, label: str, detail: str = "") -> None:
+    global checks, failures
+    checks += 1
+    if cond:
+        emit({"type": "smoke_assert_passed", "matcher": label})
+        return
+    failures += 1
+    emit({"type": "smoke_assert_failed", "matcher": label, "message": detail or label})
+    log(f"FAIL: {label}" + (f" — {detail}" if detail else ""))
+
+
+def pick_port() -> int:
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+try:
+    import starlette  # noqa: F401
+    import uvicorn  # noqa: F401
+    from mcp import ClientSession
+    from mcp.client.sse import sse_client
+except ImportError as exc:
+    log(f"SSE deps missing ({exc}); skip sse case — pip install -r tools/requirements-mcp-sse.txt")
+    print(
+        json.dumps(
+            {
+                "type": "smoke_case_stats",
+                "name": "sse",
+                "checks": 0,
+                "failures": 0,
+                "skipped": 1,
+            }
+        ),
+        flush=True,
+    )
+    sys.exit(0)
+
+port = pick_port()
+env = {
+    **os.environ,
+    "YARDB_URL": BASE,
+    "YARDB_PAT": os.environ.get("YARDB_PAT", ""),
+    "YARDB_MCP_SSE_HOST": "127.0.0.1",
+    "YARDB_MCP_SSE_PORT": str(port),
+}
+# Avoid PIPE deadlock on uvicorn logs — keep stderr in a temp file.
+err_path = os.environ.get("TMPDIR") or "/tmp"
+err_file = open(os.path.join(err_path, f"yardb_mcp_sse_smoke_{os.getpid()}.err"), "w")
+proc = subprocess.Popen(
+    [sys.executable, MCP_SSE_PY],
+    env=env,
+    stdout=subprocess.DEVNULL,
+    stderr=err_file,
+)
+
+ready = False
+for _ in range(50):
+    if proc.poll() is not None:
+        err_file.flush()
+        try:
+            with open(err_file.name, encoding="utf-8", errors="replace") as f:
+                log(f"SSE server exited early:\n{f.read()}")
+        except OSError:
+            log("SSE server exited early")
+        break
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=0.5) as resp:
+            if resp.status == 200:
+                ready = True
+                break
+    except Exception:
+        time.sleep(0.1)
+
+if not ready:
+    proc.kill()
+    proc.wait(timeout=3)
+    err_file.close()
+    try:
+        os.unlink(err_file.name)
+    except OSError:
+        pass
+    ok(False, "sse_server_ready")
+    print(
+        json.dumps({"type": "smoke_case_stats", "name": "sse", "checks": checks, "failures": failures}),
+        flush=True,
+    )
+    sys.exit(1)
+
+
+async def exercise() -> None:
+    url = f"http://127.0.0.1:{port}/sse"
+    async with sse_client(url) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            listed = await session.list_tools()
+            names = {t.name for t in listed.tools}
+            ok(len(listed.tools) == 12, "sse_tools_count_12", f"got {len(listed.tools)}")
+            ok("health" in names and "query_collection" in names, "sse_tools_core")
+            result = await session.call_tool("health", {})
+            text = ""
+            for block in result.content or []:
+                text += getattr(block, "text", "") or ""
+            payload = json.loads(text) if text.strip().startswith("{") else {}
+            ok(payload.get("status") == 200, "sse_health_200", text[:200])
+
+
+try:
+    asyncio.run(asyncio.wait_for(exercise(), timeout=20))
+except Exception as exc:  # noqa: BLE001
+    ok(False, "sse_client_session", str(exc))
+finally:
+    proc.terminate()
+    try:
+        proc.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=3)
+    err_file.close()
+    try:
+        os.unlink(err_file.name)
+    except OSError:
+        pass
+
+print(
+    json.dumps({"type": "smoke_case_stats", "name": "sse", "checks": checks, "failures": failures}),
+    flush=True,
+)
 sys.exit(1 if failures else 0)
 PY
 }

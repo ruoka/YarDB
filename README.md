@@ -156,7 +156,7 @@ YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp_sse.py
 ./tests/mcp/smoke.sh
 ```
 
-Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) (`yardb` stdio + optional `yardb-sse`).
+Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) (`yardb` stdio, optional `yardb-sse`, and `tester-cb` for CB.sh via `deps/tester/tools/cb_mcp.py` with default tags `[yardb]`).
 
 ## Operations
 

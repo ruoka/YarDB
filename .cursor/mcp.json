@@ -12,6 +12,17 @@
     "yardb-sse": {
       "type": "sse",
       "url": "http://127.0.0.1:8000/sse"
+    },
+    "tester-cb": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["${workspaceFolder}/deps/tester/tools/cb_mcp.py"],
+      "env": {
+        "CB_PROJECT_ROOT": "${workspaceFolder}",
+        "CB_SH": "${workspaceFolder}/tools/CB.sh",
+        "CB_MCP_DEFAULT_CONFIG": "debug",
+        "CB_MCP_DEFAULT_TAGS": "[yardb]"
+      }
     }
   }
 }

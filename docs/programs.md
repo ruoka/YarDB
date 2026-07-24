@@ -415,6 +415,58 @@ Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines
 
 Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `filter_or`, `filter_startswith`, `head`, `if_none_match`, `bad_json`, `auth_required`, `auth_crud`.
 
+## MCP bridge - Cursor / stdio client
+
+YarDB ships an [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) stdio server that exposes a running `yardb` HTTP/OData API as agent tools. The bridge is stdlib Python only (`tools/yardb_mcp.py`); it does not embed the database — start `yardb` separately and point the bridge at it.
+
+### Purpose
+
+- Let IDEs and agents (Cursor, Claude Desktop, custom MCP clients) query and mutate YarDB without a hand-written HTTP client
+- Keep auth and bind policy on `yardb` (`--pat`, loopback defaults); the bridge forwards `Authorization: Bearer` when `YARDB_PAT` is set
+
+### Usage
+
+```bash
+# Terminal 1 — database
+./build-darwin-debug/bin/yardb --clog 2112   # or build-linux-debug/...
+
+# Terminal 2 — MCP stdio server (clients spawn this; useful for manual checks)
+YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
+```
+
+| Environment | Meaning |
+|-------------|---------|
+| `YARDB_URL` | Base URL (default `http://127.0.0.1:2112`) |
+| `YARDB_PAT` | Optional Bearer token when `yardb --pat` is configured |
+
+Wire format: JSON-RPC 2.0 with LSP-style `Content-Length` framing on stdin/stdout. Logging goes to stderr only.
+
+### Cursor
+
+This repo registers the server in [`.cursor/mcp.json`](../.cursor/mcp.json). Set `YARDB_URL` / `YARDB_PAT` in the environment (or Cursor MCP env UI) so the bridge can reach your `yardb` instance.
+
+### Tools
+
+| Tool | HTTP |
+|------|------|
+| `health` / `ready` | `GET /health`, `GET /ready` |
+| `list_collections` / `metadata` | `GET /`, `GET /$metadata` |
+| `query_collection` | `GET /{collection}?$filter=…` (OData query string) |
+| `get_document` / `create_document` / `replace_document` / `update_document` / `delete_document` | CRUD on `/{collection}` and `/{collection}/{id}` |
+| `configure_indexes` / `reindex` | `PUT`/`PATCH /_db/{collection}`, `GET /_reindex` |
+
+Document and patch arguments accept JSON objects (preferred) or JSON strings.
+
+### Smoke tests
+
+```bash
+./tests/mcp/smoke.sh
+./tests/mcp/smoke.sh --case crud
+./tests/mcp/smoke.sh --jsonl   # machine-readable output for CI
+```
+
+Cases: `tools_list`, `probes`, `crud`, `filter`, `indexes`.
+
 ## yarproxy - HTTP Fan-out Proxy
 
 Forwards HTTP requests to multiple independent `yardb` backends. Each backend has its own database file. The long-term aim (mainly for the microservice case) is parallel, fault-tolerant instances per owner; `yarproxy` today is only a development fan-out, not that production path.

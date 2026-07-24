@@ -20,6 +20,7 @@ YarDB is a C++23 application that implements:
 
 - **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
 - **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, and `$count`; `$expand` is parsed but awaits a relationship model
+- **MCP server**: Stdio [Model Context Protocol](https://modelcontextprotocol.io/) bridge (`tools/yardb_mcp.py`) so agents and IDEs (e.g. Cursor) can call the REST/OData API as tools
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
 - **Last-Modified Support**: Timestamp-based conditional requests for cache validation
@@ -36,6 +37,7 @@ YarDB is a C++23 application that implements:
 - ✅ OData query parameters and metadata support
 - ✅ Content negotiation (Accept header, OData metadata levels)
 - ✅ Standard HTTP headers (Location, Content-Location, ETag, Last-Modified)
+- ✅ MCP stdio server for agent/IDE tooling (`tools/yardb_mcp.py`, Cursor config in `.cursor/mcp.json`)
 
 ### Technical Excellence
 - **Native C++ Build System**: Uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects
@@ -110,7 +112,8 @@ YarDB/
 │
 │   Note: std module is built from libc++ source (Clang 21+), not from a submodule
 ├── build-{os}-{config}/  # Build artifacts (generated, e.g., build-darwin-debug/, build-linux-release/)
-├── tools/            # Build tools (CB.sh)
+├── tools/            # Build tools (CB.sh) and MCP bridge (yardb_mcp.py)
+├── .cursor/          # Cursor MCP server config (mcp.json)
 └── docs/             # Documentation
 ```
 
@@ -133,6 +136,20 @@ A development HTTP fan-out proxy for independent `yardb` instances. Parallel / f
 ### yarexport / yarimport - Export, Import, Compaction
 
 Export FSON records as JSONL (`yarexport`, including `--live` for current docs only) and rebuild a database offline (`yarimport`). See [yarexport](docs/programs.md#yarexport---data-export-utility) and [yarimport](docs/programs.md#yarimport---offline-import--compaction).
+
+### MCP server - Agent / IDE bridge
+
+Stdio MCP server that wraps a running `yardb` HTTP API (health, collections, OData query, CRUD, indexes). Requires Python 3 and a live `yardb`. See [MCP bridge documentation](docs/programs.md#mcp-bridge---cursor--stdio-client).
+
+```bash
+# Start yardb, then point the bridge at it (defaults shown)
+YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
+
+# Smoke tests
+./tests/mcp/smoke.sh
+```
+
+Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) automatically in this workspace (`YARDB_URL` / `YARDB_PAT` from the environment).
 
 ## Operations
 
@@ -160,7 +177,7 @@ See [LICENSE](LICENSE) for details.
 
 Start at [docs/README.md](docs/README.md) for the full documentation index. Key guides:
 
-- [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, `yarproxy`, `yarexport`, `yarimport`
+- [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, MCP bridge, `yarproxy`, `yarexport`, `yarimport`
 - [Development Guide](docs/development.md) - Build, test, roadmap
 - [Deployment Guide](docs/deployment.md) - Production deployment
 - [Changelog](docs/changelog.md) - Shipped features and smoke coverage

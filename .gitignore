@@ -33,7 +33,8 @@ tools/cb
 .vscode/
 !.vscode/settings.json
 .vscode-test/
-.cursor/
+.cursor/*
+!.cursor/mcp.json
 
 # Vim
 *.swp

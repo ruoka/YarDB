@@ -38,6 +38,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **MCP stdio bridge** | `tools/yardb_mcp.py` + `.cursor/mcp.json` wrap REST/OData for Cursor; smoke via `./tests/mcp/smoke.sh` (`tools_list`, `probes`, `crud`, `filter`, `indexes`) |
 | **`index()` populates secondaries before unlock** | Adding a secondary key no longer publishes an empty map that makes `$filter`/read on that field return false-empty results until a separate `reindex()`; existing live rows are indexed under the same exclusive lock |
 | **`replace` rejects multi-match selectors** | `engine::replace` returns `conflict` when the selector matches more than one live row instead of tombstoning every match while appending a single successor |
 | **Update/replace commit when truncate fails after restore** | If successors are durable, status restore succeeds, but truncating appends fails, update/replace publish the staged index (and re-tombstone priors) instead of reporting failure while reopen would apply the new version |

@@ -46,6 +46,7 @@ Keep each owner’s data private where practical (loopback + reverse proxy, or n
 ### Available Programs
 - **`yardb`** - Main database server
 - **`yarsh`** - Interactive client (supports piped stdin for scripts/CI; see `./tests/yarsh/smoke.sh`)
+- **`tools/yardb_mcp.py`** - MCP stdio server bridging agents/IDEs to the REST/OData API (see [programs.md](programs.md#mcp-bridge---cursor--stdio-client); smoke: `./tests/mcp/smoke.sh`)
 - **`yarproxy`** - HTTP fan-out proxy (dev/testing; not production HA)
 - **`yarexport` / `yarimport`** - Offline JSONL export/import and compaction (`--live`; see `./tests/yarexport/smoke.sh`)
 - **`benchmark`** - Performance testing

@@ -13,7 +13,7 @@ This directory contains comprehensive project documentation organized by topic a
 - **[json4cpp.md](json4cpp.md)** - Pointer to json4cpp (`deps/xson`) docs (assessment lives upstream)
 
 ### 🚀 Operations & Deployment
-- **[programs.md](programs.md)** - Detailed documentation for all executables (`yardb`, `yarsh`, `yarproxy`, etc.)
+- **[programs.md](programs.md)** - Detailed documentation for all executables and the MCP bridge (`yardb`, `yarsh`, `tools/yardb_mcp.py`, `yarproxy`, etc.)
 - **[deployment.md](deployment.md)** - Deployment procedures and production considerations
 
 ### 🤖 Agent / automation

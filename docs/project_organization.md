@@ -10,8 +10,11 @@ YarDB/
 ├── LICENSE                      # Project license
 ├── CONTRIBUTING.md              # Contribution guidelines
 ├── AGENTS.md                    # AI/CI JSONL build and test triage
-├── tools/                       # Build tools
-│   └── CB.sh                    # C++ Builder bootstrap script
+├── tools/                       # Build tools and MCP bridge
+│   ├── CB.sh                    # C++ Builder bootstrap script
+│   └── yardb_mcp.py             # MCP stdio server (REST/OData bridge)
+├── .cursor/
+│   └── mcp.json                 # Cursor MCP server registration
 ├── .gitignore                   # Git ignore rules
 ├── .gitmodules                  # Git submodule configuration
 │
@@ -36,6 +39,9 @@ YarDB/
 ├── tests/                       # Functional/Integration tests (P1204R0)
 │   ├── yarsh/                   # Piped yarsh smoke tests (CI + local)
 │   │   ├── lib.sh               # yardb lifecycle + assertions
+│   │   └── smoke.sh             # smoke entry point
+│   ├── mcp/                     # yardb MCP bridge smoke tests
+│   │   ├── lib.sh               # MCP JSON-RPC driver (reuses yarsh lifecycle)
 │   │   └── smoke.sh             # smoke entry point
 │   ├── yarexport/               # yarexport / yarimport smoke tests
 │   │   ├── lib.sh
@@ -157,10 +163,11 @@ Dependencies are managed as git submodules in `deps/`:
   - Example: `yar-engine.test.c++` tests `yar-engine.c++m`
 - **Functional Tests**: In `tests/` directory
   - `tests/yarsh/smoke.sh` — black-box CLI smoke tests (piped `yarsh` + ephemeral `yardb`)
+  - `tests/mcp/smoke.sh` — MCP stdio bridge smoke tests (`tools/yardb_mcp.py` + ephemeral `yardb`)
   - `tests/yarexport/smoke.sh` — export/import/compaction smoke tests (`--live`, `yarimport` roundtrip)
   - `tests/yarproxy/smoke.sh` — proxy smoke tests (multi-replica cluster, fan-out writes, round-robin reads)
   - `tests/yar.sh` — manual multi-server demo
-- **Test Runner**: Unit tests via `./tools/CB.sh debug test --tags='\[yardb\]'`; smoke via `./tests/yarsh/smoke.sh`, `./tests/yarexport/smoke.sh`, and `./tests/yarproxy/smoke.sh`
+- **Test Runner**: Unit tests via `./tools/CB.sh debug test --tags='\[yardb\]'`; smoke via `./tests/yarsh/smoke.sh`, `./tests/mcp/smoke.sh`, `./tests/yarexport/smoke.sh`, and `./tests/yarproxy/smoke.sh`
 
 ## References
 

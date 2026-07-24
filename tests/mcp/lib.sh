@@ -324,6 +324,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 MCP_SSE_PY = sys.argv[1]
@@ -432,6 +433,33 @@ if not ready:
         flush=True,
     )
     sys.exit(1)
+
+# DNS-rebinding protection: cross-origin browser clients must not drive the PAT proxy.
+try:
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/sse",
+        headers={"Origin": "http://evil.example", "Accept": "text/event-stream"},
+    )
+    with urllib.request.urlopen(req, timeout=2) as resp:
+        ok(False, "sse_rejects_evil_origin", f"status={resp.status}")
+except urllib.error.HTTPError as exc:
+    ok(exc.code in (403, 421), "sse_rejects_evil_origin", f"status={exc.code}")
+except Exception as exc:  # noqa: BLE001
+    ok(False, "sse_rejects_evil_origin", str(exc))
+
+# Wildcard binds publish an unauthenticated CRUD proxy — refuse like yardb's public-bind gate.
+wild = subprocess.run(
+    [sys.executable, MCP_SSE_PY],
+    env={**env, "YARDB_MCP_SSE_HOST": "0.0.0.0", "YARDB_MCP_SSE_PORT": str(pick_port())},
+    capture_output=True,
+    text=True,
+    timeout=5,
+)
+ok(wild.returncode != 0, "sse_refuses_wildcard_bind", f"exit={wild.returncode}")
+ok(
+    "refusing to bind MCP SSE" in (wild.stderr or "") + (wild.stdout or ""),
+    "sse_wildcard_bind_message",
+)
 
 
 async def exercise() -> None:

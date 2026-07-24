@@ -427,7 +427,8 @@ YarDB ships [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) bri
 ### Purpose
 
 - Let IDEs and agents (Cursor, Claude Desktop, custom MCP clients) query and mutate YarDB without a hand-written HTTP client
-- Keep auth and bind policy on `yardb` (`--pat`, loopback defaults); the bridge forwards `Authorization: Bearer` when `YARDB_PAT` is set
+- Keep data-plane auth on `yardb` (`--pat`, loopback defaults); the bridge forwards `Authorization: Bearer` when `YARDB_PAT` is set
+- The SSE transport enables MCP DNS-rebinding protection (Host/Origin allowlists) and refuses wildcard binds (`0.0.0.0` / `::`) — the bridge has no client auth of its own and would otherwise publish a PAT-injecting CRUD proxy
 
 ### Stdio usage
 
@@ -462,7 +463,7 @@ YARDB_URL=http://127.0.0.1:2112 tools/.venv-mcp-sse/bin/python tools/yardb_mcp_s
 |-------------|---------|
 | `YARDB_URL` | Base yardb URL (default `http://127.0.0.1:2112`) |
 | `YARDB_PAT` | Optional Bearer token when `yardb --pat` is configured |
-| `YARDB_MCP_SSE_HOST` | SSE bind host (default `127.0.0.1`) |
+| `YARDB_MCP_SSE_HOST` | SSE bind host (default `127.0.0.1`; wildcards `0.0.0.0` / `::` refused) |
 | `YARDB_MCP_SSE_PORT` | SSE bind port (default `8000`) |
 
 Point the AI client at the **SSE URL** (not the root): `http://127.0.0.1:8000/sse`.

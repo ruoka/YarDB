@@ -10,7 +10,7 @@ Requires: pip install -r tools/requirements-mcp-sse.txt
 Environment:
   YARDB_URL              Base yardb URL (default http://127.0.0.1:2112)
   YARDB_PAT              Optional Bearer token
-  YARDB_MCP_SSE_HOST     Bind host (default 127.0.0.1; 0.0.0.0/:: refused)
+  YARDB_MCP_SSE_HOST     Bind host (default 127.0.0.1; any-address aliases refused)
   YARDB_MCP_SSE_PORT     Bind port (default 8000)
 
 Endpoints:
@@ -25,6 +25,7 @@ Cursor / client config should point at the SSE URL, e.g.:
 from __future__ import annotations
 
 import os
+import socket
 import sys
 from pathlib import Path
 
@@ -46,18 +47,61 @@ HOST = os.environ.get("YARDB_MCP_SSE_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("YARDB_MCP_SSE_PORT") or "8000")
 
 
-def _is_wildcard_bind_host(host: str) -> bool:
-    """Match yardb/net wildcard bind policy (public any-address binds)."""
-    normalized = host.strip().lower()
+def _normalize_bind_host(host: str) -> str:
+    normalized = host.strip()
     if normalized.startswith("[") and normalized.endswith("]"):
         normalized = normalized[1:-1]
-    return normalized in {"0.0.0.0", "::", "*"}
+    return normalized
+
+
+def _is_unspecified_bind_address(family: int, sockaddr: tuple) -> bool:
+    """True for INADDR_ANY / in6addr_any / ::ffff:0.0.0.0 (matches net::acceptor)."""
+    if family == socket.AF_INET:
+        return sockaddr[0] == "0.0.0.0"
+    if family == socket.AF_INET6:
+        try:
+            packed = socket.inet_pton(socket.AF_INET6, sockaddr[0])
+        except OSError:
+            return False
+        if packed == bytes(16):
+            return True
+        # IPv4-mapped ::ffff:0.0.0.0 — Linux accepts IPv4 clients on that any.
+        return packed[:12] == bytes.fromhex("00000000000000000000ffff") and packed[12:] == bytes(
+            4
+        )
+    return False
+
+
+def _is_wildcard_bind_host(host: str) -> bool:
+    """
+    Match yardb/net::is_wildcard_bind_host (AI_PASSIVE resolve).
+
+    Literal string checks miss getaddrinfo aliases that still bind all
+    interfaces (`0`, `0.0.0`, `::0`, `0000::`, …).
+    """
+    normalized = _normalize_bind_host(host)
+    # Portable refuse: some platforms reject '*' even though Linux maps it to any.
+    if normalized == "*":
+        return True
+    try:
+        # Empty node + AI_PASSIVE → unspecified (same as net address_info).
+        node = normalized if normalized else None
+        infos = socket.getaddrinfo(
+            node,
+            "0",
+            type=socket.SOCK_STREAM,
+            flags=socket.AI_PASSIVE,
+        )
+    except socket.gaierror:
+        return False
+    return any(
+        _is_unspecified_bind_address(family, sockaddr)
+        for family, _type, _proto, _canon, sockaddr in infos
+    )
 
 
 def _is_loopback_bind_host(host: str) -> bool:
-    normalized = host.strip().lower()
-    if normalized.startswith("[") and normalized.endswith("]"):
-        normalized = normalized[1:-1]
+    normalized = _normalize_bind_host(host).lower()
     return normalized in {"127.0.0.1", "localhost", "::1"}
 
 

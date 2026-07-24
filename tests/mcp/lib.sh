@@ -448,18 +448,18 @@ except Exception as exc:  # noqa: BLE001
     ok(False, "sse_rejects_evil_origin", str(exc))
 
 # Wildcard binds publish an unauthenticated CRUD proxy — refuse like yardb's public-bind gate.
-wild = subprocess.run(
-    [sys.executable, MCP_SSE_PY],
-    env={**env, "YARDB_MCP_SSE_HOST": "0.0.0.0", "YARDB_MCP_SSE_PORT": str(pick_port())},
-    capture_output=True,
-    text=True,
-    timeout=5,
-)
-ok(wild.returncode != 0, "sse_refuses_wildcard_bind", f"exit={wild.returncode}")
-ok(
-    "refusing to bind MCP SSE" in (wild.stderr or "") + (wild.stdout or ""),
-    "sse_wildcard_bind_message",
-)
+# Include getaddrinfo aliases that still resolve to INADDR_ANY / in6addr_any.
+for wild_host in ("0.0.0.0", "0", "0.0.0", "::", "::0", "0000::", "*"):
+    wild = subprocess.run(
+        [sys.executable, MCP_SSE_PY],
+        env={**env, "YARDB_MCP_SSE_HOST": wild_host, "YARDB_MCP_SSE_PORT": str(pick_port())},
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    out = (wild.stderr or "") + (wild.stdout or "")
+    ok(wild.returncode != 0, f"sse_refuses_wildcard_bind_{wild_host}", f"exit={wild.returncode}")
+    ok("refusing to bind MCP SSE" in out, f"sse_wildcard_bind_message_{wild_host}")
 
 
 async def exercise() -> None:

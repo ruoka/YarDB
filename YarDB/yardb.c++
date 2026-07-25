@@ -12,11 +12,17 @@ using namespace std;
 using namespace net;
 
 const auto usage = R"(
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--pat=<token>] [--pat-file=<path>] [--admin-pat=<token>] [--admin-pat-file=<path>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--mcp|--no-mcp] [--pat=<token>] [--pat-file=<path>] [--admin-pat=<token>] [--admin-pat-file=<path>] [service_or_port]
 
 Listen address (default: 127.0.0.1):
   --bind=<host>       Bind host (default 127.0.0.1). Use --bind=0.0.0.0 for Docker/port-forwarding.
                       Binding to 0.0.0.0 or :: requires --pat or --pat-file.
+
+Native MCP (HTTP+SSE, default on):
+  --mcp               Enable GET /sse + POST /messages/ (http::mcp; default)
+  --no-mcp            Disable native MCP endpoints
+  Cursor URL:         http://127.0.0.1:<port>/sse
+  Python bridges in tools/*_mcp.py remain available as a reference/oracle.
 
 Optional PAT authentication (Bearer token):
   --pat=<token>            Accept a data-API personal access token (repeatable)
@@ -165,6 +171,7 @@ try
     auto file = "yar.db"s;
     auto bind_host = "127.0.0.1"s;
     auto service_or_port = "2112"s;
+    auto enable_mcp = true;
     auto raw_pats = vector<string>{};
     auto pat_files = vector<string>{};
     auto raw_admin_pats = vector<string>{};
@@ -221,6 +228,18 @@ try
             continue;
         }
 
+        if(option == "--mcp")
+        {
+            enable_mcp = true;
+            continue;
+        }
+
+        if(option == "--no-mcp")
+        {
+            enable_mcp = false;
+            continue;
+        }
+
         if(option.starts_with("--admin-pat-file="))
         {
             admin_pat_files.push_back(string{option.substr(string_view{"--admin-pat-file="}.size())});
@@ -270,6 +289,9 @@ try
 
     slog << notice << "Starting up server on " << bind_host << ":" << service_or_port << flush;
     auto server = yar::http::rest_api_server{file, service_or_port, bind_host};
+    server.enable_mcp(enable_mcp);
+    if(enable_mcp)
+        slog << notice << "Native MCP SSE enabled at http://" << bind_host << ":" << service_or_port << "/sse" << flush;
 
     if(not hashed_pats.empty() or not hashed_admin_pats.empty())
     {

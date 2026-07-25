@@ -1,6 +1,10 @@
 {
   "mcpServers": {
     "yardb": {
+      "type": "sse",
+      "url": "http://127.0.0.1:2112/sse"
+    },
+    "yardb-python-stdio": {
       "type": "stdio",
       "command": "python3",
       "args": ["${workspaceFolder}/tools/yardb_mcp.py"],
@@ -9,7 +13,7 @@
         "YARDB_PAT": "${env:YARDB_PAT}"
       }
     },
-    "yardb-sse": {
+    "yardb-python-sse": {
       "type": "sse",
       "url": "http://127.0.0.1:8000/sse"
     },

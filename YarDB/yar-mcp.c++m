@@ -1,0 +1,314 @@
+// Copyright (c) 2025-2026 Kaius Ruokonen. All rights reserved.
+// SPDX-License-Identifier: MIT
+// See the LICENSE file in the project root for full license text.
+
+export module yar:mcp;
+import :engine;
+import :odata;
+import :constants;
+import std;
+import net;
+import xson;
+
+export namespace yar::mcp
+{
+
+using namespace std::string_literals;
+using namespace std::string_view_literals;
+
+inline auto json_text_result(const xson::object& body, bool is_error = false) -> ::http::mcp::tool_result
+{
+    return {
+        .text = xson::json::stringify(body, 2),
+        .is_error = is_error,
+    };
+}
+
+inline auto json_text_result(std::string_view text, bool is_error = false) -> ::http::mcp::tool_result
+{
+    return {.text = std::string{text}, .is_error = is_error};
+}
+
+inline auto require_string(const xson::object& args, std::string_view key) -> std::string
+{
+    if(not args.has(std::string{key}) or not args[std::string{key}].is_string())
+        throw std::invalid_argument{"missing or invalid string field: "s + std::string{key}};
+    return static_cast<std::string>(args[std::string{key}]);
+}
+
+inline auto parse_args(std::string_view arguments_json) -> xson::object
+{
+    if(arguments_json.empty())
+        return xson::object{};
+    auto parsed = xson::json::parse(arguments_json);
+    if(not parsed.is_object())
+        throw std::invalid_argument{"tool arguments must be a JSON object"};
+    return parsed;
+}
+
+// Parse `a=1&b=2` OData query (no leading '?').
+inline auto parse_odata_query(std::string_view query) -> std::flat_map<std::string, std::string>
+{
+    auto params = std::flat_map<std::string, std::string>{};
+    auto rest = query;
+    while(not rest.empty() and rest.front() == '?')
+        rest.remove_prefix(1);
+    while(not rest.empty())
+    {
+        const auto amp = rest.find('&');
+        const auto part = amp == std::string_view::npos ? rest : rest.substr(0, amp);
+        const auto eq = part.find('=');
+        if(eq != std::string_view::npos)
+            params[std::string{part.substr(0, eq)}] = std::string{part.substr(eq + 1)};
+        if(amp == std::string_view::npos)
+            break;
+        rest.remove_prefix(amp + 1);
+    }
+    return params;
+}
+
+inline auto tool_specs() -> std::vector<::http::mcp::tool_spec>
+{
+    constexpr auto empty_schema = R"({"type":"object","properties":{},"additionalProperties":false})";
+    return {
+        {.name = "health"s, .description = "GET /health — liveness probe"s, .input_schema = empty_schema},
+        {.name = "ready"s, .description = "GET /ready — readiness probe"s, .input_schema = empty_schema},
+        {.name = "list_collections"s, .description = "GET / — list collection names"s, .input_schema = empty_schema},
+        {.name = "metadata"s, .description = "GET /$metadata — OData 4.01 JSON CSDL"s, .input_schema = empty_schema},
+        {
+            .name = "query_collection"s,
+            .description = "GET /{collection} with optional OData query (no leading '?')"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"odata_query":{"type":"string","default":""}},"required":["collection"],"additionalProperties":false})"s,
+        },
+        {
+            .name = "get_document"s,
+            .description = "GET /{collection}/{id}"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"document_id":{"type":"string"}},"required":["collection","document_id"],"additionalProperties":false})"s,
+        },
+        {
+            .name = "create_document"s,
+            .description = "POST /{collection}"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"document":{"type":"object"}},"required":["collection","document"],"additionalProperties":false})"s,
+        },
+        {
+            .name = "replace_document"s,
+            .description = "PUT /{collection}/{id} upsert"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"document_id":{"type":"string"},"document":{"type":"object"}},"required":["collection","document_id","document"],"additionalProperties":false})"s,
+        },
+        {
+            .name = "update_document"s,
+            .description = "PATCH /{collection}/{id}"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"document_id":{"type":"string"},"patch":{"type":"object"}},"required":["collection","document_id","patch"],"additionalProperties":false})"s,
+        },
+        {
+            .name = "delete_document"s,
+            .description = "DELETE /{collection}/{id}"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"document_id":{"type":"string"}},"required":["collection","document_id"],"additionalProperties":false})"s,
+        },
+        {.name = "reindex"s, .description = "GET /_reindex — rebuild indexes"s, .input_schema = empty_schema},
+        {
+            .name = "configure_indexes"s,
+            .description = "PUT/PATCH /_db/{collection}; keys is {\"keys\":[\"field\"]} or [\"field\"]"s,
+            .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"keys":{},"incremental":{"type":"boolean","default":false}},"required":["collection","keys"],"additionalProperties":false})"s,
+        },
+    };
+}
+
+inline auto call_tool(
+    yar::db::engine& engine,
+    std::function<std::string()> ready_status,
+    std::string_view name,
+    std::string_view arguments_json) -> ::http::mcp::tool_result
+{
+    try
+    {
+        if(name == "health"sv)
+        {
+            return json_text_result(xson::object{{"status"s, "ok"s}});
+        }
+        if(name == "ready"sv)
+        {
+            const auto status = ready_status ? ready_status() : "ready"s;
+            return json_text_result(xson::object{{"status"s, status}});
+        }
+        if(name == "list_collections"sv)
+        {
+            return json_text_result(xson::object{{"collections"s, engine.collections()}});
+        }
+        if(name == "metadata"sv)
+        {
+            return json_text_result(yar::http::odata::generate_metadata(engine));
+        }
+        if(name == "reindex"sv)
+        {
+            const auto result = engine.reindex();
+            if(not result)
+                return json_text_result(xson::object{{"error"s, "reindex failed"s}}, true);
+            return json_text_result(xson::object{{"status"s, "ok"s}});
+        }
+
+        auto args = parse_args(arguments_json);
+
+        if(name == "query_collection"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            auto odata_query = ""s;
+            if(args.has("odata_query"s) and args["odata_query"s].is_string())
+                odata_query = static_cast<std::string>(args["odata_query"s]);
+
+            auto selector = xson::object{};
+            const auto params = parse_odata_query(odata_query);
+            if(params.contains("$top"s))
+                selector["$top"s] = yar::http::odata::parse_top(params.at("$top"s));
+            if(params.contains("$skip"s))
+                selector["$skip"s] = yar::http::odata::parse_skip(params.at("$skip"s));
+            if(params.contains("$orderby"s))
+            {
+                const auto orderby = yar::http::odata::parse_orderby(params.at("$orderby"s));
+                selector["$orderby"s] = orderby.field_name;
+                if(orderby.descending)
+                    selector["$desc"s] = true;
+            }
+
+            auto documents = xson::object{};
+            if(params.contains("$filter"s))
+            {
+                const auto parsed = yar::http::odata::parse_filter(params.at("$filter"s));
+                documents = yar::http::odata::read_with_parsed_filter(
+                    engine, collection, selector, parsed);
+            }
+            else
+            {
+                engine.read(collection, selector, documents);
+            }
+            return json_text_result(documents);
+        }
+
+        if(name == "get_document"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            const auto id = std::stoll(require_string(args, "document_id"sv));
+            auto documents = xson::object{};
+            engine.read(collection, xson::object{{"_id"s, id}}, documents);
+            auto& arr = documents.get<xson::object::array>();
+            if(arr.empty())
+                return json_text_result(xson::object{{"error"s, "Not Found"s}}, true);
+            return json_text_result(arr[0]);
+        }
+
+        if(name == "create_document"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            if(not args.has("document"s) or not args["document"s].is_object())
+                throw std::invalid_argument{"document must be a JSON object"};
+            auto document = args["document"s];
+            const auto created = engine.create(collection, document);
+            if(not created)
+                return json_text_result(xson::object{{"error"s, "create failed"s}}, true);
+            return json_text_result(document);
+        }
+
+        if(name == "replace_document"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            const auto id = std::stoll(require_string(args, "document_id"sv));
+            if(not args.has("document"s) or not args["document"s].is_object())
+                throw std::invalid_argument{"document must be a JSON object"};
+            auto document = args["document"s];
+            const auto outcome = engine.put(collection, xson::object{{"_id"s, id}}, document);
+            if(not outcome)
+                return json_text_result(xson::object{{"error"s, "replace failed"s}}, true);
+            return json_text_result(document);
+        }
+
+        if(name == "update_document"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            const auto id = std::stoll(require_string(args, "document_id"sv));
+            if(not args.has("patch"s) or not args["patch"s].is_object())
+                throw std::invalid_argument{"patch must be a JSON object"};
+            auto documents = xson::object{};
+            const auto updated = engine.update(
+                collection,
+                xson::object{{"_id"s, id}},
+                args["patch"s],
+                documents);
+            if(not updated)
+                return json_text_result(xson::object{{"error"s, "update failed"s}}, true);
+            if(updated.value() == 0)
+                return json_text_result(xson::object{{"error"s, "Not Found"s}}, true);
+            auto& arr = documents.get<xson::object::array>();
+            return json_text_result(arr.empty() ? xson::object{} : arr[0]);
+        }
+
+        if(name == "delete_document"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            const auto id = std::stoll(require_string(args, "document_id"sv));
+            auto documents = xson::object{};
+            const auto destroyed = engine.destroy(
+                collection,
+                xson::object{{"_id"s, id}},
+                documents);
+            if(not destroyed)
+                return json_text_result(xson::object{{"error"s, "delete failed"s}}, true);
+            if(destroyed.value() == 0)
+                return json_text_result(xson::object{{"error"s, "Not Found"s}}, true);
+            return json_text_result(xson::object{{"deleted"s, static_cast<std::int64_t>(destroyed.value())}});
+        }
+
+        if(name == "configure_indexes"sv)
+        {
+            const auto collection = require_string(args, "collection"sv);
+            if(not args.has("keys"s))
+                throw std::invalid_argument{"keys is required"};
+
+            auto keys = std::vector<std::string>{};
+            auto keys_value = args["keys"s];
+            if(keys_value.is_array())
+            {
+                for(const auto& key : keys_value.get<xson::object::array>())
+                    keys.push_back(static_cast<std::string>(key));
+            }
+            else if(keys_value.is_object() and keys_value.has("keys"s) and keys_value["keys"s].is_array())
+            {
+                for(const auto& key : keys_value["keys"s].get<xson::object::array>())
+                    keys.push_back(static_cast<std::string>(key));
+            }
+            else
+                throw std::invalid_argument{"keys must be an array or {\"keys\":[...]}"};
+
+            // incremental flag is accepted for API parity; engine.index replaces keys.
+            (void)args;
+            const auto indexed = engine.index(collection, std::move(keys));
+            if(not indexed)
+                return json_text_result(xson::object{{"error"s, "index failed"s}}, true);
+            return json_text_result(xson::object{
+                {"collection"s, collection},
+                {"keys"s, engine.indexed_keys(collection)},
+            });
+        }
+
+        return json_text_result("unknown tool: "s + std::string{name}, true);
+    }
+    catch(const std::exception& e)
+    {
+        return json_text_result("error: "s + e.what(), true);
+    }
+}
+
+// Build MCP protocol server (caller attaches to http::server and keeps this alive).
+inline auto make_mcp_server(
+    yar::db::engine& engine,
+    std::function<std::string()> ready_status) -> std::unique_ptr<::http::mcp::server>
+{
+    auto mcp = std::make_unique<::http::mcp::server>("/messages/");
+    mcp->info({.name = "yardb"s, .version = "1.0.0"s})
+        .list_tools([] { return tool_specs(); })
+        .call_tool([&engine, ready_status = std::move(ready_status)](std::string_view name, std::string_view args) {
+            return call_tool(engine, ready_status, name, args);
+        });
+    return mcp;
+}
+
+} // namespace yar::mcp

@@ -415,90 +415,74 @@ Starts a local `yardb`, pipes commands into `yarsh`, and asserts on status lines
 
 Cases: `crud`, `put`, `patch`, `count`, `top_skip`, `orderby`, `select`, `filter_eq_gt`, `filter_in`, `filter_ne`, `filter_or`, `filter_startswith`, `head`, `if_none_match`, `bad_json`, `auth_required`, `auth_crud`.
 
-## MCP bridge - Cursor / agent client
+## MCP - Cursor / agent client
 
-YarDB ships [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) bridges that expose a running `yardb` HTTP/OData API as agent tools. Neither bridge embeds the database — start `yardb` separately and point the bridge at it (`YARDB_URL` / optional `YARDB_PAT`).
+YarDB exposes [MCP](https://modelcontextprotocol.io/) tools over native HTTP+SSE inside `yardb`
+(net4cpp `http::mcp`). Python bridges remain as a reference/oracle.
 
-| Transport | File | Deps |
-|-----------|------|------|
-| **stdio** (default) | `tools/yardb_mcp.py` | stdlib only |
-| **HTTP/SSE** | `tools/yardb_mcp_sse.py` | `pip install -r tools/requirements-mcp-sse.txt` (`mcp`, `uvicorn`, `starlette`) |
+| Transport | Entry | Notes |
+|-----------|-------|-------|
+| **Native HTTP/SSE** (default) | `yardb` (`--mcp`, `--no-mcp` to disable) | `GET /sse` + `POST /messages/`; engine-backed tools; Host/Origin guards |
+| **Python stdio** (reference) | `tools/yardb_mcp.py` | stdlib only; proxies HTTP to a running `yardb` |
+| **Python HTTP/SSE** (reference) | `tools/yardb_mcp_sse.py` | optional deps; default `http://127.0.0.1:8000/sse` |
 
-### Purpose
-
-- Let IDEs and agents (Cursor, Claude Desktop, custom MCP clients) query and mutate YarDB without a hand-written HTTP client
-- Keep data-plane auth on `yardb` (`--pat`, loopback defaults); the bridge forwards `Authorization: Bearer` when `YARDB_PAT` is set
-- The SSE transport enables MCP DNS-rebinding protection (Host/Origin allowlists), refuses wildcard binds (`0.0.0.0` / `::` and getaddrinfo aliases such as `0` / `::0`), and when `YARDB_MCP_SSE_HOST` is loopback refuses non-loopback peers (so `uvicorn … --host 0.0.0.0` cannot Host-spoof past the env gate) — the bridge has no client auth of its own and would otherwise publish a PAT-injecting CRUD proxy
-
-### Stdio usage
+### Native usage
 
 ```bash
-# Terminal 1 — database
-./build-darwin-debug/bin/yardb --clog 2112   # or build-linux-debug/...
-
-# Terminal 2 — MCP stdio server (clients usually spawn this)
-YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
+./build-darwin-debug/bin/yardb --clog 2112
+# MCP URL for Cursor / clients:
+#   http://127.0.0.1:2112/sse
 ```
 
-Wire format: JSON-RPC 2.0 with LSP-style `Content-Length` framing on stdin/stdout. Logging goes to stderr only.
+Tools call the database engine in-process (not a second HTTP hop). DNS-rebinding
+protection uses Host/Origin allowlists from `http::mcp` (localhost defaults plus the
+configured `--bind` host).
 
-### SSE usage
+### Python reference bridges
 
-HTTP/SSE needs two routes: the client opens `GET /sse` and posts JSON-RPC to `POST /messages/`.
+The Python SSE bridge still enables Host/Origin allowlists, refuses any-address
+wildcards (including getaddrinfo aliases such as `0` / `::0`), and when
+`YARDB_MCP_SSE_HOST` is loopback refuses non-loopback peers (so
+`uvicorn … --host 0.0.0.0` cannot Host-spoof past the env gate). Prefer
+`python tools/yardb_mcp_sse.py` so bind host matches the env.
 
 ```bash
-# One-time deps (venv recommended)
+# Stdio (clients usually spawn this)
+YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
+
+# SSE bridge (separate process on :8000)
 python3 -m venv tools/.venv-mcp-sse
 tools/.venv-mcp-sse/bin/pip install -r tools/requirements-mcp-sse.txt
-
-# Terminal 1 — database
-./build-darwin-debug/bin/yardb --clog 2112
-
-# Terminal 2 — MCP SSE server
 YARDB_URL=http://127.0.0.1:2112 tools/.venv-mcp-sse/bin/python tools/yardb_mcp_sse.py
-# listens on http://127.0.0.1:8000/sse by default
 ```
 
 | Environment | Meaning |
 |-------------|---------|
-| `YARDB_URL` | Base yardb URL (default `http://127.0.0.1:2112`) |
+| `YARDB_URL` | Base yardb URL for Python bridges (default `http://127.0.0.1:2112`) |
 | `YARDB_PAT` | Optional Bearer token when `yardb --pat` is configured |
-| `YARDB_MCP_SSE_HOST` | SSE bind host (default `127.0.0.1`; any-address wildcards and aliases refused). Prefer `python tools/yardb_mcp_sse.py` so bind host matches this env; if you launch via `uvicorn yardb_mcp_sse:app`, keep `--host` aligned (loopback env rejects non-loopback peers). |
-| `YARDB_MCP_SSE_PORT` | SSE bind port (default `8000`) |
-
-Point the AI client at the **SSE URL** (not the root): `http://127.0.0.1:8000/sse`.
+| `YARDB_MCP_SSE_HOST` | Python SSE bind host (default `127.0.0.1`; any-address wildcards and aliases refused; loopback env rejects non-loopback peers under uvicorn) |
+| `YARDB_MCP_SSE_PORT` | Python SSE bind port (default `8000`) |
 
 ### Cursor
 
 [`.cursor/mcp.json`](../.cursor/mcp.json) registers:
 
-- `yardb` — stdio (`tools/yardb_mcp.py`); set `YARDB_URL` / `YARDB_PAT` in the environment
-- `yardb-sse` — SSE at `http://127.0.0.1:8000/sse` (start `yardb_mcp_sse.py` first; disable this entry if unused)
+- `yardb` — native SSE at `http://127.0.0.1:2112/sse` (start `yardb` first)
+- `yardb-python-stdio` / `yardb-python-sse` — reference Python bridges
 
 ### Tools
 
-Same tool set for both transports:
-
-| Tool | HTTP |
-|------|------|
-| `health` / `ready` | `GET /health`, `GET /ready` |
-| `list_collections` / `metadata` | `GET /`, `GET /$metadata` |
-| `query_collection` | `GET /{collection}?$filter=…` (OData query string) |
-| `get_document` / `create_document` / `replace_document` / `update_document` / `delete_document` | CRUD on `/{collection}` and `/{collection}/{id}` |
-| `configure_indexes` / `reindex` | `PUT`/`PATCH /_db/{collection}`, `GET /_reindex` |
-
-Document and patch arguments accept JSON objects (preferred) or JSON strings.
+Same tool names as the Python bridges (`health`, `ready`, `list_collections`, `metadata`,
+`query_collection`, CRUD, `configure_indexes`, `reindex`). Native tools use the engine
+directly; Python tools proxy the REST/OData HTTP API.
 
 ### Smoke tests
 
 ```bash
-./tests/mcp/smoke.sh
-./tests/mcp/smoke.sh --case crud
-./tests/mcp/smoke.sh --case sse   # optional; needs MCP SSE deps
-./tests/mcp/smoke.sh --jsonl      # machine-readable output for CI
+./tests/mcp/smoke.sh                 # Python stdio oracle (still useful)
+./tests/mcp/smoke.sh --case sse      # optional Python SSE
+./tools/CB.sh debug test "native MCP" --tags='\[yardb\]'
 ```
-
-Cases: `tools_list`, `probes`, `crud`, `filter`, `indexes`, `sse` (skipped when SSE deps are missing).
 
 ## yarproxy - HTTP Fan-out Proxy
 

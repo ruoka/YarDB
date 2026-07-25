@@ -16,7 +16,7 @@ export namespace yar::mcp
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 
-inline auto json_text_result(const xson::object& body, bool is_error = false) -> ::http::mcp::tool_result
+inline ::http::mcp::tool_result json_text_result(const xson::object& body, bool is_error = false)
 {
     return {
         .text = xson::json::stringify(body, 2),
@@ -24,19 +24,19 @@ inline auto json_text_result(const xson::object& body, bool is_error = false) ->
     };
 }
 
-inline auto json_text_result(std::string_view text, bool is_error = false) -> ::http::mcp::tool_result
+inline ::http::mcp::tool_result json_text_result(std::string_view text, bool is_error = false)
 {
     return {.text = std::string{text}, .is_error = is_error};
 }
 
-inline auto require_string(const xson::object& args, std::string_view key) -> std::string
+inline std::string require_string(const xson::object& args, std::string_view key)
 {
     if(not args.has(std::string{key}) or not args[std::string{key}].is_string())
         throw std::invalid_argument{"missing or invalid string field: "s + std::string{key}};
     return static_cast<std::string>(args[std::string{key}]);
 }
 
-inline auto parse_args(std::string_view arguments_json) -> xson::object
+inline xson::object parse_args(std::string_view arguments_json)
 {
     if(arguments_json.empty())
         return xson::object{};
@@ -47,7 +47,7 @@ inline auto parse_args(std::string_view arguments_json) -> xson::object
 }
 
 // Parse `a=1&b=2` OData query (no leading '?').
-inline auto parse_odata_query(std::string_view query) -> std::flat_map<std::string, std::string>
+inline std::flat_map<std::string, std::string> parse_odata_query(std::string_view query)
 {
     auto params = std::flat_map<std::string, std::string>{};
     auto rest = query;
@@ -67,7 +67,7 @@ inline auto parse_odata_query(std::string_view query) -> std::flat_map<std::stri
     return params;
 }
 
-inline auto tool_specs() -> std::vector<::http::mcp::tool_spec>
+inline std::vector<::http::mcp::tool_spec> tool_specs()
 {
     constexpr auto empty_schema = R"({"type":"object","properties":{},"additionalProperties":false})";
     return {
@@ -114,11 +114,11 @@ inline auto tool_specs() -> std::vector<::http::mcp::tool_spec>
     };
 }
 
-inline auto call_tool(
+inline ::http::mcp::tool_result call_tool(
     yar::db::engine& engine,
     std::function<std::string()> ready_status,
     std::string_view name,
-    std::string_view arguments_json) -> ::http::mcp::tool_result
+    std::string_view arguments_json)
 {
     try
     {
@@ -298,9 +298,9 @@ inline auto call_tool(
 }
 
 // Build MCP protocol server (caller attaches to http::server and keeps this alive).
-inline auto make_mcp_server(
+inline std::unique_ptr<::http::mcp::server> make_mcp_server(
     yar::db::engine& engine,
-    std::function<std::string()> ready_status) -> std::unique_ptr<::http::mcp::server>
+    std::function<std::string()> ready_status)
 {
     auto mcp = std::make_unique<::http::mcp::server>("/messages/");
     mcp->info({.name = "yardb"s, .version = "1.0.0"s})

@@ -2567,6 +2567,62 @@ auto register_odata_tests()
                 };
             };
 
+            when("Grouping by object-valued keys is rejected") = []
+            {
+                // Distinct object keys previously shared one "\0other" bucket and
+                // returned a single combined Total as if they were one group.
+                auto docs = object{object::array{
+                    object{
+                        {"meta"s, object{{"region"s, "US"s}}},
+                        {"amount"s, 100}},
+                    object{
+                        {"meta"s, object{{"region"s, "EU"s}}},
+                        {"amount"s, 50}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((meta),aggregate(amount with sum as Total))"sv);
+
+                then("apply_aggregation throws rather than merging groups") = [=]
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = apply_aggregation(docs, pipeline.steps[0].aggregate);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string_view{e.what()}.contains("primitive"sv));
+                    }
+                    require_true(threw);
+                };
+            };
+
+            when("Grouping by array-valued keys is rejected") = []
+            {
+                auto docs = object{object::array{
+                    object{{"tags"s, object{object::array{object{"a"s}}}}, {"amount"s, 10}},
+                    object{{"tags"s, object{object::array{object{"b"s}}}}, {"amount"s, 20}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((tags),aggregate(amount with sum as Total))"sv);
+
+                then("apply_aggregation throws rather than merging groups") = [=]
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = apply_aggregation(docs, pipeline.steps[0].aggregate);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string_view{e.what()}.contains("array"sv));
+                    }
+                    require_true(threw);
+                };
+            };
+
             when("Applying whole-set aggregate without groupby") = []
             {
                 auto docs = object{object::array{

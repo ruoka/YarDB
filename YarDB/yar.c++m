@@ -7,3 +7,4 @@ export module yar;
 export import :httpd;
 export import :engine;
 export import :metadata;
+export import :mcp;

@@ -7,6 +7,7 @@ import :engine;
 import :constants;
 import :details;
 import :odata;
+import :mcp;
 import std;
 import net;
 import xson;
@@ -313,7 +314,40 @@ public:
         setup_routes();
     }
 
+    // Native MCP over HTTP+SSE (`GET /sse`, `POST /messages/?session_id=`).
+    // Enabled by default; tools call the engine directly (not the Python bridge).
+    void enable_mcp(bool enabled = true)
+    {
+        m_mcp_enabled = enabled;
+        if(enabled)
+            attach_mcp();
+        else
+            m_mcp.reset();
+    }
+
+    [[nodiscard]] bool mcp_enabled() const noexcept
+    {
+        return m_mcp_enabled and static_cast<bool>(m_mcp);
+    }
+
 private:
+
+    void attach_mcp()
+    {
+        m_mcp = yar::mcp::make_mcp_server(m_engine, [this] {
+            return std::string{server_state_label(m_state.load())};
+        });
+        // Allow the configured bind host in addition to localhost defaults.
+        auto hosts = ::http::mcp::default_allowed_hosts();
+        hosts.push_back(m_bind_host + ":*"s);
+        hosts.push_back(m_bind_host);
+        auto origins = ::http::mcp::default_allowed_origins();
+        origins.push_back("http://"s + m_bind_host + ":*"s);
+        m_mcp->allowed_hosts(std::move(hosts))
+            .allowed_origins(std::move(origins))
+            .attach(m_server, "/sse");
+    }
+
 
     // Middleware: Correlation ID logging - extracts and logs correlation ID for all requests
     middleware_factory correlation_logging_middleware(std::string_view method, std::string_view log_event) const
@@ -1684,6 +1718,9 @@ private:
         {
             m_server.options(path).response_with_headers("*/*"sv, options_callback);
         }
+
+        if(m_mcp_enabled)
+            attach_mcp();
     }
 
     std::string m_file;
@@ -1691,6 +1728,8 @@ private:
     std::string m_port_or_service;
     yar::db::engine m_engine;
     ::http::server m_server;
+    bool m_mcp_enabled = true;
+    std::unique_ptr<::http::mcp::server> m_mcp;
     std::atomic<server_state> m_state{server_state::stopped};
     std::thread m_listen_thread;
     mutable std::mutex m_start_mutex;

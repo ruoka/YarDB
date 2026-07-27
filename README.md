@@ -20,7 +20,7 @@ YarDB is a C++23 application that implements:
 
 - **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
 - **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, and `$count`; `$expand` is parsed but awaits a relationship model
-- **MCP server**: Stdio [Model Context Protocol](https://modelcontextprotocol.io/) bridge (`tools/yardb_mcp.py`) so agents and IDEs (e.g. Cursor) can call the REST/OData API as tools
+- **MCP server**: Native HTTP+SSE MCP on `yardb` (`GET /sse`, via `http::mcp` in net4cpp). Python `tools/yardb_mcp*.py` kept as reference/oracle
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
 - **Last-Modified Support**: Timestamp-based conditional requests for cache validation
@@ -139,24 +139,25 @@ Export FSON records as JSONL (`yarexport`, including `--live` for current docs o
 
 ### MCP server - Agent / IDE bridge
 
-MCP bridges that wrap a running `yardb` HTTP API (health, collections, OData query, CRUD, indexes). Requires Python 3 and a live `yardb`. See [MCP bridge documentation](docs/programs.md#mcp-bridge---cursor--agent-client).
+Native MCP HTTP+SSE is built into `yardb` (default on; `--no-mcp` to disable). Python
+`tools/yardb_mcp*.py` remain as a reference/oracle. See [programs.md](docs/programs.md#mcp-bridge---cursor--agent-client).
 
 | Transport | Entry | Notes |
 |-----------|-------|-------|
-| **stdio** | `tools/yardb_mcp.py` | Default; stdlib only |
-| **HTTP/SSE** | `tools/yardb_mcp_sse.py` | `pip install -r tools/requirements-mcp-sse.txt`; client URL `http://127.0.0.1:8000/sse` |
+| **Native HTTP/SSE** | `yardb` (`--mcp`) | `http://127.0.0.1:2112/sse` |
+| **Python stdio** | `tools/yardb_mcp.py` | Reference |
+| **Python HTTP/SSE** | `tools/yardb_mcp_sse.py` | Reference (`:8000/sse`) |
 
 ```bash
-# Start yardb, then either:
-YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
-# or:
-YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp_sse.py
+./build-darwin-debug/bin/yardb 2112
+# Cursor / client: http://127.0.0.1:2112/sse
 
-# Smoke tests (sse case skips if optional deps missing)
+# Optional Python reference bridges
+YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py
 ./tests/mcp/smoke.sh
 ```
 
-Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) (`yardb` stdio, optional `yardb-sse`, and `tester-cb` for CB.sh via `deps/tester/tools/cb_mcp.py` with default tags `[yardb]`).
+Cursor loads [`.cursor/mcp.json`](.cursor/mcp.json) (`yardb` → native SSE, optional Python reference servers, `tester-cb`).
 
 ## Operations
 

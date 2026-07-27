@@ -24,6 +24,7 @@ Cursor / client config should point at the SSE URL, e.g.:
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import socket
 import sys
@@ -40,6 +41,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 import yardb_mcp
 
@@ -105,6 +107,56 @@ def _is_loopback_bind_host(host: str) -> bool:
     return normalized in {"127.0.0.1", "localhost", "::1"}
 
 
+def _is_loopback_client_host(host: str) -> bool:
+    """True for loopback peer addresses (incl. IPv4-mapped IPv6)."""
+    candidate = host.strip().lower()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    # Drop IPv6 zone id (e.g. fe80::1%eth0) before ip_address().
+    candidate = candidate.split("%", 1)[0]
+    try:
+        addr = ipaddress.ip_address(candidate)
+    except ValueError:
+        return candidate in {"localhost"}
+    if addr.is_loopback:
+        return True
+    # ::ffff:127.0.0.1 is not is_loopback on the IPv6 object itself.
+    mapped = getattr(addr, "ipv4_mapped", None)
+    return mapped is not None and mapped.is_loopback
+
+class _LoopbackClientGate:
+    """
+    When YARDB_MCP_SSE_HOST is loopback-only, refuse non-loopback peers.
+
+    Import-time bind policy only sees the env host. `uvicorn yardb_mcp_sse:app
+    --host 0.0.0.0` still binds all interfaces while Host allowlisting includes
+    `127.0.0.1:*`, so a remote client can Host-spoof and drive the PAT proxy.
+    Peer checks close that ASGI/CLI gap without changing correct loopback binds.
+    """
+
+    def __init__(self, app: ASGIApp, bind_host: str) -> None:
+        self.app = app
+        self.enforce = _is_loopback_bind_host(bind_host)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if self.enforce and scope["type"] in {"http", "websocket"}:
+            client = scope.get("client")
+            if client is not None and not _is_loopback_client_host(client[0]):
+                if scope["type"] == "http":
+                    response = JSONResponse(
+                        {
+                            "error": (
+                                "refusing non-loopback client for loopback-only "
+                                "MCP SSE bind; set YARDB_MCP_SSE_HOST to the "
+                                "address you actually bind (not 0.0.0.0/::)"
+                            )
+                        },
+                        status_code=403,
+                    )
+                    await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
 def _transport_security_settings(host: str) -> TransportSecuritySettings:
     """
     Enable MCP DNS-rebinding protection (Host/Origin checks).
@@ -148,7 +200,8 @@ def _validate_bind_policy(host: str) -> None:
         )
 
 
-# Fail closed even when launched via `uvicorn yardb_mcp_sse:app` (bypasses main).
+# Env host check (covers `uvicorn yardb_mcp_sse:app` imports). Uvicorn's own
+# `--host` is enforced separately by `_LoopbackClientGate` below.
 _validate_bind_policy(HOST)
 
 mcp_server = Server("yardb")
@@ -211,13 +264,15 @@ async def handle_health(_: Request) -> JSONResponse:
 
 # Mount handle_post_message as a raw ASGI app — wrapping it in a FastAPI/Starlette
 # route handler double-sends the HTTP response and breaks the MCP session.
-app = Starlette(
+_starlette_app = Starlette(
     routes=[
         Route("/sse", endpoint=handle_sse, methods=["GET"]),
         Route("/health", endpoint=handle_health, methods=["GET"]),
         Mount("/messages/", app=sse_transport.handle_post_message),
     ],
 )
+# ASGI entrypoint for `uvicorn yardb_mcp_sse:app` and for main() below.
+app = _LoopbackClientGate(_starlette_app, HOST)
 
 
 def main() -> None:

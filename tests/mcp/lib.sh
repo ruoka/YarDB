@@ -326,6 +326,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 MCP_SSE_PY = sys.argv[1]
 BASE = (os.environ.get("YARDB_URL") or "http://127.0.0.1:2112").rstrip("/")
@@ -460,6 +461,96 @@ for wild_host in ("0.0.0.0", "0", "0.0.0", "::", "::0", "0000::", "*"):
     out = (wild.stderr or "") + (wild.stdout or "")
     ok(wild.returncode != 0, f"sse_refuses_wildcard_bind_{wild_host}", f"exit={wild.returncode}")
     ok("refusing to bind MCP SSE" in out, f"sse_wildcard_bind_message_{wild_host}")
+
+# uvicorn --host 0.0.0.0 with default loopback env must not publish a Host-spoofable
+# PAT proxy: non-loopback peers are refused even when Host is 127.0.0.1.
+def _non_loopback_ip() -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith("127."):
+                return ip
+    except OSError:
+        pass
+    return None
+
+
+def _stop_proc(proc: subprocess.Popen, err) -> None:
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=3)
+    err.close()
+    try:
+        os.unlink(err.name)
+    except OSError:
+        pass
+
+
+pub_ip = _non_loopback_ip()
+uv_port = pick_port()
+uv_err = open(os.path.join(err_path, f"yardb_mcp_sse_uv_{os.getpid()}.err"), "w")
+uv_proc = subprocess.Popen(
+    [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "yardb_mcp_sse:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        str(uv_port),
+        "--app-dir",
+        str(Path(MCP_SSE_PY).resolve().parent),
+    ],
+    env={**os.environ, "YARDB_URL": BASE, "YARDB_PAT": os.environ.get("YARDB_PAT", "")},
+    stdout=subprocess.DEVNULL,
+    stderr=uv_err,
+)
+uv_ready = False
+for _ in range(50):
+    if uv_proc.poll() is not None:
+        break
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{uv_port}/health", timeout=0.5) as resp:
+            if resp.status == 200:
+                uv_ready = True
+                break
+    except Exception:
+        time.sleep(0.1)
+
+if not uv_ready:
+    _stop_proc(uv_proc, uv_err)
+    ok(False, "sse_uvicorn_wildcard_ready")
+elif pub_ip is None:
+    _stop_proc(uv_proc, uv_err)
+    ok(True, "sse_uvicorn_host_spoof_skipped_no_pub_ip")
+else:
+    try:
+        req = urllib.request.Request(
+            f"http://{pub_ip}:{uv_port}/sse",
+            headers={
+                "Host": f"127.0.0.1:{uv_port}",
+                "Accept": "text/event-stream",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            ok(False, "sse_uvicorn_refuses_host_spoof", f"status={resp.status}")
+    except urllib.error.HTTPError as exc:
+        ok(exc.code == 403, "sse_uvicorn_refuses_host_spoof", f"status={exc.code}")
+    except Exception as exc:  # noqa: BLE001
+        ok(False, "sse_uvicorn_refuses_host_spoof", str(exc))
+    # Loopback clients must still work under the same uvicorn public bind.
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{uv_port}/health", timeout=2) as resp:
+            ok(resp.status == 200, "sse_uvicorn_loopback_still_ok", f"status={resp.status}")
+    except Exception as exc:  # noqa: BLE001
+        ok(False, "sse_uvicorn_loopback_still_ok", str(exc))
+    _stop_proc(uv_proc, uv_err)
 
 
 async def exercise() -> None:

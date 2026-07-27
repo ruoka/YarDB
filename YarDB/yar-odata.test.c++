@@ -2567,6 +2567,48 @@ auto register_odata_tests()
                 };
             };
 
+            when("Grouping by large integer and scientific JSON numbers") = []
+            {
+                // Outside ±2^53 the safe-mantissa int64 path no longer applies.
+                // 10^16 is still exact in double, and primitive_equal treats the
+                // integer_type digit form and number_type `1e+16` as equal — so
+                // groupby must not split them into under-counted aggregates.
+                constexpr auto large = static_cast<integer_type>(10000000000000000LL); // 10^16
+                constexpr auto past_mantissa =
+                    static_cast<integer_type>(9007199254740994LL); // 2^53+2, exact in double
+                auto docs = object{object::array{
+                    object{{"region"s, large}, {"amount"s, 100}},
+                    object{{"region"s, 1e+16}, {"amount"s, 50}},
+                    object{{"region"s, past_mantissa}, {"amount"s, 7}},
+                    object{{"region"s, 9007199254740994.0}, {"amount"s, 3}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((region),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("matching int/float forms beyond 2^53 form one group each") = [result, large, past_mantissa]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 2u);
+
+                    auto totals = std::map<integer_type, integer_type>{};
+                    for(const auto& row : rows)
+                    {
+                        const auto region = [&]() -> integer_type
+                        {
+                            if(row["region"s].is_integer())
+                                return static_cast<integer_type>(row["region"s]);
+                            return static_cast<integer_type>(
+                                static_cast<number_type>(row["region"s]));
+                        }();
+                        totals[region] = static_cast<integer_type>(row["Total"s]);
+                    }
+                    require_eq(totals[large], 150);
+                    require_eq(totals[past_mantissa], 10);
+                };
+            };
+
             when("Grouping by object-valued keys is rejected") = []
             {
                 // Distinct object keys previously shared one "\0other" bucket and

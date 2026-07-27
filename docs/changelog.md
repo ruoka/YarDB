@@ -40,6 +40,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 |------|---------|
 | **MCP stdio + SSE bridges** | `tools/yardb_mcp.py` (stdio) and `tools/yardb_mcp_sse.py` (Starlette `/sse` + `/messages/`); Cursor config in `.cursor/mcp.json`; smoke via `./tests/mcp/smoke.sh` (`tools_list`, `probes`, `crud`, `filter`, `indexes`, optional `sse`) |
 | **MCP SSE bind/Origin harden** | SSE enables MCP DNS-rebinding Host/Origin allowlists and refuses `0.0.0.0`/`::` binds so an unauthenticated PAT-injecting proxy cannot be published |
+| **MCP SSE wildcard-alias refuse** | SSE bind policy resolves via `getaddrinfo(AI_PASSIVE)` like `net::is_wildcard_bind_host`, so aliases (`0`, `0.0.0`, `::0`, `0000::`, …) cannot bypass the any-address refuse gate |
 | **tester CB MCP** | Bump `deps/tester` for `tools/cb_mcp.py`; YarDB `.cursor/mcp.json` registers `tester-cb` with `CB_SH` → `tools/CB.sh` and default tags `[yardb]` |
 | **`index()` populates secondaries before unlock** | Adding a secondary key no longer publishes an empty map that makes `$filter`/read on that field return false-empty results until a separate `reindex()`; existing live rows are indexed under the same exclusive lock |
 | **`replace` rejects multi-match selectors** | `engine::replace` returns `conflict` when the selector matches more than one live row instead of tombstoning every match while appending a single successor |

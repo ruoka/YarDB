@@ -55,7 +55,7 @@ yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [
 - `--admin-pat=<token>` - Accept an admin-API token for `/_*` maintenance routes (`/_reindex`, `/_db/...`; repeatable).
 - `--admin-pat-file=<path>` - Load admin-API PATs from a file (same format as `--pat-file`).
 
-When data PATs are configured, ordinary API routes require a valid Bearer token except **`GET /health`**, **`GET /ready`**, and **`GET /metrics`**. When admin PATs are configured, `/_*` routes require an admin token (data PATs are rejected there); without admin PATs, `/_*` falls back to the data PAT. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
+When data PATs are configured, ordinary API routes require a valid Bearer token except **`GET /health`**, **`GET /ready`**, and **`GET /metrics`**. Native MCP endpoints **`GET /sse`** and **`POST /messages/`** also require the data PAT (they are not public probes). When admin PATs are configured, `/_*` routes require an admin token (data PATs are rejected there); without admin PATs, `/_*` falls back to the data PAT. Tokens are stored in memory as SHA-256 hashes of the full `Authorization` header value (e.g. `Bearer <token>`), not plaintext.
 
 ### Security Note
 
@@ -422,7 +422,7 @@ YarDB exposes [MCP](https://modelcontextprotocol.io/) tools over native HTTP+SSE
 
 | Transport | Entry | Notes |
 |-----------|-------|-------|
-| **Native HTTP/SSE** (default) | `yardb` (`--mcp`, `--no-mcp` to disable) | `GET /sse` + `POST /messages/`; engine-backed tools; Host/Origin guards |
+| **Native HTTP/SSE** (default) | `yardb` (`--mcp`, `--no-mcp` to disable) | `GET /sse` + `POST /messages/`; engine-backed tools; Host/Origin guards; data PAT when configured |
 | **Python stdio** (reference) | `tools/yardb_mcp.py` | stdlib only; proxies HTTP to a running `yardb` |
 | **Python HTTP/SSE** (reference) | `tools/yardb_mcp_sse.py` | optional deps; default `http://127.0.0.1:8000/sse` |
 
@@ -436,7 +436,8 @@ YarDB exposes [MCP](https://modelcontextprotocol.io/) tools over native HTTP+SSE
 
 Tools call the database engine in-process (not a second HTTP hop). DNS-rebinding
 protection uses Host/Origin allowlists from `http::mcp` (localhost defaults plus the
-configured `--bind` host).
+configured `--bind` host). When `--pat` / `--pat-file` is set, MCP clients must send
+`Authorization: Bearer <token>` on both `GET /sse` and `POST /messages/`.
 
 ### Python reference bridges
 

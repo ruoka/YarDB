@@ -346,6 +346,38 @@ private:
         m_mcp->allowed_hosts(std::move(hosts))
             .allowed_origins(std::move(origins))
             .attach(m_server, "/sse");
+        apply_mcp_auth_guard();
+    }
+
+    // MCP attaches outside build_middleware_chain, so PAT middleware never wraps
+    // GET /sse or POST /messages/. Without this guard, --bind=0.0.0.0 --pat=…
+    // still left full CRUD tool access unauthenticated (Host allowlist only).
+    void apply_mcp_auth_guard()
+    {
+        if(not m_mcp)
+            return;
+
+        if(not m_authentication_enabled or not m_validate_token)
+        {
+            m_mcp->request_guard({});
+            return;
+        }
+
+        m_mcp->request_guard([this](request_view, headers& hdr) -> std::optional<::http::response_with_headers>
+        {
+            std::string_view authorization{};
+            if(hdr.contains("authorization"s))
+                authorization = hdr["authorization"s];
+
+            if(authorization.empty() or not m_validate_token(authorization))
+            {
+                auto error_headers = ::http::headers{};
+                error_headers.set("www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
+                return make_error_response(
+                    status_unauthorized, "Unauthorized"sv, std::make_optional(error_headers));
+            }
+            return std::nullopt;
+        });
     }
 
 

@@ -4419,6 +4419,119 @@ auto test_set()
         };
     };
 
+    test_case("Native MCP requires data PAT when authentication is enabled, [yardb]") = []
+    {
+        const auto test_file = "./httpd_mcp_pat_auth_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto valid_pat = "Bearer mcp-smoke-pat"s;
+        setup->get_server().configure_authentication(
+            is_public_api_path,
+            [valid_pat](string_view authorization) -> bool {
+                return authorization == valid_pat;
+            },
+            "YarDB API"sv
+        );
+
+        section("GET /sse without Authorization returns 401") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << "Connection: close" << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, body] = parse_http_response(stream, "GET"s);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+            require_true(headers.contains("www-authenticate"s));
+        };
+
+        section("GET /sse with invalid Authorization returns 401") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Authorization: Bearer wrong-token" << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << "Connection: close" << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, body] = parse_http_response(stream, "GET"s);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("POST /messages/ without Authorization returns 401") = [setup]
+        {
+            const auto body = R"({"jsonrpc":"2.0","id":1,"method":"ping"})"s;
+            auto stream = connect("localhost"s, setup->port());
+            stream << "POST /messages/?session_id=deadbeefdeadbeefdeadbeefdeadbeef HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << body.size() << crlf
+                   << "Connection: close" << crlf
+                   << crlf << body << flush;
+
+            auto [status, reason, headers, response_body] = parse_http_response(stream, "POST"s);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("GET /sse with valid Bearer PAT opens the event stream") = [setup, valid_pat]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Authorization: " << valid_pat << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << "Connection: close" << crlf
+                   << crlf << flush;
+
+            auto version = ""s, status_code = ""s, reason = ""s;
+            auto status_line = ""s;
+            getline(stream, status_line, '\r');
+            stream >> ws;
+            auto space1 = status_line.find(' ');
+            if(space1 != std::string::npos)
+            {
+                version = status_line.substr(0, space1);
+                auto space2 = status_line.find(' ', space1 + 1);
+                if(space2 != std::string::npos)
+                {
+                    status_code = status_line.substr(space1 + 1, space2 - space1 - 1);
+                    reason = status_line.substr(space2 + 1);
+                }
+            }
+            require_eq(status_code, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto headers = ::http::headers{};
+            stream >> headers >> crlf;
+            require_true(headers.contains("content-type"s));
+            require_true(headers["content-type"s].find("text/event-stream") != std::string::npos);
+
+            auto body = ""s;
+            char ch{};
+            auto saw_endpoint = false;
+            while(stream.get(ch))
+            {
+                body.push_back(ch);
+                if(body.find("event: endpoint") != std::string::npos
+                    or body.find("event:endpoint") != std::string::npos)
+                {
+                    saw_endpoint = true;
+                    break;
+                }
+                if(body.size() > 4096)
+                    break;
+            }
+            require_true(saw_endpoint);
+            stream.close();
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

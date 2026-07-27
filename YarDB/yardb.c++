@@ -31,7 +31,8 @@ Optional PAT authentication (Bearer token):
   --admin-pat=<token>      Accept an admin-API token for /_* maintenance routes (repeatable)
   --admin-pat-file=<path>  Load admin-API tokens from a file (same format as --pat-file)
 When data PATs are configured, ordinary API routes require Authorization: Bearer <token>
-(except GET /health, /ready, /metrics). When admin PATs are configured, /_* routes require an
+(except GET /health, /ready, /metrics). Native MCP GET /sse and POST /messages/ also
+require the data PAT. When admin PATs are configured, /_* routes require an
 admin token; otherwise /_* uses the data PAT.
 )";
 

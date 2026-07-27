@@ -2115,21 +2115,53 @@ export inline apply_pipeline parse_apply(std::string_view apply_expr)
 
 inline std::string group_key_string(const xson::object& value)
 {
+    // JSON `1` is integer_type and `1.0` / `1e+0` are number_type. $filter uses
+    // primitive_equal (cross-type), so they match — groupby must too.
+    constexpr auto max_safe_int = 9007199254740992.0; // 2^53
+    constexpr auto min_safe_int = -9007199254740992.0;
+    constexpr auto max_safe_integer =
+        static_cast<xson::integer_type>(9007199254740992LL); // 2^53
+    constexpr auto min_safe_integer = -max_safe_integer;
+
+    auto number_key = [](xson::number_type n)
+    {
+        return "\0n:"s + std::format("{}", n);
+    };
+
     if(value.is_null())
         return "\0null"s;
     if(value.is_boolean())
         return static_cast<bool>(value) ? "\0true"s : "\0false"s;
     if(value.is_integer())
-        return "\0i:"s + std::to_string(static_cast<xson::integer_type>(value));
+    {
+        const auto i = static_cast<xson::integer_type>(value);
+        if(i >= min_safe_integer and i <= max_safe_integer)
+            return "\0i:"s + std::to_string(i);
+
+        // Outside ±2^53, only integers exactly representable as double can equal
+        // a number_type under primitive_equal (e.g. 10^16 vs 1e+16). Share the
+        // number_type key in that case; otherwise keep a distinct int key so
+        // distinct int64 values that share a float bucket stay separate.
+        if(i == std::numeric_limits<xson::integer_type>::min())
+        {
+            // INT64_MIN == -2^63 exactly; casting that double back to int64 is
+            // undefined, but primitive_equal special-cases the match.
+            constexpr auto neg_two_63 = -9223372036854775808.0;
+            return number_key(neg_two_63);
+        }
+        const auto as_double = static_cast<xson::number_type>(i);
+        if(std::isfinite(as_double)
+            and static_cast<xson::integer_type>(as_double) == i)
+        {
+            return number_key(as_double);
+        }
+        return "\0i:"s + std::to_string(i);
+    }
     if(value.is_number())
     {
         const auto n = static_cast<xson::number_type>(value);
-        // JSON `1` is integer_type and `1.0` is number_type. $filter uses
-        // primitive_equal (cross-type), so they match — groupby must too.
         // Only normalize exact values inside the safe double mantissa so the
         // int64 cast cannot lose bits or hit undefined conversion near ±2^63.
-        constexpr auto max_safe_int = 9007199254740992.0; // 2^53
-        constexpr auto min_safe_int = -9007199254740992.0;
         if(std::isfinite(n)
             and std::floor(n) == n
             and n >= min_safe_int
@@ -2137,7 +2169,7 @@ inline std::string group_key_string(const xson::object& value)
         {
             return "\0i:"s + std::to_string(static_cast<xson::integer_type>(n));
         }
-        return "\0n:"s + std::format("{}", n);
+        return number_key(n);
     }
     if(value.is_string())
         return "\0s:"s + static_cast<std::string>(value);

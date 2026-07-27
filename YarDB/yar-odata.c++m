@@ -2141,7 +2141,13 @@ inline std::string group_key_string(const xson::object& value)
     }
     if(value.is_string())
         return "\0s:"s + static_cast<std::string>(value);
-    return "\0other"s;
+
+    // Object/array (and any other non-primitive) values used to share one
+    // "\0other" bucket, so distinct complex keys silently merged and returned
+    // combined aggregates as if they were one group. Reject instead.
+    throw std::invalid_argument{
+        "$apply groupby keys must be primitive (null, boolean, number, or string); "
+        "object and array values are not supported"};
 }
 
 inline xson::object group_key_value(const xson::object& doc, std::string_view field)

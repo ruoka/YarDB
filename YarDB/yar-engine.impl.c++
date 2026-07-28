@@ -1372,6 +1372,16 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             "Document _id must be an integer"s)};
 
     const auto new_id = static_cast<sequence_type>(document["_id"s]);
+    const auto old_id = static_cast<sequence_type>(old_documents.front()["_id"s]);
+    // Same immutability as update_impl. Changing _id would tombstone the
+    // matched row and insert under a new key — silent disappearance at the
+    // original id (MCP/engine callers that omit HTTP's URL→body overwrite).
+    if(new_id != old_id)
+        return std::unexpected{db_error(
+            db_error_code::conflict,
+            db_operation::replace,
+            "Document _id is immutable"s)};
+
     if(staged_index.contains_id(new_id))
         return std::unexpected{db_error(
             db_error_code::conflict,
@@ -1517,6 +1527,13 @@ yar::db::db_result<yar::db::put_outcome> yar::db::engine::put(
 
     if(revision != nullptr)
         *revision = {};
+
+    // PUT resource identity is the selector's equality _id when present.
+    // HTTP copies the URL id into the body; MCP replace_document and other
+    // API callers must not silently auto-assign a different primary key (or
+    // honor a mismatched body _id) on create — same class as upsert_impl.
+    if(selector.has("_id"s) and selector["_id"s].is_integer())
+        document["_id"s] = selector["_id"s];
 
     auto current_position = std::optional<position_type>{};
     if(const auto* index = find_index(m_index, collection); index != nullptr)

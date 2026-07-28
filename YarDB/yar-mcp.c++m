@@ -215,6 +215,8 @@ inline ::http::mcp::tool_result call_tool(
             if(not args.has("document"s) or not args["document"s].is_object())
                 throw std::invalid_argument{"document must be a JSON object"};
             auto document = args["document"s];
+            // Match HTTP PUT: resource id comes from document_id, not the body.
+            document["_id"s] = id;
             const auto outcome = engine.put(collection, xson::object{{"_id"s, id}}, document);
             if(not outcome)
                 return json_text_result(xson::object{{"error"s, "replace failed"s}}, true);

@@ -4479,6 +4479,130 @@ auto test_set()
         };
     };
 
+    test_case("MCP dual-PAT role separation on tools/call, [yardb]") = []
+    {
+        // REST separates data vs admin PATs by path. Native MCP previously
+        // accepted either token for every tool, so a data Bearer could reindex
+        // and an admin Bearer could mutate documents. Gate tools/call by role.
+        const auto test_file = "./httpd_mcp_dual_pat_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto data_pat = "Bearer data-pat"s;
+        const auto admin_pat = "Bearer admin-pat"s;
+        setup->get_server().configure_authentication(
+            is_public_api_path,
+            [data_pat](string_view authorization) -> bool {
+                return authorization == data_pat;
+            },
+            "YarDB API"sv,
+            [admin_pat](string_view authorization) -> bool {
+                return authorization == admin_pat;
+            }
+        );
+
+        // Hold the SSE connection so the session_id stays valid for POSTs.
+        auto sse = std::make_shared<net::endpointstream>(connect("localhost"s, setup->port()));
+        *sse << "GET /sse HTTP/1.1" << crlf
+             << "Host: localhost:" << setup->port() << crlf
+             << "Authorization: " << data_pat << crlf
+             << "Accept: text/event-stream" << crlf
+             << crlf << flush;
+
+        auto status_line = ""s;
+        getline(*sse, status_line, '\r');
+        *sse >> ws;
+        require_true(status_line.find(" 200 ") != string::npos);
+
+        auto sse_headers = ::http::headers{};
+        *sse >> sse_headers >> crlf;
+        require_true(sse_headers.contains("content-type"s));
+        require_true(sse_headers["content-type"s].find("text/event-stream") != string::npos);
+
+        auto session_id = ""s;
+        {
+            auto body = ""s;
+            char ch{};
+            while(sse->get(ch) and body.size() < 8192)
+            {
+                body.push_back(ch);
+                const auto marker = "session_id="sv;
+                const auto pos = body.find(marker);
+                if(pos == string::npos)
+                    continue;
+                auto rest = std::string_view{body}.substr(pos + marker.size());
+                // Wait until the id token is terminated (SSE data line ends with \n).
+                const auto end = rest.find_first_of("\r\n");
+                if(end == string_view::npos)
+                    continue;
+                session_id = string{rest.substr(0, end)};
+                while(not session_id.empty()
+                      and (session_id.back() == ' ' or session_id.back() == '\t'))
+                    session_id.pop_back();
+                if(not session_id.empty())
+                    break;
+            }
+        }
+        require_false(session_id.empty());
+
+        // Capture sse inside post_tool so every section keeps the session alive
+        // (sections run after this lambda returns).
+        auto post_tool = [setup, session_id, sse](string_view authorization, string_view tool_name)
+            -> tuple<string, string>
+        {
+            (void)sse;
+            const auto payload = R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")"s
+                + string{tool_name} + R"(","arguments":{}}})";
+            auto post = connect("localhost"s, setup->port());
+            post << "POST /messages/?session_id=" << session_id << " HTTP/1.1" << crlf
+                 << "Host: localhost:" << setup->port() << crlf
+                 << "Authorization: " << authorization << crlf
+                 << "Content-Type: application/json" << crlf
+                 << "Content-Length: " << payload.size() << crlf
+                 << crlf
+                 << payload << flush;
+            auto [status, reason, headers, body] = parse_http_response(post, "POST"s);
+            (void)headers;
+            (void)body;
+            return {status, reason};
+        };
+
+        section("data PAT cannot call reindex") = [post_tool, data_pat]
+        {
+            auto [status, reason] = post_tool(data_pat, "reindex"sv);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("data PAT cannot call configure_indexes") = [post_tool, data_pat]
+        {
+            // Authorize inspects params.name only; empty arguments still 401.
+            auto [status, reason] = post_tool(data_pat, "configure_indexes"sv);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("admin PAT cannot call list_collections") = [post_tool, admin_pat]
+        {
+            auto [status, reason] = post_tool(admin_pat, "list_collections"sv);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("admin PAT can call reindex") = [post_tool, admin_pat]
+        {
+            auto [status, reason] = post_tool(admin_pat, "reindex"sv);
+            require_eq(status, "202"s);
+            require_eq(reason, "Accepted"s);
+        };
+
+        section("data PAT can call list_collections") = [post_tool, data_pat]
+        {
+            auto [status, reason] = post_tool(data_pat, "list_collections"sv);
+            require_eq(status, "202"s);
+            require_eq(reason, "Accepted"s);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

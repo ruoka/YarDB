@@ -4515,23 +4515,31 @@ auto test_set()
 
         auto sse_headers = ::http::headers{};
         *sse >> sse_headers >> crlf;
+        require_true(sse_headers.contains("content-type"s));
+        require_true(sse_headers["content-type"s].find("text/event-stream") != string::npos);
 
         auto session_id = ""s;
         {
             auto body = ""s;
             char ch{};
-            while(sse->get(ch) and body.size() < 4096)
+            while(sse->get(ch) and body.size() < 8192)
             {
                 body.push_back(ch);
                 const auto marker = "session_id="sv;
                 const auto pos = body.find(marker);
-                if(pos != string::npos)
-                {
-                    auto rest = body.substr(pos + marker.size());
-                    const auto end = rest.find_first_of(" \r\n\t&");
-                    session_id = end == string::npos ? rest : rest.substr(0, end);
+                if(pos == string::npos)
+                    continue;
+                auto rest = std::string_view{body}.substr(pos + marker.size());
+                // Wait until the id token is terminated (SSE data line ends with \n).
+                const auto end = rest.find_first_of("\r\n");
+                if(end == string_view::npos)
+                    continue;
+                session_id = string{rest.substr(0, end)};
+                while(not session_id.empty()
+                      and (session_id.back() == ' ' or session_id.back() == '\t'))
+                    session_id.pop_back();
+                if(not session_id.empty())
                     break;
-                }
             }
         }
         require_false(session_id.empty());

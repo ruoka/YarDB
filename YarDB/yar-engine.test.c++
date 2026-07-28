@@ -729,6 +729,78 @@ auto test_set()
             require_eq(documents[0]["name"s].get<string>(), "victim"s);
         };
 
+        section("ReplaceRejectsPrimaryKeyMutation") = []
+        {
+            // Changing _id on replace tombstones the matched row and inserts
+            // under a new key — the original id disappears.
+            const auto test_file = "./engine_replace_id_mutation_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "before"s}};
+            require_true(engine.create("ReplaceIdMut"s, original).has_value());
+            const auto id = static_cast<xson::integer_type>(original["_id"s]);
+            const auto selector = object{{"_id"s, id}};
+
+            auto moved = object{{"_id"s, id + 100}, {"name"s, "after"s}};
+            const auto result = engine.replace("ReplaceIdMut"s, selector, moved);
+            require_false(result.has_value());
+            require_eq(result.error().code, yar::db::db_error_code::conflict);
+
+            auto documents = object{};
+            require_true(engine.read("ReplaceIdMut"s, selector, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "before"s);
+            require_false(engine.read("ReplaceIdMut"s, object{{"_id"s, id + 100}}, documents));
+        };
+
+        section("PutCreateHonorsSelectorId") = []
+        {
+            // put() create used to auto-assign _id when the body omitted it,
+            // ignoring selector {"_id": N}. Retries then created duplicates
+            // while N stayed empty (MCP replace_document hit this).
+            const auto test_file = "./engine_put_selector_id_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto document = object{{"name"s, "Ada"s}};
+            const auto selector = object{{"_id"s, 42ll}};
+
+            const auto outcome = engine.put("PutSelId"s, selector, document);
+            require_true(outcome.has_value());
+            require_true(*outcome == yar::db::put_outcome::created);
+            require_eq(static_cast<xson::integer_type>(document["_id"s]), 42ll);
+
+            auto documents = object{};
+            require_true(engine.read("PutSelId"s, selector, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(documents[0]["name"s].get<string>(), "Ada"s);
+
+            auto retry = object{{"name"s, "Ada"s}};
+            const auto again = engine.put("PutSelId"s, selector, retry);
+            require_true(again.has_value());
+            require_true(*again == yar::db::put_outcome::replaced);
+            require_eq(engine.count("PutSelId"s, object{}), 1u);
+        };
+
+        section("PutCreateOverwritesMismatchedBodyId") = []
+        {
+            // Body _id must not win over the PUT selector identity.
+            const auto test_file = "./engine_put_body_id_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            auto document = object{{"_id"s, 99ll}, {"name"s, "Bob"s}};
+            const auto selector = object{{"_id"s, 7ll}};
+
+            const auto outcome = engine.put("PutBodyId"s, selector, document);
+            require_true(outcome.has_value());
+            require_true(*outcome == yar::db::put_outcome::created);
+            require_eq(static_cast<xson::integer_type>(document["_id"s]), 7ll);
+
+            auto documents = object{};
+            require_true(engine.read("PutBodyId"s, selector, documents));
+            require_eq(documents.size(), 1u);
+            require_false(engine.read("PutBodyId"s, object{{"_id"s, 99ll}}, documents));
+        };
+
         section("ReplaceRejectsMultiMatchSelector") = []
         {
             // replace appends one successor. A broad selector must not tombstone

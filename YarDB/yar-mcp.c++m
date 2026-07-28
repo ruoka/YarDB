@@ -6,6 +6,7 @@ export module yar:mcp;
 import :engine;
 import :odata;
 import :constants;
+import :details;
 import std;
 import net;
 import xson;
@@ -34,6 +35,11 @@ inline std::string require_string(const xson::object& args, std::string_view key
     if(not args.has(std::string{key}) or not args[std::string{key}].is_string())
         throw std::invalid_argument{"missing or invalid string field: "s + std::string{key}};
     return static_cast<std::string>(args[std::string{key}]);
+}
+
+inline std::string require_collection(const xson::object& args)
+{
+    return yar::http::details::validate_collection_name(require_string(args, "collection"sv));
 }
 
 inline xson::object parse_args(std::string_view arguments_json)
@@ -151,7 +157,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "query_collection"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             auto odata_query = ""s;
             if(args.has("odata_query"s) and args["odata_query"s].is_string())
                 odata_query = static_cast<std::string>(args["odata_query"s]);
@@ -186,7 +192,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "get_document"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             const auto id = std::stoll(require_string(args, "document_id"sv));
             auto documents = xson::object{};
             engine.read(collection, xson::object{{"_id"s, id}}, documents);
@@ -198,7 +204,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "create_document"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             if(not args.has("document"s) or not args["document"s].is_object())
                 throw std::invalid_argument{"document must be a JSON object"};
             auto document = args["document"s];
@@ -210,7 +216,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "replace_document"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             const auto id = std::stoll(require_string(args, "document_id"sv));
             if(not args.has("document"s) or not args["document"s].is_object())
                 throw std::invalid_argument{"document must be a JSON object"};
@@ -225,7 +231,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "update_document"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             const auto id = std::stoll(require_string(args, "document_id"sv));
             if(not args.has("patch"s) or not args["patch"s].is_object())
                 throw std::invalid_argument{"patch must be a JSON object"};
@@ -245,7 +251,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "delete_document"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             const auto id = std::stoll(require_string(args, "document_id"sv));
             auto documents = xson::object{};
             const auto destroyed = engine.destroy(
@@ -261,7 +267,7 @@ inline ::http::mcp::tool_result call_tool(
 
         if(name == "configure_indexes"sv)
         {
-            const auto collection = require_string(args, "collection"sv);
+            const auto collection = require_collection(args);
             if(not args.has("keys"s))
                 throw std::invalid_argument{"keys is required"};
 

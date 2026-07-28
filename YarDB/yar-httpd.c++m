@@ -344,8 +344,40 @@ private:
         auto origins = ::http::mcp::default_allowed_origins();
         origins.push_back("http://"s + m_bind_host + ":*"s);
         m_mcp->allowed_hosts(std::move(hosts))
-            .allowed_origins(std::move(origins))
-            .attach(m_server, "/sse");
+            .allowed_origins(std::move(origins));
+
+        // MCP tools call the engine directly and bypass REST middleware. When
+        // PAT auth is configured, require the same Bearer token on SSE open and
+        // every POST /messages/ — otherwise --pat/--admin-pat only protect REST
+        // while native MCP stays reachable with a spoofable Host header.
+        if(m_authentication_enabled)
+        {
+            m_mcp->authorize([this]([[maybe_unused]] ::http::request_view req, ::http::headers& hdr)
+                -> std::optional<::http::response_with_headers>
+            {
+                std::string_view authorization{};
+                if(hdr.contains("authorization"s))
+                    authorization = hdr["authorization"s];
+
+                auto accepted = false;
+                if(m_validate_token and not authorization.empty() and m_validate_token(authorization))
+                    accepted = true;
+                if(not accepted and m_validate_admin_token and not authorization.empty()
+                    and m_validate_admin_token(authorization))
+                    accepted = true;
+
+                if(not accepted)
+                {
+                    auto error_headers = ::http::headers{};
+                    error_headers.set("www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
+                    return ::http::make_error_response(
+                        status_unauthorized, "Unauthorized"sv, std::make_optional(error_headers));
+                }
+                return std::nullopt;
+            });
+        }
+
+        m_mcp->attach(m_server, "/sse");
     }
 
 

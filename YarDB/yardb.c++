@@ -33,8 +33,10 @@ Optional PAT authentication (Bearer token):
   --admin-pat-file=<path>  Load admin-API tokens from a file (same format as --pat-file)
 When data PATs are configured, ordinary API routes and native MCP (/sse, /messages/) require
 Authorization: Bearer <token> (except GET /health, /ready, /metrics). When admin PATs are
-configured, /_* routes require an admin token; otherwise /_* uses the data PAT. Admin PATs
-are also accepted on MCP transport.
+configured, /_* routes require an admin token; otherwise /_* uses the data PAT. When both
+data and admin PATs are set, MCP tools/call mirrors that split: reindex/configure_indexes
+need the admin token; document/query tools need the data token. SSE open and other JSON-RPC
+methods still accept either token.
 )";
 
 // Global atomic flag for shutdown request (async-signal-safe)

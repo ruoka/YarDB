@@ -437,6 +437,12 @@ inline bool is_admin_api_path(std::string_view uri)
     return not segment.empty() and segment.starts_with('_');
 }
 
+// MCP tools that map to `/_*` maintenance routes — require admin PAT when configured.
+inline bool is_mcp_admin_tool(std::string_view name)
+{
+    return name == "reindex"sv or name == "configure_indexes"sv;
+}
+
 // Collection name validation
 inline auto validate_collection_name(std::string_view collection_name)
 {

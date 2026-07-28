@@ -4546,12 +4546,10 @@ auto test_set()
 
         // Capture sse inside post_tool so every section keeps the session alive
         // (sections run after this lambda returns).
-        auto post_tool = [setup, session_id, sse](string_view authorization, string_view tool_name)
+        auto post_payload = [setup, session_id, sse](string_view authorization, string_view payload)
             -> tuple<string, string>
         {
             (void)sse;
-            const auto payload = R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")"s
-                + string{tool_name} + R"(","arguments":{}}})";
             auto post = connect("localhost"s, setup->port());
             post << "POST /messages/?session_id=" << session_id << " HTTP/1.1" << crlf
                  << "Host: localhost:" << setup->port() << crlf
@@ -4564,6 +4562,14 @@ auto test_set()
             (void)headers;
             (void)body;
             return {status, reason};
+        };
+
+        auto post_tool = [post_payload](string_view authorization, string_view tool_name)
+            -> tuple<string, string>
+        {
+            const auto payload = R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")"s
+                + string{tool_name} + R"(","arguments":{}}})";
+            return post_payload(authorization, payload);
         };
 
         section("data PAT cannot call reindex") = [post_tool, data_pat]
@@ -4600,6 +4606,37 @@ auto test_set()
             auto [status, reason] = post_tool(data_pat, "list_collections"sv);
             require_eq(status, "202"s);
             require_eq(reason, "Accepted"s);
+        };
+
+        section("data PAT cannot shadow reindex via duplicate method key") = [post_payload, data_pat]
+        {
+            // xson last-wins would see method=ping and skip the role gate; net
+            // first-wins still dispatches tools/call. Authorize must match net.
+            const auto payload =
+                R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"reindex","arguments":{}},"method":"ping"})"sv;
+            auto [status, reason] = post_payload(data_pat, payload);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("data PAT cannot shadow reindex via duplicate params.name") = [post_payload, data_pat]
+        {
+            // First name=reindex (what net executes); last name=list_collections
+            // (what xson would authorize as a data tool).
+            const auto payload =
+                R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"reindex","name":"list_collections","arguments":{}}})"sv;
+            auto [status, reason] = post_payload(data_pat, payload);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+        };
+
+        section("admin PAT cannot shadow delete via duplicate params.name") = [post_payload, admin_pat]
+        {
+            const auto payload =
+                R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"delete_document","name":"reindex","arguments":{"collection":"x","document_id":"1"}}})"sv;
+            auto [status, reason] = post_payload(admin_pat, payload);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
         };
     };
 

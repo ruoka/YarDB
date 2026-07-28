@@ -213,6 +213,60 @@ auto register_mcp_tests()
                 R"({"collection":"items","document_id":"99"})");
             require_true(by_body_id.is_error);
         };
+
+        section("document_id rejects trailing garbage instead of truncating") = []
+        {
+            // std::stoll accepts a numeric prefix ("12abc" → 12). MCP must
+            // match HTTP's utils::stoll full-string parse so malformed ids
+            // cannot silently delete/update/replace the wrong document.
+            const auto setup = fixture{"./mcp_id_strict_test.db"};
+            auto engine = yar::db::engine{"./mcp_id_strict_test.db"};
+
+            const auto seeded = yar::mcp::call_tool(
+                engine,
+                ready,
+                "replace_document",
+                R"({"collection":"items","document_id":"12","document":{"name":"keep"}})");
+            require_false(seeded.is_error);
+
+            const auto bad_delete = yar::mcp::call_tool(
+                engine,
+                ready,
+                "delete_document",
+                R"({"collection":"items","document_id":"12abc"})");
+            require_true(bad_delete.is_error);
+            check_contains(bad_delete.text, "error:");
+
+            const auto bad_update = yar::mcp::call_tool(
+                engine,
+                ready,
+                "update_document",
+                R"({"collection":"items","document_id":"12.5","patch":{"name":"gone"}})");
+            require_true(bad_update.is_error);
+
+            const auto bad_replace = yar::mcp::call_tool(
+                engine,
+                ready,
+                "replace_document",
+                R"({"collection":"items","document_id":"1e2","document":{"name":"wrong"}})");
+            require_true(bad_replace.is_error);
+
+            const auto bad_get = yar::mcp::call_tool(
+                engine,
+                ready,
+                "get_document",
+                R"({"collection":"items","document_id":" 12"})");
+            require_true(bad_get.is_error);
+
+            const auto still_there = yar::mcp::call_tool(
+                engine,
+                ready,
+                "get_document",
+                R"({"collection":"items","document_id":"12"})");
+            require_false(still_there.is_error);
+            require_eq(xson::json::parse(still_there.text)["name"s].get<std::string>(), "keep"s);
+            require_eq(engine.count("items"s, xson::object{}), 1u);
+        };
     };
 
     test_case("native MCP query validation and index tools, [yardb]") = []

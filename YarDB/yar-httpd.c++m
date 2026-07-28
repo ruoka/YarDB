@@ -382,20 +382,27 @@ private:
                 // Dual-PAT role separation only applies when both validators exist
                 // and the POST carries a tools/call body (SSE open has empty body).
                 //
-                // Parse method/name with the same first-key helpers as
-                // http::mcp::handle_json_rpc. xson::json::parse keeps the *last*
-                // duplicate key; a body like
-                //   {"method":"tools/call",...,"method":"ping"}
-                // or params {"name":"reindex","name":"list_collections"} would
-                // otherwise skip the role gate while net still dispatches the
-                // first tools/call — data PAT could reindex, admin could CRUD.
+                // Parse method/name with the same helpers as http::mcp::handle_json_rpc.
+                // Those helpers fail closed on duplicate depth-1 keys (net#57). A last-wins
+                // app parser could still disagree; reject unparseable method/name here so
+                // authorize cannot allow a body that dispatch will not uniquely interpret.
                 if(m_validate_token and m_validate_admin_token and not body.empty())
                 {
                     using ::http::mcp::detail::json_object_field;
                     using ::http::mcp::detail::json_string_field;
 
                     const auto method = json_string_field(body, "method"sv);
-                    if(method and *method == "tools/call"sv)
+                    if(not method or method->empty())
+                    {
+                        auto error_headers = ::http::headers{};
+                        error_headers.set(
+                            "www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
+                        return ::http::make_error_response(
+                            status_unauthorized,
+                            "Unauthorized"sv,
+                            std::make_optional(error_headers));
+                    }
+                    if(*method == "tools/call"sv)
                     {
                         const auto params = json_object_field(body, "params"sv).value_or("{}"sv);
                         const auto tool_name = json_string_field(params, "name"sv);

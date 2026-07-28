@@ -4610,8 +4610,8 @@ auto test_set()
 
         section("data PAT cannot shadow reindex via duplicate method key") = [post_payload, data_pat]
         {
-            // xson last-wins would see method=ping and skip the role gate; net
-            // first-wins still dispatches tools/call. Authorize must match net.
+            // Duplicate method → find_key nullopt (net#57). Authorize must fail
+            // closed rather than skip the role gate and return 202.
             const auto payload =
                 R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"reindex","arguments":{}},"method":"ping"})"sv;
             auto [status, reason] = post_payload(data_pat, payload);

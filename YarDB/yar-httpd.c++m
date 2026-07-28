@@ -381,61 +381,48 @@ private:
 
                 // Dual-PAT role separation only applies when both validators exist
                 // and the POST carries a tools/call body (SSE open has empty body).
+                //
+                // Parse method/name with the same first-key helpers as
+                // http::mcp::handle_json_rpc. xson::json::parse keeps the *last*
+                // duplicate key; a body like
+                //   {"method":"tools/call",...,"method":"ping"}
+                // or params {"name":"reindex","name":"list_collections"} would
+                // otherwise skip the role gate while net still dispatches the
+                // first tools/call — data PAT could reindex, admin could CRUD.
                 if(m_validate_token and m_validate_admin_token and not body.empty())
                 {
-                    try
-                    {
-                        auto message = xson::json::parse(std::string{body});
-                        if(message.is_object()
-                            and message.has("method"s)
-                            and message["method"s].is_string()
-                            and static_cast<std::string>(message["method"s]) == "tools/call"s)
-                        {
-                            auto tool_name = ""s;
-                            if(message.has("params"s) and message["params"s].is_object())
-                            {
-                                auto& params = message["params"s];
-                                if(params.has("name"s) and params["name"s].is_string())
-                                    tool_name = static_cast<std::string>(params["name"s]);
-                            }
-                            // Fail closed: unparseable tools/call must not bypass roles.
-                            if(tool_name.empty())
-                            {
-                                auto error_headers = ::http::headers{};
-                                error_headers.set(
-                                    "www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
-                                return ::http::make_error_response(
-                                    status_unauthorized,
-                                    "Unauthorized"sv,
-                                    std::make_optional(error_headers));
-                            }
+                    using ::http::mcp::detail::json_object_field;
+                    using ::http::mcp::detail::json_string_field;
 
-                            const auto needs_admin = is_mcp_admin_tool(tool_name);
-                            const auto allowed = needs_admin ? admin_ok : data_ok;
-                            if(not allowed)
-                            {
-                                auto error_headers = ::http::headers{};
-                                error_headers.set(
-                                    "www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
-                                return ::http::make_error_response(
-                                    status_unauthorized,
-                                    "Unauthorized"sv,
-                                    std::make_optional(error_headers));
-                            }
-                        }
-                    }
-                    catch(...)
+                    const auto method = json_string_field(body, "method"sv);
+                    if(method and *method == "tools/call"sv)
                     {
-                        // Malformed JSON-RPC on an authenticated POST: reject when
-                        // dual-PAT roles are configured so callers cannot smuggle
-                        // a tools/call past the role gate.
-                        auto error_headers = ::http::headers{};
-                        error_headers.set(
-                            "www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
-                        return ::http::make_error_response(
-                            status_unauthorized,
-                            "Unauthorized"sv,
-                            std::make_optional(error_headers));
+                        const auto params = json_object_field(body, "params"sv).value_or("{}"sv);
+                        const auto tool_name = json_string_field(params, "name"sv);
+                        // Fail closed: unparseable tools/call must not bypass roles.
+                        if(not tool_name or tool_name->empty())
+                        {
+                            auto error_headers = ::http::headers{};
+                            error_headers.set(
+                                "www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
+                            return ::http::make_error_response(
+                                status_unauthorized,
+                                "Unauthorized"sv,
+                                std::make_optional(error_headers));
+                        }
+
+                        const auto needs_admin = is_mcp_admin_tool(*tool_name);
+                        const auto allowed = needs_admin ? admin_ok : data_ok;
+                        if(not allowed)
+                        {
+                            auto error_headers = ::http::headers{};
+                            error_headers.set(
+                                "www-authenticate"s, "Basic realm=\""s + m_auth_realm + "\""s);
+                            return ::http::make_error_response(
+                                status_unauthorized,
+                                "Unauthorized"sv,
+                                std::make_optional(error_headers));
+                        }
                     }
                 }
 

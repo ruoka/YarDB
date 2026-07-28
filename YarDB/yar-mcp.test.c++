@@ -48,6 +48,21 @@ auto register_mcp_tests()
             check_false(listed.is_error);
             check_contains(listed.text, "items");
         };
+
+        section("create_document rejects reserved _db collection name") = []
+        {
+            // HTTP validates collection names; MCP must too — otherwise
+            // create_document("_db", {...}) can poison reopen/index metadata.
+            auto engine = yar::db::engine{"./mcp_db_reject_test.db"};
+            auto ready = [] { return "ready"s; };
+            const auto poisoned = yar::mcp::call_tool(
+                engine,
+                ready,
+                "create_document",
+                R"({"collection":"_db","document":{"collection":"x","keys":"not-an-array"}})");
+            check_true(poisoned.is_error);
+            check_contains(poisoned.text, "must start with a lowercase letter");
+        };
     };
 
     return true;

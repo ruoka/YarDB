@@ -23,6 +23,7 @@ Native MCP (HTTP+SSE, default on):
   --no-mcp            Disable native MCP endpoints
   Cursor URL:         http://127.0.0.1:<port>/sse
   Python bridges in tools/*_mcp.py remain available as a reference/oracle.
+  When --pat is set, MCP SSE/POST require the same Authorization: Bearer token.
 
 Optional PAT authentication (Bearer token):
   --pat=<token>            Accept a data-API personal access token (repeatable)
@@ -30,9 +31,10 @@ Optional PAT authentication (Bearer token):
                            Lines may be plaintext tokens or sha256:<hex> pre-hashed values.
   --admin-pat=<token>      Accept an admin-API token for /_* maintenance routes (repeatable)
   --admin-pat-file=<path>  Load admin-API tokens from a file (same format as --pat-file)
-When data PATs are configured, ordinary API routes require Authorization: Bearer <token>
-(except GET /health, /ready, /metrics). When admin PATs are configured, /_* routes require an
-admin token; otherwise /_* uses the data PAT.
+When data PATs are configured, ordinary API routes and native MCP (/sse, /messages/) require
+Authorization: Bearer <token> (except GET /health, /ready, /metrics). When admin PATs are
+configured, /_* routes require an admin token; otherwise /_* uses the data PAT. Admin PATs
+are also accepted on MCP transport.
 )";
 
 // Global atomic flag for shutdown request (async-signal-safe)

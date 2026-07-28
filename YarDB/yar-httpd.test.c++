@@ -4327,6 +4327,66 @@ auto test_set()
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
         };
+
+        section("GET /sse without Authorization returns 401 when PAT enabled") = [setup]
+        {
+            // Native MCP bypasses REST middleware; without an authorize gate,
+            // --pat would only protect REST while /sse stayed open.
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << crlf << flush;
+            auto [status, reason, headers, body] = parse_http_response(stream, "GET"s);
+            require_eq(status, "401"s);
+            require_eq(reason, "Unauthorized"s);
+            require_true(headers.contains("www-authenticate"s));
+            (void)body;
+        };
+
+        section("GET /sse with valid Bearer PAT opens event stream") = [setup, valid_pat]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Authorization: " << valid_pat << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << crlf << flush;
+
+            auto version = ""s, status_code = ""s, reason = ""s;
+            auto status_line = ""s;
+            getline(stream, status_line, '\r');
+            stream >> ws;
+            auto space1 = status_line.find(' ');
+            auto space2 = status_line.find(' ', space1 + 1);
+            require_true(space1 != string::npos and space2 != string::npos);
+            status_code = status_line.substr(space1 + 1, space2 - space1 - 1);
+            reason = status_line.substr(space2 + 1);
+            require_eq(status_code, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto headers = ::http::headers{};
+            stream >> headers >> crlf;
+            require_true(headers.contains("content-type"s));
+            require_true(headers["content-type"s].find("text/event-stream") != string::npos);
+
+            // Read until the endpoint event so we know the session started.
+            auto body = ""s;
+            char ch{};
+            auto saw_endpoint = false;
+            while(stream.get(ch) and body.size() < 4096)
+            {
+                body.push_back(ch);
+                if(body.find("event: endpoint") != string::npos
+                    or body.find("event:endpoint") != string::npos)
+                {
+                    saw_endpoint = true;
+                    break;
+                }
+            }
+            require_true(saw_endpoint);
+            (void)version;
+        };
     };
 
     test_case("Admin PAT for /_ maintenance routes, [yardb]") = []

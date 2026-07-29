@@ -53,6 +53,9 @@ inline xson::object parse_args(std::string_view arguments_json)
 }
 
 // Parse `a=1&b=2` OData query (no leading '?').
+// MCP passes the query as a JSON string (not a URL), so clients write raw `&`
+// inside quoted $filter literals. Split only outside quotes — naive find('&')
+// truncated `$filter=name eq 'AT&T'&$top=10` to `name eq 'AT`.
 inline std::flat_map<std::string, std::string> parse_odata_query(std::string_view query)
 {
     auto params = std::flat_map<std::string, std::string>{};
@@ -61,14 +64,14 @@ inline std::flat_map<std::string, std::string> parse_odata_query(std::string_vie
         rest.remove_prefix(1);
     while(not rest.empty())
     {
-        const auto amp = rest.find('&');
-        const auto part = amp == std::string_view::npos ? rest : rest.substr(0, amp);
+        const auto amp = yar::http::details::find_outside_quotes(rest, "&"sv);
+        const auto part = amp ? rest.substr(0, *amp) : rest;
         const auto eq = part.find('=');
         if(eq != std::string_view::npos)
             params[std::string{part.substr(0, eq)}] = std::string{part.substr(eq + 1)};
-        if(amp == std::string_view::npos)
+        if(not amp)
             break;
-        rest.remove_prefix(amp + 1);
+        rest.remove_prefix(*amp + 1);
     }
     return params;
 }

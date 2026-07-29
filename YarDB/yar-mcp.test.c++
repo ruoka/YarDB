@@ -238,6 +238,30 @@ auto register_mcp_tests()
             require_eq(rows.get<xson::object::array>().size(), 2u);
         };
 
+        section("query_collection keeps & inside quoted $filter literals") = []
+        {
+            const auto setup = fixture{"./mcp_query_amp_test.db"};
+            auto engine = yar::db::engine{"./mcp_query_amp_test.db"};
+            auto match = xson::object{{"name"s, "AT&T"s}};
+            auto other = xson::object{{"name"s, "Verizon"s}};
+            require_true(static_cast<bool>(engine.create("vendors", match)));
+            require_true(static_cast<bool>(engine.create("vendors", other)));
+
+            // MCP odata_query is a JSON string, not a URL — clients write raw '&'
+            // in literals. Naive '&' split used to truncate the filter to
+            // `name eq 'AT` and return an empty set while still applying $top.
+            const auto queried = yar::mcp::call_tool(
+                engine,
+                ready,
+                "query_collection",
+                R"({"collection":"vendors","odata_query":"$filter=name eq 'AT&T'&$top=10"})");
+            require_false(queried.is_error);
+            const auto rows = xson::json::parse(queried.text);
+            require_true(rows.is_array());
+            require_eq(rows.get<xson::object::array>().size(), 1u);
+            check_contains(queried.text, "AT&T");
+        };
+
         section("configure_indexes accepts keys array") = []
         {
             const auto setup = fixture{"./mcp_index_test.db"};

@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -252,6 +252,50 @@ EOF
   end_case read_round_robin
 }
 
+test_empty_backends_502() {
+  should_run empty_backends_502 || return 0
+  begin_case empty_backends_502
+  ensure_cluster
+
+  # Drop every backend while yarproxy keeps running. Dead fan-out must return
+  # 502 (not echo the client request). A follow-up request after remove_if
+  # empties the replica list must not UB on rotate(++begin(empty)).
+  local pid
+  for pid in "${REPLICA_PIDS[@]}"; do
+    if kill -0 "${pid}" 2>/dev/null; then
+      kill "${pid}" 2>/dev/null || true
+      wait "${pid}" 2>/dev/null || true
+    fi
+  done
+  REPLICA_PIDS=()
+
+  run_yarsh_proxy "$(cat <<EOF
+GET /
+EXIT
+EOF
+)" || true
+  assert_contains " 502 " "dead_backends_bad_gateway"
+
+  if ! kill -0 "${YARPROXY_PID}" 2>/dev/null; then
+    fail "yarproxy exited after dead-backend 502"
+    end_case empty_backends_502
+    return 0
+  fi
+
+  # Second request: replica list may now be empty after remove_if.
+  LAST_OUTPUT="$(printf '%s\n' "GET /
+EXIT" | run_with_timeout 15 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || true
+
+  if ! kill -0 "${YARPROXY_PID}" 2>/dev/null; then
+    fail "yarproxy crashed on empty-replica request"
+    end_case empty_backends_502
+    return 0
+  fi
+
+  assert_contains " 502 " "empty_backends_bad_gateway"
+  end_case empty_backends_502
+}
+
 main() {
   require_bins
   trap stop_cluster EXIT
@@ -268,6 +312,7 @@ main() {
   test_read_round_robin
   test_header_forward_auth
   test_header_forward_correlation
+  test_empty_backends_502
 
   local end_ms duration_ms passed
   end_ms=$(python3 - <<'PY'

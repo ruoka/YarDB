@@ -174,12 +174,46 @@ inline void handle(auto& client, auto& replicas)
             }
             else
             {
-                if(not ranges::all_of(replicas, request))
+                // Fan-out must not leave a successful backend with an unread
+                // response: all_of short-circuits on the first failure, and a
+                // later GET/HEAD on that keep-alive socket would consume the
+                // stale write response (e.g. 201) as if it belonged to the new
+                // request. Drain every backend that accepted the request, then
+                // read every response (no short-circuit) before succeeding.
+                auto sent_until = replicas.begin();
+                auto request_failed = false;
+                for(; sent_until != replicas.end(); ++sent_until)
+                {
+                    if(not request(*sent_until))
+                    {
+                        request_failed = true;
+                        break;
+                    }
+                }
+                if(request_failed)
+                {
+                    for(auto it = replicas.begin(); it != sent_until; ++it)
+                    {
+                        if(not it->connection.good())
+                            continue;
+                        auto discard = stringstream{};
+                        read_http_message(it->connection, discard);
+                    }
+                    send_bad_gateway();
+                    break;
+                }
+
+                auto response_failed = false;
+                for(auto& replica : replicas)
+                {
+                    if(not response(replica))
+                        response_failed = true;
+                }
+                if(response_failed)
                 {
                     send_bad_gateway();
                     break;
                 }
-                [[maybe_unused]] auto responded = ranges::all_of(replicas, response);
             }
         }
 

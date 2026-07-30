@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, partial_backend_drain, empty_backends_502"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -252,6 +252,48 @@ EOF
   end_case read_round_robin
 }
 
+test_partial_backend_drain() {
+  should_run partial_backend_drain || return 0
+  begin_case partial_backend_drain
+  ensure_cluster
+  local coll dead_pid
+  coll="$(collection partial)"
+
+  # Kill only the last replica so fan-out writes the first backend, then fails.
+  # Without draining that backend's response, the next GET would read the stale
+  # 201 Created off the keep-alive socket.
+  dead_pid="${REPLICA_PIDS[-1]}"
+  if kill -0 "${dead_pid}" 2>/dev/null; then
+    kill "${dead_pid}" 2>/dev/null || true
+    wait "${dead_pid}" 2>/dev/null || true
+  fi
+  unset 'REPLICA_PIDS[-1]'
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+{"name":"stale-trap"}
+EXIT
+EOF
+)" || true
+  assert_contains " 502 " "partial_fanout_bad_gateway"
+
+  run_yarsh_proxy "$(cat <<EOF
+GET /
+EXIT
+EOF
+)" || true
+  assert_contains " 200 " "surviving_backend_get_ok"
+  if [[ "${LAST_OUTPUT}" == *" 201 "* ]]; then
+    fail "stale_post_response_on_get"
+  fi
+  assert_not_contains '"name" : "stale-trap"' "get_not_stale_post_body"
+
+  # Fresh cluster for later cases that expect a full replica set.
+  stop_cluster
+  CLUSTER_STARTED=0
+  end_case partial_backend_drain
+}
+
 test_empty_backends_502() {
   should_run empty_backends_502 || return 0
   begin_case empty_backends_502
@@ -312,6 +354,7 @@ main() {
   test_read_round_robin
   test_header_forward_auth
   test_header_forward_correlation
+  test_partial_backend_drain
   test_empty_backends_502
 
   local end_ms duration_ms passed

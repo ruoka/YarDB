@@ -51,8 +51,18 @@ inline auto host_header_from_url(string_view replica_url) -> string
     return host;
 }
 
-inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs)
+inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs, bool skip_body = false)
 {
+    // HEAD responses advertise Content-Length for the would-be GET body but
+    // send no octets (net::http::server). Waiting for those bytes hangs the
+    // keep-alive backend socket — and yarproxy holds the replica mutex while
+    // reading — so skip body transfer for HEAD.
+    if(skip_body)
+    {
+        os << flush;
+        return;
+    }
+
     auto content_length = hdrs.contains("content-length"s) ? stoll(hdrs["content-length"s]) : 0ll;
 
     while(content_length > 0 and is and os)
@@ -64,14 +74,14 @@ inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs)
     os << flush;
 }
 
-inline void read_http_message(istream& is, ostream& os)
+inline void read_http_message(istream& is, ostream& os, bool skip_body = false)
 {
     auto request_line = ""s;
     auto headers = http::headers{};
 
     getline(is, request_line, '\r') >> ws >> headers >> crlf;
     os << request_line << crlf << headers << crlf;
-    copy_http_body(is, os, headers);
+    copy_http_body(is, os, headers, skip_body);
 }
 
 inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
@@ -110,10 +120,10 @@ inline void handle(auto& client, auto& replicas)
 
     auto buffer = stringstream{};
 
-    auto request_and_response = [&buffer](replica_backend& replica) {
+    auto request_and_response = [&buffer](replica_backend& replica, bool skip_body) {
         buffer.seekg(0);
         forward_request(buffer, replica.connection, replica.host_header);
-        read_http_message(replica.connection, buffer.seekp(0));
+        read_http_message(replica.connection, buffer.seekp(0), skip_body);
         return replica.connection.good();
     };
 
@@ -161,7 +171,10 @@ inline void handle(auto& client, auto& replicas)
 
             if(method == "GET"s or method == "HEAD"s)
             {
-                if(not ranges::any_of(replicas, request_and_response))
+                const auto skip_body = method == "HEAD"s;
+                if(not ranges::any_of(replicas, [&](replica_backend& replica) {
+                        return request_and_response(replica, skip_body);
+                    }))
                 {
                     // All backends failed but may still look connected until
                     // remove_if runs — do not echo the buffered client request.
@@ -184,7 +197,7 @@ inline void handle(auto& client, auto& replicas)
         }
 
         buffer.seekg(0);
-        read_http_message(buffer, stream);
+        read_http_message(buffer, stream, method == "HEAD"s);
         buffer.seekp(0);
     }
 

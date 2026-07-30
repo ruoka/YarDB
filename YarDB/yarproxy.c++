@@ -52,7 +52,11 @@ inline auto host_header_from_url(string_view replica_url) -> string
     return host;
 }
 
-inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs, bool skip_body = false)
+// Returns false when Content-Length bytes could not be fully transferred
+// (truncated client body, short stringstream, or output failure). Callers must
+// not forward a short request: backends would block on the remaining length
+// while yarproxy holds the replica mutex.
+inline auto copy_http_body(istream& is, ostream& os, const http::headers& hdrs, bool skip_body = false) -> bool
 {
     // HEAD responses advertise Content-Length for the would-be GET body but
     // send no octets (net::http::server). Waiting for those bytes hangs the
@@ -61,31 +65,39 @@ inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs, 
     if(skip_body)
     {
         os << flush;
-        return;
+        return true;
     }
 
     // Requests and ordinary yardb responses always frame with Content-Length.
     // Missing length means no body for client→proxy requests; do not treat it
     // as a streaming response here (see read_backend_response).
     auto content_length = hdrs.contains("content-length"s) ? stoll(hdrs["content-length"s]) : 0ll;
+    if(content_length < 0)
+        return false;
 
     while(content_length > 0 and is and os)
     {
-        os.put(is.get());
+        const auto ch = is.get();
+        if(not is)
+            break;
+        os.put(static_cast<char>(ch));
         --content_length;
     }
 
     os << flush;
+    return content_length == 0 and static_cast<bool>(os);
 }
 
-inline void read_http_message(istream& is, ostream& os, bool skip_body = false)
+inline auto read_http_message(istream& is, ostream& os, bool skip_body = false) -> bool
 {
     auto request_line = ""s;
     auto headers = http::headers{};
 
     getline(is, request_line, '\r') >> ws >> headers >> crlf;
+    if(not is)
+        return false;
     os << request_line << crlf << headers << crlf;
-    copy_http_body(is, os, headers, skip_body);
+    return copy_http_body(is, os, headers, skip_body);
 }
 
 // Read a backend response. Returns false when the body is unframed (no
@@ -151,16 +163,18 @@ inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
     return out;
 }
 
-inline void forward_request(istream& is, ostream& os, string_view backend_host)
+inline auto forward_request(istream& is, ostream& os, string_view backend_host) -> bool
 {
     auto request_line = ""s;
     auto headers = http::headers{};
 
     getline(is, request_line, '\r') >> ws >> headers >> crlf;
+    if(not is)
+        return false;
     headers = strip_hop_by_hop(std::move(headers));
     headers.set("host"s, string{backend_host});
     os << request_line << crlf << headers << crlf;
-    copy_http_body(is, os, headers);
+    return copy_http_body(is, os, headers);
 }
 
 inline void handle(auto& client, auto& replicas)
@@ -173,7 +187,8 @@ inline void handle(auto& client, auto& replicas)
 
     auto request_and_response = [&buffer](replica_backend& replica, bool skip_body) {
         buffer.seekg(0);
-        forward_request(buffer, replica.connection, replica.host_header);
+        if(not forward_request(buffer, replica.connection, replica.host_header))
+            return false;
         if(not read_backend_response(replica.connection, buffer.seekp(0), skip_body))
         {
             // Unframed streaming body (SSE). Close + reconnect so unread
@@ -186,8 +201,8 @@ inline void handle(auto& client, auto& replicas)
 
     auto request = [&buffer](replica_backend& replica) {
         buffer.seekg(0);
-        forward_request(buffer, replica.connection, replica.host_header);
-        return replica.connection.good();
+        return forward_request(buffer, replica.connection, replica.host_header)
+            and replica.connection.good();
     };
 
     auto response = [&buffer](replica_backend& replica) {
@@ -210,11 +225,26 @@ inline void handle(auto& client, auto& replicas)
                << crlf << flush;
     };
 
+    auto send_bad_request = [&stream] {
+        stream << "HTTP/1.1 400 Bad Request" << crlf
+               << "Content-Length: 0" << crlf
+               << "Connection: close" << crlf
+               << crlf << flush;
+    };
+
     while(stream.good() and stream.peek() != char_traits<char>::eof())
     {
         buffer.str(""s);
         buffer.clear();
-        read_http_message(stream, buffer);
+        // Incomplete Content-Length body must not be forwarded: backends wait
+        // for the missing octets on keep-alive while this thread holds replicas.
+        if(not read_http_message(stream, buffer))
+        {
+            // Mid-body EOF sets failbit; clear so the 400 can be written.
+            stream.clear();
+            send_bad_request();
+            break;
+        }
 
         auto method = ""s;
         buffer.seekg(0) >> method;
@@ -258,7 +288,11 @@ inline void handle(auto& client, auto& replicas)
         }
 
         buffer.seekg(0);
-        read_http_message(buffer, stream, method == "HEAD"s);
+        if(not read_http_message(buffer, stream, method == "HEAD"s))
+        {
+            send_bad_gateway();
+            break;
+        }
         buffer.seekp(0);
     }
 

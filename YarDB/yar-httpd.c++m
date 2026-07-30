@@ -344,8 +344,18 @@ private:
     // invoke callbacks that outlive m_mcp (yardb --no-mcp / enable_mcp(false)).
     void detach_mcp_routes()
     {
-        // Empty sse callback → has_sse() is false → GET /sse falls to 404.
+        // Empty sse callback → has_sse() is false (no event-stream takeover).
+        // The "/sse" router key still exists after sse(), so also install a GET
+        // 404 — otherwise the server answers 405 Method Not Allowed.
         m_server.sse("/sse"s).gate({}).sse({});
+        m_server.get("/sse"s).response(
+            "text/plain"sv,
+            []([[maybe_unused]] ::http::request_view req,
+               [[maybe_unused]] ::http::body_view body,
+               [[maybe_unused]] ::http::headers& hdr) -> ::http::response_with_headers
+            {
+                return ::http::make_error_response(status_not_found, "Not Found"sv);
+            });
         m_server.post("/messages/?(\\?.*)?"s).response(
             "text/plain"sv,
             []([[maybe_unused]] ::http::request_view req,

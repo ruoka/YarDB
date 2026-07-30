@@ -127,7 +127,7 @@ inline void reconnect_replica(replica_backend& replica)
     replica.connection.close();
     try
     {
-        replica.connection = connect(replica.url);
+        replica.connection = connect(uri{replica.url});
     }
     catch(...)
     {

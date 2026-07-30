@@ -30,10 +30,13 @@ constexpr auto correlation_id_header = "x-correlation-id"sv;
 // Cached correlation ID header string (headers API requires std::string)
 const auto correlation_id_header_str = std::string{correlation_id_header};
 
-// Collection routes exclude reserved path segments (e.g. /health, /ready, /metrics).
-inline const auto collection_route = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*"s;
-inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*(\\?.*)?"s;
-inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*/[0-9]+"s;
+// Collection routes exclude reserved path segments (e.g. /health, /ready, /metrics,
+// /sse, /messages). Native MCP claims /sse and /messages/; keep them out of the
+// collection matcher so enable_mcp(false) yields 404 instead of treating "sse"
+// as a collection name.
+inline const auto collection_route = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*"s;
+inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*(\\?.*)?"s;
+inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*/[0-9]+"s;
 
 // Handler type aliases for middleware composition
 using handler = ::http::callback_with_headers;

@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502, head_no_hang"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502, head_no_hang, sse_no_poison"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -337,6 +337,52 @@ EOF
   end_case head_no_hang
 }
 
+test_sse_no_poison() {
+  should_run sse_no_poison || return 0
+  begin_case sse_no_poison
+  ensure_cluster
+  local coll status sse_out
+  coll="$(collection sse)"
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+{"name":"sse-via-proxy"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_for_sse"
+
+  # yardb enables native MCP by default: GET /sse returns text/event-stream with
+  # Connection: keep-alive and no Content-Length, then streams events. Pre-fix
+  # yarproxy treated that as a zero-length body, returned the backend to the
+  # pool with unread SSE bytes, and the next GET hung on the status line while
+  # holding the replica mutex.
+  status=0
+  sse_out="$(run_with_timeout 5 curl -sS -D - -o /dev/null \
+    -H 'Accept: text/event-stream' \
+    "${PROXY_URL}/sse" 2>&1)" || status=$?
+  LAST_OUTPUT="${sse_out}"
+  # Proxy must not hang under the mutex: either 502 (unframed rejected) or a
+  # finite response. A hung proxy makes the follow-up GET time out.
+  if [[ "${status}" -eq 124 ]]; then
+    fail "GET /sse through yarproxy timed out (likely held replica mutex)"
+    end_case sse_no_poison
+    return 0
+  fi
+
+  status=0
+  LAST_OUTPUT="$(printf '%s\n' "GET /${coll}/1
+EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    fail "GET after /sse timed out or failed (exit=${status}) — backend pool poisoned"
+    end_case sse_no_poison
+    return 0
+  fi
+  assert_contains " 200 " "get_after_sse_ok"
+  assert_contains '"name" : "sse-via-proxy"' "get_after_sse_body"
+  end_case sse_no_poison
+}
+
 main() {
   require_bins
   trap stop_cluster EXIT
@@ -352,6 +398,7 @@ main() {
   test_write_fanout
   test_read_round_robin
   test_head_no_hang
+  test_sse_no_poison
   # Auth cases restart the cluster with --pat; empty_backends_502 kills replicas.
   test_header_forward_auth
   test_header_forward_correlation

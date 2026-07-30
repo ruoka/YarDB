@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502, head_no_hang, sse_no_poison"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502, head_no_hang, sse_no_poison, truncated_body_no_hang"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -383,6 +383,76 @@ EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
   end_case sse_no_poison
 }
 
+test_truncated_body_no_hang() {
+  should_run truncated_body_no_hang || return 0
+  begin_case truncated_body_no_hang
+  ensure_cluster
+  local coll status truncated_out
+  coll="$(collection trunc)"
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+{"name":"trunc-seed"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_for_trunc"
+
+  # Client advertises Content-Length larger than the body then half-closes.
+  # Pre-fix yarproxy forwarded the short request; backends blocked waiting for
+  # the missing octets while the handler held the replica mutex (proxy-wide hang).
+  status=0
+  truncated_out="$(
+    PROXY_URL="${PROXY_URL}" COLL="${coll}" run_with_timeout 5 python3 - <<'PY' 2>&1
+import os, socket, urllib.parse
+url = urllib.parse.urlparse(os.environ["PROXY_URL"])
+coll = os.environ["COLL"]
+body = b'{"name":"short"}'
+req = (
+    f"POST /{coll} HTTP/1.1\r\n"
+    f"Host: {url.hostname}\r\n"
+    f"Content-Type: application/json\r\n"
+    f"Content-Length: {len(body) + 50}\r\n"
+    f"\r\n"
+).encode() + body
+with socket.create_connection((url.hostname, url.port), timeout=3) as sock:
+    sock.sendall(req)
+    sock.shutdown(socket.SHUT_WR)
+    sock.settimeout(3)
+    chunks = []
+    try:
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+    except TimeoutError:
+        pass
+    print(b"".join(chunks).decode("utf-8", "replace"))
+PY
+  )" || status=$?
+  LAST_OUTPUT="${truncated_out}"
+  if [[ "${status}" -eq 124 ]]; then
+    fail "truncated body request timed out (likely held replica mutex waiting on backends)"
+    end_case truncated_body_no_hang
+    return 0
+  fi
+  assert_contains " 400 " "truncated_body_bad_request"
+
+  # Mutex must be released: a follow-up GET on a fresh client must succeed.
+  status=0
+  LAST_OUTPUT="$(printf '%s\n' "GET /${coll}/1
+EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    fail "GET after truncated body timed out or failed (exit=${status})"
+    end_case truncated_body_no_hang
+    return 0
+  fi
+  assert_contains " 200 " "get_after_trunc_ok"
+  assert_contains '"name" : "trunc-seed"' "get_after_trunc_body"
+  end_case truncated_body_no_hang
+}
+
 main() {
   require_bins
   trap stop_cluster EXIT
@@ -399,6 +469,7 @@ main() {
   test_read_round_robin
   test_head_no_hang
   test_sse_no_poison
+  test_truncated_body_no_hang
   # Auth cases restart the cluster with --pat; empty_backends_502 kills replicas.
   test_header_forward_auth
   test_header_forward_correlation

@@ -36,12 +36,17 @@ struct replica_set : list<replica_backend>, mutex
 
 inline auto host_header_from_url(string_view replica_url) -> string
 {
-    using namespace std::string_view_literals;
-
+    // RFC 7230 Host is uri-host [ ":" port ] with a numeric port only.
+    // When the replica URL omits a port, uri.port is empty — do not fall back
+    // to the URI scheme (getaddrinfo service name). That produced illegal
+    // values like Host: localhost:http (same class as net websocket host_header).
     const auto url = uri{replica_url};
     auto host = string{url.host};
-    const auto port = url.port == ""sv ? string{url.scheme} : string{url.port};
-    if(not port.empty())
+    const auto port = string{url.port};
+    if(not port.empty()
+       and ranges::all_of(port, [](unsigned char c) {
+               return std::isdigit(c) != 0;
+           }))
         host += ':' + port;
     return host;
 }
@@ -127,6 +132,13 @@ inline void handle(auto& client, auto& replicas)
         return not replica.connection.good();
     };
 
+    auto send_bad_gateway = [&stream] {
+        stream << "HTTP/1.1 502 Bad Gateway" << crlf
+               << "Content-Length: 0" << crlf
+               << "Connection: close" << crlf
+               << crlf << flush;
+    };
+
     while(stream.good() and stream.peek() != char_traits<char>::eof())
     {
         buffer.str(""s);
@@ -136,17 +148,39 @@ inline void handle(auto& client, auto& replicas)
         auto method = ""s;
         buffer.seekg(0) >> method;
 
-        if(method == "GET"s or method == "HEAD"s)
         {
             const auto guard = std::lock_guard{replicas};
-            [[maybe_unused]] auto r1 = ranges::any_of(replicas, request_and_response);
-            [[maybe_unused]] auto r2 = ranges::rotate(replicas, ++ranges::begin(replicas));
-        }
-        else
-        {
-            const auto guard = std::lock_guard{replicas};
-            [[maybe_unused]] auto r1 = ranges::all_of(replicas, request);
-            [[maybe_unused]] auto r2 = ranges::all_of(replicas, response);
+            // remove_if at connection end can leave an empty replica list after
+            // every backend dies. ++begin on empty is UB; forwarding an empty
+            // buffer also echoed the client request as a forged response.
+            if(replicas.empty())
+            {
+                send_bad_gateway();
+                break;
+            }
+
+            if(method == "GET"s or method == "HEAD"s)
+            {
+                if(not ranges::any_of(replicas, request_and_response))
+                {
+                    // All backends failed but may still look connected until
+                    // remove_if runs — do not echo the buffered client request.
+                    send_bad_gateway();
+                    break;
+                }
+                // middle==end is valid for size==1 (no-op rotate).
+                [[maybe_unused]] auto rotated = ranges::rotate(
+                    replicas, ranges::next(ranges::begin(replicas)));
+            }
+            else
+            {
+                if(not ranges::all_of(replicas, request))
+                {
+                    send_bad_gateway();
+                    break;
+                }
+                [[maybe_unused]] auto responded = ranges::all_of(replicas, response);
+            }
         }
 
         buffer.seekg(0);

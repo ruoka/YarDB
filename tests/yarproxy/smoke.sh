@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, empty_backends_502, head_no_hang"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -296,6 +296,47 @@ EXIT" | run_with_timeout 15 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || true
   end_case empty_backends_502
 }
 
+test_head_no_hang() {
+  should_run head_no_hang || return 0
+  begin_case head_no_hang
+  ensure_cluster
+  local coll status
+  coll="$(collection head)"
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+{"name":"head-via-proxy"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_for_head"
+
+  # yardb HEAD responses include Content-Length for the would-be body but send
+  # no octets. Pre-fix yarproxy waited for those bytes on the keep-alive
+  # backend socket while holding the replica mutex (proxy-wide hang).
+  status=0
+  LAST_OUTPUT="$(printf '%s\n' "HEAD /${coll}/1
+EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    fail "HEAD through yarproxy timed out or failed (exit=${status})"
+    end_case head_no_hang
+    return 0
+  fi
+  assert_contains " 200 " "head_status_ok"
+  assert_contains "  Content-Length: " "head_content_length"
+  assert_not_contains "Response Body:" "head_no_body"
+
+  # Mutex must be released: a follow-up GET on a fresh client must succeed.
+  run_yarsh_proxy "$(cat <<EOF
+GET /${coll}/1
+EXIT
+EOF
+)"
+  assert_contains " 200 " "get_after_head_ok"
+  assert_contains '"name" : "head-via-proxy"' "get_after_head_body"
+  end_case head_no_hang
+}
+
 main() {
   require_bins
   trap stop_cluster EXIT
@@ -310,6 +351,8 @@ main() {
   test_proxy_crud
   test_write_fanout
   test_read_round_robin
+  test_head_no_hang
+  # Auth cases restart the cluster with --pat; empty_backends_502 kills replicas.
   test_header_forward_auth
   test_header_forward_correlation
   test_empty_backends_502

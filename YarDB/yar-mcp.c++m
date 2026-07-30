@@ -193,7 +193,8 @@ inline ::http::mcp::tool_result call_tool(
         if(name == "get_document"sv)
         {
             const auto collection = require_collection(args);
-            const auto id = std::stoll(require_string(args, "document_id"sv));
+            // Match HTTP path ids: require the whole string (reject "12abc").
+            const auto id = utils::stoll(require_string(args, "document_id"sv));
             auto documents = xson::object{};
             engine.read(collection, xson::object{{"_id"s, id}}, documents);
             auto& arr = documents.get<xson::object::array>();
@@ -217,7 +218,7 @@ inline ::http::mcp::tool_result call_tool(
         if(name == "replace_document"sv)
         {
             const auto collection = require_collection(args);
-            const auto id = std::stoll(require_string(args, "document_id"sv));
+            const auto id = utils::stoll(require_string(args, "document_id"sv));
             if(not args.has("document"s) or not args["document"s].is_object())
                 throw std::invalid_argument{"document must be a JSON object"};
             auto document = args["document"s];
@@ -232,7 +233,7 @@ inline ::http::mcp::tool_result call_tool(
         if(name == "update_document"sv)
         {
             const auto collection = require_collection(args);
-            const auto id = std::stoll(require_string(args, "document_id"sv));
+            const auto id = utils::stoll(require_string(args, "document_id"sv));
             if(not args.has("patch"s) or not args["patch"s].is_object())
                 throw std::invalid_argument{"patch must be a JSON object"};
             auto documents = xson::object{};
@@ -252,7 +253,7 @@ inline ::http::mcp::tool_result call_tool(
         if(name == "delete_document"sv)
         {
             const auto collection = require_collection(args);
-            const auto id = std::stoll(require_string(args, "document_id"sv));
+            const auto id = utils::stoll(require_string(args, "document_id"sv));
             auto documents = xson::object{};
             const auto destroyed = engine.destroy(
                 collection,

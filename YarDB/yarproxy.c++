@@ -74,7 +74,7 @@ inline void read_http_message(istream& is, ostream& os)
     copy_http_body(is, os, headers);
 }
 
-inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
+inline auto strip_hop_by_hop(http::headers hdrs)
 {
     static constexpr array hop_by_hop = {
         "connection"s, "proxy-connection"s, "keep-alive"s,
@@ -175,35 +175,21 @@ inline void handle(auto& client, auto& replicas)
                     break;
                 }
                 // middle==end is valid for size==1 (no-op rotate).
-                [[maybe_unused]] auto rotated = ranges::rotate(
-                    replicas, ranges::next(ranges::begin(replicas)));
+                [[maybe_unused]] auto rotated = ranges::rotate(replicas, ranges::next(ranges::begin(replicas)));
             }
             else
             {
-                // Fan-out must not leave a successful backend with an unread
-                // response: a later GET/HEAD on that keep-alive socket would
-                // consume the stale write response (e.g. 201) as if it
-                // belonged to the new request. Read every successful backend
-                // response, but hide individual backend failures from clients.
+                // Drain every successful backend response so a later GET/HEAD does not
+                // consume a stale write response on a keep-alive connection.
                 auto successful_replicas = vector<reference_wrapper<replica_backend>>{};
-                ranges::for_each(replicas, [&request, &successful_replicas](auto& replica)
-                {
-                    if(request(replica))
-                        successful_replicas.emplace_back(replica);
-                });
-                if(successful_replicas.empty())
-                {
-                    send_bad_gateway();
-                    break;
-                }
 
-                const auto response_received = ranges::fold_left(
-                    successful_replicas,
-                    false,
-                    [&response](const auto received, const auto replica)
-                    {
-                        return response(replica.get()) or received;
-                    });
+                for(auto& replica : replicas)
+                    if(request(replica)) successful_replicas.emplace_back(replica);
+
+                auto response_received = false;
+                for(const auto& replica : successful_replicas)
+                    response_received = response(replica.get()) or response_received;
+
                 if(not response_received)
                 {
                     send_bad_gateway();

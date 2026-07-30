@@ -124,14 +124,14 @@ inline void handle(auto& client, auto& replicas)
     };
 
     auto response = [&buffer](replica_backend& replica) {
-        read_http_message(replica.connection, buffer.seekp(0));
-        return replica.connection.good();
-    };
+        auto response_buffer = stringstream{};
+        read_http_message(replica.connection, response_buffer);
+        if(not replica.connection.good())
+            return false;
 
-    auto drain_response = [](replica_backend& replica)
-    {
-        auto discard = stringstream{};
-        read_http_message(replica.connection, discard);
+        buffer.str(response_buffer.str());
+        buffer.clear();
+        return true;
     };
 
     auto disconnected = [](const replica_backend& replica) {
@@ -181,34 +181,33 @@ inline void handle(auto& client, auto& replicas)
             else
             {
                 // Fan-out must not leave a successful backend with an unread
-                // response: all_of short-circuits on the first failure, and a
-                // later GET/HEAD on that keep-alive socket would consume the
-                // stale write response (e.g. 201) as if it belonged to the new
-                // request. Drain every backend that accepted the request, then
-                // read every response (no short-circuit) before succeeding.
-                const auto first_failed = ranges::find_if_not(replicas, request);
-                if(first_failed != replicas.end())
+                // response: a later GET/HEAD on that keep-alive socket would
+                // consume the stale write response (e.g. 201) as if it
+                // belonged to the new request. Read every successful backend
+                // response, but hide individual backend failures from clients.
+                auto successful_replicas = vector<reference_wrapper<replica_backend>>{};
+                ranges::for_each(replicas, [&request, &successful_replicas](auto& replica)
                 {
-                    const auto sent = replicas | views::take(
-                        ranges::distance(replicas.begin(), first_failed));
-                    ranges::for_each(
-                        sent | views::filter([](const replica_backend& replica)
-                        {
-                            return replica.connection.good();
-                        }),
-                        drain_response);
+                    if(request(replica))
+                        successful_replicas.emplace_back(replica);
+                });
+                if(successful_replicas.empty())
+                {
                     send_bad_gateway();
                     break;
                 }
 
-                const auto response_failed = ranges::fold_left(
-                    replicas | views::transform(response),
-                    false,
-                    [](const auto failed, const auto succeeded)
+                const auto response_received = ranges::fold_left(
+                    successful_replicas | views::transform([&response](auto& replica)
                     {
-                        return failed or not succeeded;
+                        return response(replica.get());
+                    }),
+                    false,
+                    [](const auto received, const auto succeeded)
+                    {
+                        return received or succeeded;
                     });
-                if(response_failed)
+                if(not response_received)
                 {
                     send_bad_gateway();
                     break;

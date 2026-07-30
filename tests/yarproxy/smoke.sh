@@ -280,7 +280,7 @@ POST /${coll}
 EXIT
 EOF
 )" || true
-  assert_contains " 502 " "partial_fanout_bad_gateway"
+  assert_contains " 201 " "partial_fanout_succeeds"
 
   run_yarsh_proxy "$(cat <<EOF
 GET /

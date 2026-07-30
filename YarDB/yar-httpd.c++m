@@ -90,7 +90,7 @@ enum class server_state
     failed
 };
 
-inline auto server_state_label(server_state state) -> std::string_view
+inline auto server_state_label(server_state state)
 {
     switch(state)
     {
@@ -103,7 +103,7 @@ inline auto server_state_label(server_state state) -> std::string_view
     return "unknown"sv;
 }
 
-inline auto ready_probe_body(server_state state) -> std::string
+inline auto ready_probe_body(server_state state)
 {
     return xson::json::stringify(xson::object{
         {"status"s, std::string{server_state_label(state)}}
@@ -1027,7 +1027,7 @@ private:
                             std::optional<::http::headers>{}};
                     }
                 }
-                const auto count = [&]() -> std::size_t
+                const auto count = [&]()
                 {
                     if(params.contains("$filter"s))
                     {

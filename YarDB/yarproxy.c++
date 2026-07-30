@@ -34,7 +34,7 @@ struct replica_set : list<replica_backend>, mutex
     using list::list;
 };
 
-inline auto host_header_from_url(string_view replica_url) -> string
+inline auto host_header_from_url(string_view replica_url)
 {
     // RFC 7230 Host is uri-host [ ":" port ] with a numeric port only.
     // When the replica URL omits a port, uri.port is empty — do not fall back

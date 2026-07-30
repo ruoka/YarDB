@@ -68,7 +68,7 @@ void header_name_to_lower(string& name)
     }
 }
 
-auto trim(string_view text) -> string
+auto trim(string_view text)
 {
     auto begin = text.find_first_not_of(" \t\r\n");
     if(begin == string_view::npos)
@@ -77,7 +77,7 @@ auto trim(string_view text) -> string
     return string{text.substr(begin, end - begin + 1)};
 }
 
-auto host_from_url(string_view url) -> string
+auto host_from_url(string_view url)
 {
     const uri endpoint{url};
     const auto host = string{endpoint.host};
@@ -91,7 +91,7 @@ auto host_from_url(string_view url) -> string
     return host + ":" + port;
 }
 
-auto read_optional_headers() -> pair<string, vector<pair<string, string>>>
+auto read_optional_headers()
 {
     auto accept = "application/json"s;
     auto headers = vector<pair<string, string>>{};
@@ -115,10 +115,10 @@ auto read_optional_headers() -> pair<string, vector<pair<string, string>>>
             headers.emplace_back(std::move(name), std::move(value));
     }
 
-    return {std::move(accept), std::move(headers)};
+    return std::make_pair(std::move(accept), std::move(headers));
 }
 
-auto read_body(std::istream& stream, std::size_t length) -> string
+auto read_body(std::istream& stream, std::size_t length)
 {
     auto body = string(length, '\0');
     stream.read(body.data(), static_cast<std::streamsize>(length));

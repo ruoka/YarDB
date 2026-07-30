@@ -27,6 +27,7 @@ struct replica_backend
 {
     endpointstream connection;
     string host_header;
+    string url; // reconnect after unframed (SSE) responses poison keep-alive
 };
 
 struct replica_set : list<replica_backend>, mutex
@@ -63,6 +64,9 @@ inline void copy_http_body(istream& is, ostream& os, const http::headers& hdrs, 
         return;
     }
 
+    // Requests and ordinary yardb responses always frame with Content-Length.
+    // Missing length means no body for client→proxy requests; do not treat it
+    // as a streaming response here (see read_backend_response).
     auto content_length = hdrs.contains("content-length"s) ? stoll(hdrs["content-length"s]) : 0ll;
 
     while(content_length > 0 and is and os)
@@ -82,6 +86,53 @@ inline void read_http_message(istream& is, ostream& os, bool skip_body = false)
     getline(is, request_line, '\r') >> ws >> headers >> crlf;
     os << request_line << crlf << headers << crlf;
     copy_http_body(is, os, headers, skip_body);
+}
+
+// Read a backend response. Returns false when the body is unframed (no
+// Content-Length) and was not skipped — e.g. MCP GET /sse text/event-stream.
+// Caller must not reuse the keep-alive socket; unread SSE bytes would make the
+// next status-line read hang while holding the replica mutex.
+inline auto read_backend_response(istream& is, ostream& os, bool skip_body = false) -> bool
+{
+    auto status_line = ""s;
+    auto headers = http::headers{};
+
+    getline(is, status_line, '\r') >> ws >> headers >> crlf;
+    os << status_line << crlf << headers << crlf;
+
+    if(skip_body)
+    {
+        os << flush;
+        return true;
+    }
+
+    if(not headers.contains("content-length"s))
+    {
+        os << flush;
+        return false;
+    }
+
+    auto content_length = stoll(headers["content-length"s]);
+    while(content_length > 0 and is and os)
+    {
+        os.put(is.get());
+        --content_length;
+    }
+    os << flush;
+    return true;
+}
+
+inline void reconnect_replica(replica_backend& replica)
+{
+    replica.connection.close();
+    try
+    {
+        replica.connection = connect(uri{replica.url});
+    }
+    catch(...)
+    {
+        // Leave closed; remove_if drops it when the client handler exits.
+    }
 }
 
 inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
@@ -123,7 +174,13 @@ inline void handle(auto& client, auto& replicas)
     auto request_and_response = [&buffer](replica_backend& replica, bool skip_body) {
         buffer.seekg(0);
         forward_request(buffer, replica.connection, replica.host_header);
-        read_http_message(replica.connection, buffer.seekp(0), skip_body);
+        if(not read_backend_response(replica.connection, buffer.seekp(0), skip_body))
+        {
+            // Unframed streaming body (SSE). Close + reconnect so unread
+            // event-stream bytes cannot poison the pooled keep-alive socket.
+            reconnect_replica(replica);
+            return false;
+        }
         return replica.connection.good();
     };
 
@@ -134,7 +191,11 @@ inline void handle(auto& client, auto& replicas)
     };
 
     auto response = [&buffer](replica_backend& replica) {
-        read_http_message(replica.connection, buffer.seekp(0));
+        if(not read_backend_response(replica.connection, buffer.seekp(0)))
+        {
+            reconnect_replica(replica);
+            return false;
+        }
         return replica.connection.good();
     };
 
@@ -248,7 +309,8 @@ try
             auto replica_url = option.substr(string_view{"--replica="}.size());
             replicas.emplace_back(replica_backend{
                 connect(replica_url),
-                host_header_from_url(replica_url)
+                host_header_from_url(replica_url),
+                string{replica_url}
             });
             continue;
         }

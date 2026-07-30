@@ -4389,6 +4389,79 @@ auto test_set()
         };
     };
 
+    test_case("enable_mcp(false) detaches native MCP routes, [yardb]") = []
+    {
+        // Constructor attaches MCP by default, then yardb --no-mcp calls
+        // enable_mcp(false). Pre-fix that only reset m_mcp and left router
+        // callbacks capturing the destroyed server (UAF on GET /sse).
+        const auto test_file = "./httpd_mcp_disable_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        require_true(setup->get_server().mcp_enabled());
+        setup->get_server().enable_mcp(false);
+        require_false(setup->get_server().mcp_enabled());
+
+        section("GET /sse returns 404 after disable") = [setup]
+        {
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << crlf << flush;
+            auto [status, reason, headers, body] = parse_http_response(stream, "GET"s);
+            require_eq(status, "404"s);
+            (void)reason;
+            (void)headers;
+            (void)body;
+        };
+
+        section("POST /messages returns 404 after disable") = [setup]
+        {
+            const auto body = R"({"jsonrpc":"2.0","id":1,"method":"ping"})"s;
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/messages/?session_id=deadbeef"s, body
+            );
+            require_eq(status, "404"s);
+            (void)reason;
+            (void)headers;
+            (void)response_body;
+        };
+
+        section("REST still works after MCP disable") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/health"s, ""s
+            );
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            (void)body;
+        };
+
+        section("rebuild_routes after disable keeps MCP detached") = [setup]
+        {
+            // configure_authentication rebuilds routes; m_mcp_enabled is false
+            // so attach must not run and stale callbacks must stay cleared.
+            setup->get_server().configure_authentication(
+                is_public_api_path,
+                [](string_view) { return true; }
+            );
+            require_false(setup->get_server().mcp_enabled());
+
+            auto stream = connect("localhost"s, setup->port());
+            stream << "GET /sse HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Authorization: Bearer anything" << crlf
+                   << "Accept: text/event-stream" << crlf
+                   << crlf << flush;
+            auto [status, reason, headers, body] = parse_http_response(stream, "GET"s);
+            require_eq(status, "404"s);
+            (void)reason;
+            (void)headers;
+            (void)body;
+        };
+    };
+
     test_case("Admin PAT for /_ maintenance routes, [yardb]") = []
     {
         const auto test_file = "./httpd_admin_pat_auth_test.db";

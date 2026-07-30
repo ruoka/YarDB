@@ -351,10 +351,11 @@ main() {
   test_proxy_crud
   test_write_fanout
   test_read_round_robin
+  test_head_no_hang
+  # Auth cases restart the cluster with --pat; empty_backends_502 kills replicas.
   test_header_forward_auth
   test_header_forward_correlation
   test_empty_backends_502
-  test_head_no_hang
 
   local end_ms duration_ms passed
   end_ms=$(python3 - <<'PY'

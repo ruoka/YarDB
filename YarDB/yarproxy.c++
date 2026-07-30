@@ -128,6 +128,12 @@ inline void handle(auto& client, auto& replicas)
         return replica.connection.good();
     };
 
+    auto drain_response = [](replica_backend& replica)
+    {
+        auto discard = stringstream{};
+        read_http_message(replica.connection, discard);
+    };
+
     auto disconnected = [](const replica_backend& replica) {
         return not replica.connection.good();
     };
@@ -180,35 +186,28 @@ inline void handle(auto& client, auto& replicas)
                 // stale write response (e.g. 201) as if it belonged to the new
                 // request. Drain every backend that accepted the request, then
                 // read every response (no short-circuit) before succeeding.
-                auto sent_until = replicas.begin();
-                auto request_failed = false;
-                for(; sent_until != replicas.end(); ++sent_until)
+                const auto first_failed = ranges::find_if_not(replicas, request);
+                if(first_failed != replicas.end())
                 {
-                    if(not request(*sent_until))
-                    {
-                        request_failed = true;
-                        break;
-                    }
-                }
-                if(request_failed)
-                {
-                    for(auto it = replicas.begin(); it != sent_until; ++it)
-                    {
-                        if(not it->connection.good())
-                            continue;
-                        auto discard = stringstream{};
-                        read_http_message(it->connection, discard);
-                    }
+                    const auto sent = replicas | views::take(
+                        ranges::distance(replicas.begin(), first_failed));
+                    ranges::for_each(
+                        sent | views::filter([](const replica_backend& replica)
+                        {
+                            return replica.connection.good();
+                        }),
+                        drain_response);
                     send_bad_gateway();
                     break;
                 }
 
-                auto response_failed = false;
-                for(auto& replica : replicas)
-                {
-                    if(not response(replica))
-                        response_failed = true;
-                }
+                const auto response_failed = ranges::fold_left(
+                    replicas | views::transform(response),
+                    false,
+                    [](const auto failed, const auto succeeded)
+                    {
+                        return failed or not succeeded;
+                    });
                 if(response_failed)
                 {
                     send_bad_gateway();

@@ -260,18 +260,19 @@ test_partial_backend_drain() {
   stop_cluster
   CLUSTER_STARTED=0
   ensure_cluster
-  local coll dead_pid
+  local coll dead_pid last_replica_index
   coll="$(collection partial)"
 
   # Kill only the last replica so fan-out writes the first backend, then fails.
   # Without draining that backend's response, the next GET would read the stale
   # 201 Created off the keep-alive socket.
-  dead_pid="${REPLICA_PIDS[-1]}"
+  last_replica_index=$((${#REPLICA_PIDS[@]} - 1))
+  dead_pid="${REPLICA_PIDS[${last_replica_index}]}"
   if kill -0 "${dead_pid}" 2>/dev/null; then
     kill "${dead_pid}" 2>/dev/null || true
     wait "${dead_pid}" 2>/dev/null || true
   fi
-  unset 'REPLICA_PIDS[-1]'
+  unset "REPLICA_PIDS[${last_replica_index}]"
 
   run_yarsh_proxy "$(cat <<EOF
 POST /${coll}

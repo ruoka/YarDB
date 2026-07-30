@@ -255,6 +255,10 @@ EOF
 test_partial_backend_drain() {
   should_run partial_backend_drain || return 0
   begin_case partial_backend_drain
+  # Auth cases leave a PAT-protected cluster running; restart without PAT so
+  # unauthenticated GET / is meaningful for the stale-response check.
+  stop_cluster
+  CLUSTER_STARTED=0
   ensure_cluster
   local coll dead_pid
   coll="$(collection partial)"

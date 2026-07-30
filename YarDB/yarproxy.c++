@@ -198,14 +198,11 @@ inline void handle(auto& client, auto& replicas)
                 }
 
                 const auto response_received = ranges::fold_left(
-                    successful_replicas | views::transform([&response](auto& replica)
-                    {
-                        return response(replica.get());
-                    }),
+                    successful_replicas,
                     false,
-                    [](const auto received, const auto succeeded)
+                    [&response](const auto received, const auto replica)
                     {
-                        return received or succeeded;
+                        return response(replica.get()) or received;
                     });
                 if(not response_received)
                 {

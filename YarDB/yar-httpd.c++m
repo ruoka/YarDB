@@ -202,6 +202,13 @@ public:
         return m_state.load();
     }
 
+    // Port the listen socket is bound to (0 before listen / after stop).
+    // Useful when start() was given "0" so the OS picks an ephemeral port.
+    std::uint16_t bound_port()
+    {
+        return m_server.bound_port();
+    }
+
     // For backward compatibility - blocks forever
     void listen()
     {

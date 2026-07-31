@@ -3777,7 +3777,7 @@ auto test_set()
         setup->get_server().configure_rate_limiting(
             2,
             std::chrono::seconds{5},
-            [](std::string_view, const ::http::headers&) -> std::string {
+            [](std::string_view, const ::http::headers&){
                 return "test-key"s; // Use same key for all requests
             }
         );
@@ -3821,7 +3821,7 @@ auto test_set()
             setup->get_server().configure_rate_limiting(
                 1,
                 std::chrono::seconds{5},
-                [](std::string_view, const ::http::headers& hdr) -> std::string {
+                [](std::string_view, const ::http::headers& hdr){
                     if(hdr.contains("x-forwarded-for"s))
                         return std::string{hdr["x-forwarded-for"s]};
                     return "default-ip"s;
@@ -3960,7 +3960,7 @@ auto test_set()
                 std::set<std::string>{"https://example.com", "https://trusted.com"}
             );
             setup->get_server().configure_cors(
-                [allowed_origins](std::string_view origin) -> bool {
+                [allowed_origins](std::string_view origin){
                     return allowed_origins->contains(std::string{origin});
                 }
             );
@@ -4251,7 +4251,7 @@ auto test_set()
         const auto valid_pat = "Bearer smoke-test-pat"s;
         setup->get_server().configure_authentication(
             is_public_api_path,
-            [valid_pat](string_view authorization) -> bool {
+            [valid_pat](string_view authorization){
                 return authorization == valid_pat;
             },
             "YarDB API"sv
@@ -4471,11 +4471,11 @@ auto test_set()
         const auto admin_pat = "Bearer admin-pat"s;
         setup->get_server().configure_authentication(
             is_public_api_path,
-            [data_pat](string_view authorization) -> bool {
+            [data_pat](string_view authorization){
                 return authorization == data_pat;
             },
             "YarDB API"sv,
-            [admin_pat](string_view authorization) -> bool {
+            [admin_pat](string_view authorization){
                 return authorization == admin_pat;
             }
         );
@@ -4564,11 +4564,11 @@ auto test_set()
         const auto admin_pat = "Bearer admin-pat"s;
         setup->get_server().configure_authentication(
             is_public_api_path,
-            [data_pat](string_view authorization) -> bool {
+            [data_pat](string_view authorization){
                 return authorization == data_pat;
             },
             "YarDB API"sv,
-            [admin_pat](string_view authorization) -> bool {
+            [admin_pat](string_view authorization){
                 return authorization == admin_pat;
             }
         );

@@ -52,7 +52,7 @@ namespace {
 
 using pat_hash = string;
 
-auto trim(string_view text) -> string
+auto trim(string_view text)
 {
     while(not text.empty() and isspace(static_cast<unsigned char>(text.front())))
         text.remove_prefix(1);
@@ -77,28 +77,28 @@ void load_pat_file(const string& path, vector<string>& tokens)
     }
 }
 
-auto normalize_bearer_auth(string_view token) -> string
+auto normalize_bearer_auth(string_view token)
 {
     if(token.starts_with("Bearer "))
         return string{token};
     return "Bearer "s + string{token};
 }
 
-auto is_hex_digit(char ch) -> bool
+auto is_hex_digit(char ch)
 {
     return (ch >= '0' and ch <= '9')
         or (ch >= 'a' and ch <= 'f')
         or (ch >= 'A' and ch <= 'F');
 }
 
-auto is_sha256_hex(string_view text) -> bool
+auto is_sha256_hex(string_view text)
 {
     if(text.size() != 64)
         return false;
     return ranges::all_of(text, is_hex_digit);
 }
 
-auto to_lower_hex(string_view text) -> string
+auto to_lower_hex(string_view text)
 {
     auto result = string{text};
     for(auto& ch : result)
@@ -109,12 +109,12 @@ auto to_lower_hex(string_view text) -> string
     return result;
 }
 
-auto hash_pat_bearer(string_view bearer_auth) -> pat_hash
+auto hash_pat_bearer(string_view bearer_auth)
 {
     return cryptic::sha256::hexadecimal(bearer_auth);
 }
 
-auto parse_pat_hash(string_view raw) -> pat_hash
+auto parse_pat_hash(string_view raw)
 {
     if(raw.empty())
         throw runtime_error{"PAT token must not be empty"};
@@ -136,7 +136,7 @@ void append_hashed_pats(vector<string>& raw_tokens, set<pat_hash>& hashed_values
         hashed_values.insert(parse_pat_hash(raw));
 }
 
-auto secure_equals(string_view left, string_view right) -> bool
+auto secure_equals(string_view left, string_view right)
 {
     if(left.size() != right.size())
         return false;
@@ -147,7 +147,7 @@ auto secure_equals(string_view left, string_view right) -> bool
     return diff == 0u;
 }
 
-auto validate_hashed_pat(const set<pat_hash>& hashed_values, string_view authorization) -> bool
+auto validate_hashed_pat(const set<pat_hash>& hashed_values, string_view authorization)
 {
     const auto candidate = hash_pat_bearer(authorization);
     for(const auto& stored : hashed_values)

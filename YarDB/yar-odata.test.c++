@@ -2553,7 +2553,7 @@ auto register_odata_tests()
                     auto totals = std::map<integer_type, integer_type>{};
                     for(const auto& row : rows)
                     {
-                        const auto region = [&]() -> integer_type
+                        const auto region = [&]()
                         {
                             if(row["region"s].is_integer())
                                 return static_cast<integer_type>(row["region"s]);
@@ -2595,7 +2595,7 @@ auto register_odata_tests()
                     auto totals = std::map<integer_type, integer_type>{};
                     for(const auto& row : rows)
                     {
-                        const auto region = [&]() -> integer_type
+                        const auto region = [&]()
                         {
                             if(row["region"s].is_integer())
                                 return static_cast<integer_type>(row["region"s]);

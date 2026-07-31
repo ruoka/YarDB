@@ -71,7 +71,7 @@ public:
         return tmp;
     }
 
-    friend auto operator==(const secondary_position_iterator&, const secondary_position_iterator&) -> bool = default;
+    friend bool operator==(const secondary_position_iterator&, const secondary_position_iterator&) = default;
 
 private:
 
@@ -136,7 +136,7 @@ public:
         return tmp;
     }
 
-    friend auto operator==(const reverse_secondary_position_iterator&, const reverse_secondary_position_iterator&) -> bool = default;
+    friend bool operator==(const reverse_secondary_position_iterator&, const reverse_secondary_position_iterator&) = default;
 
 private:
 
@@ -245,7 +245,7 @@ public:
         return tmp;
     }
 
-    friend auto operator==(const index_iterator& lhs, const index_iterator& rhs) -> bool
+    friend bool operator==(const index_iterator& lhs, const index_iterator& rhs)
     {
         if(lhs.m_kind != rhs.m_kind)
             return false;

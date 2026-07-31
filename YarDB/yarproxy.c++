@@ -35,7 +35,7 @@ struct replica_set : list<replica_backend>, mutex
     using list::list;
 };
 
-inline auto host_header_from_url(string_view replica_url) -> string
+inline auto host_header_from_url(string_view replica_url)
 {
     // RFC 7230 Host is uri-host [ ":" port ] with a numeric port only.
     // When the replica URL omits a port, uri.port is empty — do not fall back
@@ -147,7 +147,7 @@ inline void reconnect_replica(replica_backend& replica)
     }
 }
 
-inline auto strip_hop_by_hop(http::headers hdrs) -> http::headers
+inline auto strip_hop_by_hop(http::headers hdrs)
 {
     static constexpr array hop_by_hop = {
         "connection"s, "proxy-connection"s, "keep-alive"s,
@@ -206,12 +206,21 @@ inline void handle(auto& client, auto& replicas)
     };
 
     auto response = [&buffer](replica_backend& replica) {
-        if(not read_backend_response(replica.connection, buffer.seekp(0)))
+        // Drain into a side buffer so a later failed replica cannot clobber a
+        // response already chosen for the client. Unframed bodies (SSE) must
+        // reconnect — unread event-stream bytes poison keep-alive.
+        auto response_buffer = stringstream{};
+        if(not read_backend_response(replica.connection, response_buffer))
         {
             reconnect_replica(replica);
             return false;
         }
-        return replica.connection.good();
+        if(not replica.connection.good())
+            return false;
+
+        buffer.str(response_buffer.str());
+        buffer.clear();
+        return true;
     };
 
     auto disconnected = [](const replica_backend& replica) {
@@ -273,17 +282,26 @@ inline void handle(auto& client, auto& replicas)
                     break;
                 }
                 // middle==end is valid for size==1 (no-op rotate).
-                [[maybe_unused]] auto rotated = ranges::rotate(
-                    replicas, ranges::next(ranges::begin(replicas)));
+                [[maybe_unused]] auto rotated = ranges::rotate(replicas, ranges::next(ranges::begin(replicas)));
             }
             else
             {
-                if(not ranges::all_of(replicas, request))
+                // Drain every successful backend response so a later GET/HEAD does not
+                // consume a stale write response on a keep-alive connection.
+                auto successful_replicas = vector<reference_wrapper<replica_backend>>{};
+
+                for(auto& replica : replicas)
+                    if(request(replica)) successful_replicas.emplace_back(replica);
+
+                auto response_received = false;
+                for(const auto& replica : successful_replicas)
+                    response_received = response(replica.get()) or response_received;
+
+                if(not response_received)
                 {
                     send_bad_gateway();
                     break;
                 }
-                [[maybe_unused]] auto responded = ranges::all_of(replicas, response);
             }
         }
 

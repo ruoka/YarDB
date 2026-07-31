@@ -251,7 +251,7 @@ auto metadata_value(
     std::istream& storage,
     const yar::db::index_view& view,
     const yar::db::object& selector,
-    Extractor extractor) -> std::optional<T>
+    Extractor extractor)
 {
     using xson::fson::operator >>;
 
@@ -263,10 +263,10 @@ auto metadata_value(
         storage.seekg(position, storage.beg);
         storage >> metadata >> document;
         if(document.match(selector))
-            return extractor(metadata);
+            return std::optional<T>{extractor(metadata)};
     }
 
-    return std::nullopt;
+    return std::optional<T>{};
 }
 
 void assign_revision(yar::db::document_revision* revision, const yar::db::metadata& metadata_record)
@@ -706,11 +706,11 @@ void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, 
         return value.has_value() and not value.is_null();
     };
 
-    const auto id_of = [](const yar::db::object& doc) -> std::int64_t
+    const auto id_of = [](const yar::db::object& doc)
     {
         if(doc.has("_id"s) and doc["_id"s].is_integer())
             return static_cast<std::int64_t>(doc["_id"s]);
-        return 0;
+        return std::int64_t{0};
     };
 
     std::ranges::sort(items, [&](const yar::db::object& lhs, const yar::db::object& rhs)

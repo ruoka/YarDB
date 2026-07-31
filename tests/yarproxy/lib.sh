@@ -90,7 +90,7 @@ stop_cluster() {
   YARPROXY_PID=""
 
   local pid db
-  for pid in "${REPLICA_PIDS[@]}"; do
+  for pid in "${REPLICA_PIDS[@]-}"; do
     if kill -0 "${pid}" 2>/dev/null; then
       kill "${pid}" 2>/dev/null || true
       wait "${pid}" 2>/dev/null || true
@@ -98,7 +98,7 @@ stop_cluster() {
   done
   REPLICA_PIDS=()
 
-  for db in "${REPLICA_DBS[@]}"; do
+  for db in "${REPLICA_DBS[@]-}"; do
     rm -f "${db}" "${db}.pid" "${db}.log"
   done
   REPLICA_DBS=()

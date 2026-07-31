@@ -30,10 +30,13 @@ constexpr auto correlation_id_header = "x-correlation-id"sv;
 // Cached correlation ID header string (headers API requires std::string)
 const auto correlation_id_header_str = std::string{correlation_id_header};
 
-// Collection routes exclude reserved path segments (e.g. /health, /ready, /metrics).
-inline const auto collection_route = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*"s;
-inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*(\\?.*)?"s;
-inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$)[a-z][a-z0-9]*/[0-9]+"s;
+// Collection routes exclude reserved path segments (e.g. /health, /ready, /metrics,
+// /sse, /messages). Native MCP claims /sse and /messages/; keep them out of the
+// collection matcher so enable_mcp(false) yields 404 instead of treating "sse"
+// as a collection name.
+inline const auto collection_route = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*"s;
+inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*(\\?.*)?"s;
+inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*/[0-9]+"s;
 
 // Handler type aliases for middleware composition
 using handler = ::http::callback_with_headers;
@@ -322,7 +325,12 @@ public:
         if(enabled)
             attach_mcp();
         else
+        {
+            // Router callbacks capture raw pointers into m_mcp. Clear them
+            // before destroying the object or GET /sse / POST /messages/ UAF.
+            detach_mcp_routes();
             m_mcp.reset();
+        }
     }
 
     [[nodiscard]] bool mcp_enabled() const noexcept
@@ -331,6 +339,32 @@ public:
     }
 
 private:
+
+    // Clear SSE takeover and overwrite POST /messages so disabled MCP cannot
+    // invoke callbacks that outlive m_mcp (yardb --no-mcp / enable_mcp(false)).
+    void detach_mcp_routes()
+    {
+        // Empty sse callback → has_sse() is false (no event-stream takeover).
+        // The "/sse" router key still exists after sse(), so also install a GET
+        // 404 — otherwise the server answers 405 Method Not Allowed.
+        m_server.sse("/sse"s).gate({}).sse({});
+        m_server.get("/sse"s).response(
+            "text/plain"sv,
+            []([[maybe_unused]] ::http::request_view req,
+               [[maybe_unused]] ::http::body_view body,
+               [[maybe_unused]] ::http::headers& hdr) -> ::http::response_with_headers
+            {
+                return ::http::make_error_response(status_not_found, "Not Found"sv);
+            });
+        m_server.post("/messages/?(\\?.*)?"s).response(
+            "text/plain"sv,
+            []([[maybe_unused]] ::http::request_view req,
+               [[maybe_unused]] ::http::body_view body,
+               [[maybe_unused]] ::http::headers& hdr) -> ::http::response_with_headers
+            {
+                return ::http::make_error_response(status_not_found, "Not Found"sv);
+            });
+    }
 
     void attach_mcp()
     {
@@ -1813,6 +1847,10 @@ private:
 
         if(m_mcp_enabled)
             attach_mcp();
+        else
+            // rebuild_routes / --no-mcp: drop any previously attached MCP
+            // callbacks so they cannot outlive a destroyed m_mcp.
+            detach_mcp_routes();
     }
 
     std::string m_file;

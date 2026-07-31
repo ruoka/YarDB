@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, partial_backend_drain, empty_backends_502, head_no_hang, sse_no_poison, truncated_body_no_hang"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, partial_backend_drain, empty_backends_502, head_no_hang, sse_no_poison, truncated_body_no_hang, truncated_backend_no_poison"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -500,6 +500,108 @@ EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
   end_case truncated_body_no_hang
 }
 
+test_truncated_backend_no_poison() {
+  should_run truncated_backend_no_poison || return 0
+  begin_case truncated_backend_no_poison
+  # Custom topology: a backend that advertises a large Content-Length then
+  # closes after one body byte, plus one healthy yardb. Pre-fix GET retries
+  # clobbered the shared request buffer with that partial response and forwarded
+  # it to the healthy replica (which then blocked on the forged Content-Length
+  # while yarproxy held the replica mutex).
+  stop_cluster
+  CLUSTER_STARTED=0
+  REPLICA_PAT=""
+  start_replica
+
+  local coll mock_port status yardb_url
+  coll="$(collection truncbe)"
+  yardb_url="${REPLICA_URLS[0]}"
+  run_yarsh_at "${yardb_url}" "$(cat <<EOF
+POST /${coll}
+{"name":"trunc-backend-seed"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_healthy_replica"
+
+  mock_port="$(pick_port)"
+  MOCK_BACKEND_LOG="$(mktemp "${TMPDIR:-/tmp}/yarproxy_trunc_backend.XXXXXX").log"
+  python3 - "${mock_port}" >>"${MOCK_BACKEND_LOG}" 2>&1 <<'PY' &
+import socket, sys
+port = int(sys.argv[1])
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.bind(("127.0.0.1", port))
+sock.listen(8)
+while True:
+    conn, _ = sock.accept()
+    try:
+        conn.settimeout(2)
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        # Truncated framed body: claim 1MiB, send one byte, close.
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Length: 1048576\r\n"
+            b"\r\n"
+            b"x"
+        )
+    finally:
+        conn.close()
+PY
+  MOCK_BACKEND_PID=$!
+  # yarproxy connect()s every replica at startup; wait until the mock listens.
+  for _ in $(seq 1 50); do
+    if python3 - "${mock_port}" <<'PY'
+import socket, sys
+s = socket.socket()
+try:
+    s.settimeout(0.2)
+    s.connect(("127.0.0.1", int(sys.argv[1])))
+except OSError:
+    raise SystemExit(1)
+finally:
+    s.close()
+PY
+    then
+      break
+    fi
+    sleep 0.05
+  done
+
+  REPLICA_URLS=("http://127.0.0.1:${mock_port}" "${yardb_url}")
+  start_yarproxy
+  CLUSTER_STARTED=1
+
+  status=0
+  LAST_OUTPUT="$(printf '%s\n' "GET /${coll}/1
+EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    fail "GET via truncated backend timed out or failed (exit=${status})"
+    end_case truncated_backend_no_poison
+    return 0
+  fi
+  assert_contains " 200 " "get_retries_healthy_backend"
+  assert_contains '"name" : "trunc-backend-seed"' "get_retries_healthy_body"
+
+  # Healthy replica must remain usable: a follow-up GET on a fresh client.
+  status=0
+  LAST_OUTPUT="$(printf '%s\n' "GET /${coll}/1
+EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    fail "GET after truncated backend timed out (exit=${status}) — replica pool poisoned"
+    end_case truncated_backend_no_poison
+    return 0
+  fi
+  assert_contains " 200 " "get_after_trunc_backend_ok"
+  assert_contains '"name" : "trunc-backend-seed"' "get_after_trunc_backend_body"
+  end_case truncated_backend_no_poison
+}
+
 main() {
   require_bins
   trap stop_cluster EXIT
@@ -517,6 +619,7 @@ main() {
   test_head_no_hang
   test_sse_no_poison
   test_truncated_body_no_hang
+  test_truncated_backend_no_poison
   # Auth cases restart the cluster with --pat; empty_backends_502 kills replicas.
   test_header_forward_auth
   test_header_forward_correlation

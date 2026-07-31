@@ -17,6 +17,8 @@ YARPROXY_PID=""
 YARPROXY_PORT=""
 PROXY_URL=""
 YARPROXY_LOG=""
+MOCK_BACKEND_PID=""
+MOCK_BACKEND_LOG=""
 
 wait_for_url() {
   local url=$1
@@ -88,6 +90,16 @@ stop_cluster() {
     wait "${YARPROXY_PID}" 2>/dev/null || true
   fi
   YARPROXY_PID=""
+
+  if [[ -n "${MOCK_BACKEND_PID}" ]] && kill -0 "${MOCK_BACKEND_PID}" 2>/dev/null; then
+    kill "${MOCK_BACKEND_PID}" 2>/dev/null || true
+    wait "${MOCK_BACKEND_PID}" 2>/dev/null || true
+  fi
+  MOCK_BACKEND_PID=""
+  if [[ -n "${MOCK_BACKEND_LOG}" ]]; then
+    rm -f "${MOCK_BACKEND_LOG}"
+  fi
+  MOCK_BACKEND_LOG=""
 
   local pid db
   for pid in "${REPLICA_PIDS[@]-}"; do

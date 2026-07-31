@@ -22,7 +22,9 @@ using namespace yar::http::details;
 class fixture
 {
 public:
-    fixture(string_view f) : file{f}, m_port{"21120"s}
+    // Bind port "0" so each parallel top-level case gets an OS-assigned
+    // ephemeral port. A fixed port (e.g. 21120) collides under --jobs>1.
+    fixture(string_view f) : file{f}, m_port{"0"s}
     {
         // Set logging app name and sd_id for tests (using instance methods)
         slog.app_name("yardb")
@@ -37,8 +39,18 @@ public:
         fs.close();
         server = std::make_unique<yar::http::rest_api_server>(file, m_port);
         server->start();
-        // Wait longer for server to start and bind to port
-        std::this_thread::sleep_for(1000ms);
+        // Wait until listen() has bound and published the ephemeral port.
+        for(auto attempt = 0; attempt < 200; ++attempt)
+        {
+            const auto bound = server->bound_port();
+            if(bound != 0)
+            {
+                m_port = std::to_string(bound);
+                return;
+            }
+            std::this_thread::sleep_for(10ms);
+        }
+        throw std::runtime_error{"HTTP fixture failed to bind an ephemeral port"};
     }
 
     const std::string& port() const { return m_port; }

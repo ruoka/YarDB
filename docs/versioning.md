@@ -26,6 +26,16 @@ Each repository uses SemVer tags: `vMAJOR.MINOR.PATCH`.
 
 **Current YarDB release: [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0)** — first supported SemVer tag for the modules-era product surface (`yardb`, REST/OData HTTP API, FSON engine, companion CLIs). Between tags, prefer an explicit commit or `master` tip and keep submodule pins aligned.
 
+## When not to bump
+
+Do **not** cut a new SemVer tag solely for:
+
+- **Pin-only** submodule gitlink updates (including nested `deps/tester` sync)
+- **Test-only** changes that leave the public consume surface unchanged (e.g. adopting `require_throws_as<E>(callable)`, silencing warnings in `*.test.c++`, fixture cleanup)
+- **Docs / CI / policy** wording that does not change documented public behaviour
+
+Land those on the default branch and keep pins aligned. Cut a tag when the public surface itself warrants MAJOR, MINOR, or PATCH.
+
 ## Tester pin rule
 
 **All `deps/tester` gitlinks must be the same commit** — YarDB’s top-level `deps/tester` and every nested `deps/*/deps/tester` (cryptic, net, xson).

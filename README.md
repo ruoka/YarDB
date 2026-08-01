@@ -166,10 +166,12 @@ The intended one-service / one-file model, database locking, recovery, backups, 
 ## Dependencies
 
 The project uses git submodules for dependencies:
-- `net`: Network library (HTTP server)
-- `xson`: JSON/XML parsing
-- `cryptic`: Cryptographic functions (SHA1, SHA2, Base64)
-- `tester`: Testing framework
+- `net`: Network library / net4cpp ([`v3.0.0`](https://github.com/ruoka/net4cpp/releases/tag/v3.0.0)+)
+- `xson`: JSON/FSON library / json4cpp ([`v3.0.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.0.0)+)
+- `cryptic`: Cryptographic functions ([`v2.0.0`](https://github.com/ruoka/cryptic/releases/tag/v2.0.0)+)
+- `tester`: Testing framework ([`v2.0.0`](https://github.com/ruoka/tester/releases/tag/v2.0.0)+)
+
+**Versioning:** YarDB [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0); SemVer per repo; product majors ≠ dependency majors. **All `deps/tester` gitlinks (top-level and nested) must share one SHA** — see [`docs/versioning.md`](docs/versioning.md).
 
 **Note**: The `std` module is built from libc++ source (provided by Clang 21+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core`.
 
@@ -187,6 +189,7 @@ Start at [docs/README.md](docs/README.md) for the full documentation index. Key 
 
 - [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, MCP bridge, `yarproxy`, `yarexport`, `yarimport`
 - [Development Guide](docs/development.md) - Build, test, roadmap
+- [Versioning](docs/versioning.md) - Ecosystem SemVer and shared tester pin rule
 - [Deployment Guide](docs/deployment.md) - Production deployment
 - [Changelog](docs/changelog.md) - Shipped features and smoke coverage
 - [Archived REST API evaluation](docs/archive/rest_api_evaluation.md) - Historical design review

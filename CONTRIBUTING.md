@@ -19,10 +19,10 @@ Thank you for your interest in contributing to YarDB! This document provides gui
 
 2. **Initialize submodules:**
    ```bash
-   git submodule update --init --depth 1
+   git submodule update --init --recursive
    ```
-   
-   **Note:** Using `--depth 1` prevents pulling in nested submodules, which avoids multiple tester framework dependencies that could cause conflicts.
+
+   **Tester pin rule:** YarDB’s `deps/tester` and every nested `deps/*/deps/tester` must be the **same commit**. See [`docs/versioning.md`](docs/versioning.md). Prefer `--recursive` so nested pins are checked out; do not leave libraries on an older nested tester while YarDB’s top-level pin moves.
 
 3. **Build the project:**
    ```bash

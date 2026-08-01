@@ -16,12 +16,15 @@ Each repository uses SemVer tags: `vMAJOR.MINOR.PATCH`.
 
 **Modules-era baseline.** The Clang 21 + libc++ modules (`import …;`) consume surface is a new major relative to older header-era tags:
 
-| Repo | Modules-era first tag | Prior line (historical) |
-|------|----------------------|-------------------------|
-| [tester](https://github.com/ruoka/tester) | `v2.0.0` | `v1.0.0` pre-release / pre-JSONL |
-| [cryptic](https://github.com/ruoka/cryptic) | `v2.0.0` | untagged header history treated as v1 |
-| [net4cpp](https://github.com/ruoka/net4cpp) | `v3.0.0` | `v1.0` / `v2.0` / `v2.1` |
-| [json4cpp](https://github.com/ruoka/json4cpp) (`deps/xson`) | `v3.0.0` | `v1.0` / `v2.0` |
+| Repo | Current modules-era tag | Prior line (historical) | Policy |
+|------|-------------------------|-------------------------|--------|
+| [YarDB](https://github.com/ruoka/YarDB) | [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0) | untagged `master` history | this document |
+| [tester](https://github.com/ruoka/tester) | [`v2.0.0`](https://github.com/ruoka/tester/releases/tag/v2.0.0) | `v1.0.0` pre-release / pre-JSONL | [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md) |
+| [cryptic](https://github.com/ruoka/cryptic) | [`v2.0.0`](https://github.com/ruoka/cryptic/releases/tag/v2.0.0) | untagged header history treated as v1 | [`deps/cryptic/docs/release-policy.md`](../deps/cryptic/docs/release-policy.md) |
+| [net4cpp](https://github.com/ruoka/net4cpp) | [`v3.0.0`](https://github.com/ruoka/net4cpp/releases/tag/v3.0.0) | `v1.0` / `v2.0` / `v2.1` | [`deps/net/docs/release-policy.md`](../deps/net/docs/release-policy.md) |
+| [json4cpp](https://github.com/ruoka/json4cpp) (`deps/xson`) | [`v3.0.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.0.0) | `v1.0` / `v2.0` | [`deps/xson/docs/release-policy.md`](../deps/xson/docs/release-policy.md) |
+
+**Current YarDB release: [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0)** — first supported SemVer tag for the modules-era product surface (`yardb`, REST/OData HTTP API, FSON engine, companion CLIs). Between tags, prefer an explicit commit or `master` tip and keep submodule pins aligned.
 
 ## Tester pin rule
 
@@ -29,7 +32,7 @@ Each repository uses SemVer tags: `vMAJOR.MINOR.PATCH`.
 
 When bumping tester:
 
-1. Land the change on tester `main` (CI green).
+1. Land the change on tester `main` (CI green); prefer a release tag when cutting a supported tester version.
 2. Update nested pins in cryptic, net, and xson to that SHA and push those repos.
 3. Update YarDB’s `deps/tester` **and** the three library submodule pointers together in one YarDB commit.
 
@@ -43,9 +46,9 @@ Cut or move a SemVer tag only when:
 2. Open PRs that affect the release surface are merged or closed.
 3. Nested `deps/tester` pins match across consumers (see above).
 
-Prefer tagging the default-branch tip (`main` / `master`), not a feature branch.
+Prefer tagging the default-branch tip (`main` / `master`), not a feature branch. Per-repo criteria and public-surface tables live in each library’s `docs/release-policy.md`.
 
 ## Related
 
-- Tester’s own surface and rules: [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md)
+- Tester policy (canonical for the framework): [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md)
 - Agent build/test commands: [`AGENTS.md`](../AGENTS.md)

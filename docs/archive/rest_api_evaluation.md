@@ -105,10 +105,11 @@ Rationale: `$filter` comparison operators (including `ne`), `in`, `or`, nested p
    - ✅ Return `304 Not Modified` for conditional GET/HEAD requests
    - ✅ **Impact**: Prevents lost updates and enables efficient caching
 
-14. **API Versioning** - Version management strategy
+14. **API Versioning** - HTTP/REST version management strategy (not package SemVer)
     - Support version in URL (`/v1/collection`) or header (`API-Version: 1.0`)
     - Document versioning strategy
     - **Impact**: Enables API evolution without breaking clients
+    - **Note:** Ecosystem *package* SemVer for YarDB’s library submodules is covered by [`docs/versioning.md`](../versioning.md); this item is only about the HTTP surface.
 
 ### 🟢 Low Priority
 
@@ -243,7 +244,7 @@ All previously identified critical issues have been addressed:
 - **Bulk Operations**: No batch endpoints
 - **Search**: No full-text search or indexing
 - **Relationships**: No nested resources or relationships
-- **Versioning**: No API versioning strategy
+- **Versioning**: No HTTP API versioning strategy (package SemVer for deps: see [`docs/versioning.md`](../versioning.md))
 
 ## Minor Issues 🟢
 

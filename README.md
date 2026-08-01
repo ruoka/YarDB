@@ -171,7 +171,7 @@ The project uses git submodules for dependencies:
 - `cryptic`: Cryptographic functions ([`v2.0.0`](https://github.com/ruoka/cryptic/releases/tag/v2.0.0)+)
 - `tester`: Testing framework ([`v2.0.0`](https://github.com/ruoka/tester/releases/tag/v2.0.0)+)
 
-**Versioning:** SemVer per repo; product majors ≠ dependency majors. **All `deps/tester` gitlinks (top-level and nested) must share one SHA** — see [`docs/versioning.md`](docs/versioning.md).
+**Versioning:** YarDB [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0); SemVer per repo; product majors ≠ dependency majors. **All `deps/tester` gitlinks (top-level and nested) must share one SHA** — see [`docs/versioning.md`](docs/versioning.md).
 
 **Note**: The `std` module is built from libc++ source (provided by Clang 21+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core`.
 

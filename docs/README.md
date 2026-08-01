@@ -9,6 +9,7 @@ This directory contains comprehensive project documentation organized by topic a
 - **[odata.md](odata.md)** - OData **supported vs pipeline** checklist (`$apply`, `$expand`, …)
 - **[changelog.md](changelog.md)** - **Shipped features and smoke coverage** (completed work)
 - **[project_organization.md](project_organization.md)** - Project structure and P1204R0 compliance
+- **[versioning.md](versioning.md)** - Ecosystem SemVer tags and the shared `deps/tester` pin rule
 - **[clang_module_flags.md](clang_module_flags.md)** - C++23 module handling in C++ Builder
 - **[json4cpp.md](json4cpp.md)** - Pointer to json4cpp (`deps/xson`) docs (assessment lives upstream)
 

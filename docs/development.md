@@ -13,14 +13,14 @@
 
 ### Git Submodules
 ```bash
-# Initialize and update submodules (depth 1 to avoid nested submodules)
-git submodule update --init --depth 1
+# Initialize including nested deps/*/deps/tester pins
+git submodule update --init --recursive
 
 # Pull with submodules
 git pull --recurse-submodules
 ```
 
-**Note:** Using `--depth 1` prevents pulling in nested submodules, which avoids multiple tester framework dependencies that could cause conflicts.
+**Tester pin rule:** YarDB `deps/tester` and every nested `deps/*/deps/tester` must be the same commit. See [`versioning.md`](versioning.md).
 
 ### Environment Setup
 

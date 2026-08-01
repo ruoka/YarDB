@@ -9,11 +9,13 @@ Use **`--jsonl=failures`**. Parse **stdout only** (one JSON object per line, `sc
 ## Setup
 
 ```bash
-git submodule update --init --depth 1 deps/cryptic deps/net deps/tester deps/xson
+git submodule update --init --recursive --depth 1 deps/cryptic deps/net deps/tester deps/xson
 ./tools/CB.sh debug build
 ```
 
 `tools/CB.sh` is a thin wrapper over `deps/tester/tools/CB.sh.core`. Requires **Clang 21+** with libc++ modules (`std.cppm`).
+
+**Tester pins:** top-level and nested `deps/tester` must be the same commit — see [`docs/versioning.md`](docs/versioning.md).
 
 ## Coding standards
 

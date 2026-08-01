@@ -92,10 +92,10 @@ auto register_details_tests()
             {
                 then("Throws invalid_argument") = []
                 {
-                    require_throws_as([]
+                    require_throws_as<std::invalid_argument>([]
                     {
                         (void)split_outside_quotes("a,b"sv, ""sv);
-                    }, std::invalid_argument{"delimiter cannot be empty"});
+                    });
                 };
             };
         };
@@ -144,10 +144,10 @@ auto register_details_tests()
             {
                 then("Throws invalid_argument") = []
                 {
-                    require_throws_as([]
+                    require_throws_as<std::invalid_argument>([]
                     {
                         validate_collection_name("Users"sv);
-                    }, std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"});
+                    });
                 };
             };
         };

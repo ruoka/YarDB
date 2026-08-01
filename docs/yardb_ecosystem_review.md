@@ -91,10 +91,13 @@ using middleware_factory = ::http::middleware_factory;
 **Submodule-Based Dependencies:**
 - **net4cpp** (networking): Included as git submodule in `deps/net/`
 - **xson** (JSON/BSON): Included as git submodule in `deps/xson/`
-- **tester** (testing framework): Included as git submodule in `deps/tester/` (also nested in `deps/xson/deps/tester/`)
+- **tester** (testing framework): Included as git submodule in `deps/tester/` (also nested under `deps/*/deps/tester/`)
+- **cryptic** (crypto): Included as git submodule in `deps/cryptic/`
 - Build system (`tools/CB.sh`) automatically resolves all module dependencies
 - Reproducible builds: all submodule commits are pinned
 - Each dependency can work standalone or as part of YarDB
+- **Package SemVer:** libraries publish modules-era tags (`tester`/`cryptic` `v2.0.0`, `net4cpp`/`json4cpp` `v3.0.0`); ecosystem pin rule and product-vs-dependency majors are in [`docs/versioning.md`](versioning.md). YarDB itself is not yet SemVer-tagged.
+- **HTTP API versioning** (URL/header scheme for REST clients) is a separate concern from package SemVer — still open in the archived REST evaluation, not closed by submodule tags.
 
 **Build Integration:**
 - Custom C++ Builder (`cb`) handles module dependencies automatically
@@ -110,7 +113,7 @@ import xson;      // JSON/BSON serialization
 import tester;    // Testing framework (in test files)
 ```
 
-**Recommendation:** ✅ Excellent dependency management with clean separation. All three dependencies are well-integrated.
+**Recommendation:** ✅ Excellent dependency management with clean separation. Library SemVer and the shared `deps/tester` pin rule are documented; keep pins aligned when bumping tester.
 
 #### 1.4 Extensibility ⭐⭐⭐⭐⭐
 **Files:** `YarDB/yar-httpd.c++m:339-381`, middleware pattern

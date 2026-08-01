@@ -101,8 +101,9 @@ inline auto read_http_message(istream& is, ostream& os, bool skip_body = false) 
 }
 
 // Read a backend response. Returns false when the body is unframed (no
-// Content-Length) and was not skipped — e.g. MCP GET /sse text/event-stream.
-// Caller must not reuse the keep-alive socket; unread SSE bytes would make the
+// Content-Length) and was not skipped — e.g. MCP GET /sse text/event-stream —
+// or when Content-Length bytes are truncated. Caller must not reuse the
+// keep-alive socket on failure; unread SSE / short-body bytes would make the
 // next status-line read hang while holding the replica mutex.
 inline auto read_backend_response(istream& is, ostream& os, bool skip_body = false) -> bool
 {
@@ -110,6 +111,8 @@ inline auto read_backend_response(istream& is, ostream& os, bool skip_body = fal
     auto headers = http::headers{};
 
     getline(is, status_line, '\r') >> ws >> headers >> crlf;
+    if(not is)
+        return false;
     os << status_line << crlf << headers << crlf;
 
     if(skip_body)
@@ -125,13 +128,22 @@ inline auto read_backend_response(istream& is, ostream& os, bool skip_body = fal
     }
 
     auto content_length = stoll(headers["content-length"s]);
+    if(content_length < 0)
+        return false;
+
     while(content_length > 0 and is and os)
     {
-        os.put(is.get());
+        const auto ch = is.get();
+        if(not is)
+            break;
+        os.put(static_cast<char>(ch));
         --content_length;
     }
     os << flush;
-    return true;
+    // Same short-read discipline as copy_http_body: a truncated backend body
+    // must fail closed so GET retries do not forward a forged request built
+    // from the partial response (which can stall the next replica on CL).
+    return content_length == 0 and static_cast<bool>(os);
 }
 
 inline void reconnect_replica(replica_backend& replica)
@@ -186,17 +198,25 @@ inline void handle(auto& client, auto& replicas)
     auto buffer = stringstream{};
 
     auto request_and_response = [&buffer](replica_backend& replica, bool skip_body) {
+        // Keep the client request intact across any_of retries. Reading the
+        // backend response into `buffer` would clobber the request so a later
+        // replica receives the truncated response as a forged request (and can
+        // block forever on its Content-Length while we hold the replica mutex).
         buffer.seekg(0);
         if(not forward_request(buffer, replica.connection, replica.host_header))
             return false;
-        if(not read_backend_response(replica.connection, buffer.seekp(0), skip_body))
+        auto response_buffer = stringstream{};
+        if(not read_backend_response(replica.connection, response_buffer, skip_body)
+            or not replica.connection.good())
         {
-            // Unframed streaming body (SSE). Close + reconnect so unread
-            // event-stream bytes cannot poison the pooled keep-alive socket.
+            // Unframed SSE, truncated Content-Length, or dead socket. Close +
+            // reconnect so unread/short body bytes cannot poison keep-alive.
             reconnect_replica(replica);
             return false;
         }
-        return replica.connection.good();
+        buffer.str(response_buffer.str());
+        buffer.clear();
+        return true;
     };
 
     auto request = [&buffer](replica_backend& replica) {
@@ -207,16 +227,15 @@ inline void handle(auto& client, auto& replicas)
 
     auto response = [&buffer](replica_backend& replica) {
         // Drain into a side buffer so a later failed replica cannot clobber a
-        // response already chosen for the client. Unframed bodies (SSE) must
-        // reconnect — unread event-stream bytes poison keep-alive.
+        // response already chosen for the client. Unframed / truncated bodies
+        // must reconnect — unread bytes poison keep-alive.
         auto response_buffer = stringstream{};
-        if(not read_backend_response(replica.connection, response_buffer))
+        if(not read_backend_response(replica.connection, response_buffer)
+            or not replica.connection.good())
         {
             reconnect_replica(replica);
             return false;
         }
-        if(not replica.connection.good())
-            return false;
 
         buffer.str(response_buffer.str());
         buffer.clear();

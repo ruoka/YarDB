@@ -3797,12 +3797,21 @@ auto test_set()
 
         section("Rate limiting allows requests within limit") = [setup]
         {
+            setup->get_server().configure_rate_limiting(
+                2,
+                std::chrono::seconds{5},
+                [](std::string_view, const ::http::headers&){
+                    return "allow-section-key"s;
+                }
+            );
+            setup->get_server().rebuild_routes();
+
             // First request should succeed
             auto [status1, reason1, headers1, body1] = make_request(
                 setup->port(), "GET"s, "/"s, ""s
             );
             require_eq(status1, "200"s);
-            
+
             // Second request should succeed
             auto [status2, reason2, headers2, body2] = make_request(
                 setup->port(), "GET"s, "/"s, ""s
@@ -3812,15 +3821,26 @@ auto test_set()
 
         section("Rate limiting rejects requests when limit exceeded") = [setup]
         {
+            // Fresh limiter so this section does not depend on earlier sections
+            // (or parallel tests) having already consumed the shared window.
+            setup->get_server().configure_rate_limiting(
+                2,
+                std::chrono::seconds{5},
+                [](std::string_view, const ::http::headers&){
+                    return "reject-section-key"s;
+                }
+            );
+            setup->get_server().rebuild_routes();
+
             // Make 2 requests to fill the limit
             make_request(setup->port(), "GET"s, "/"s, ""s);
             make_request(setup->port(), "GET"s, "/"s, ""s);
-            
+
             // Third request should be rejected
             auto [status, reason, headers, body] = make_request(
                 setup->port(), "GET"s, "/"s, ""s
             );
-            
+
             require_eq(status, "429"s);
             require_eq(reason, "Too Many Requests"s);
             require_true(headers.contains("retry-after"s));

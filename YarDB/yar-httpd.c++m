@@ -246,6 +246,7 @@ public:
         m_rate_limiting_enabled = true;
         m_rate_limit_max_requests = max_requests;
         m_rate_limit_window_seconds = window_seconds;
+        m_rate_limiter = ::http::middleware::make_rate_limiter();
         if(key_extractor)
             m_rate_limit_key_extractor = std::move(key_extractor);
         else
@@ -258,6 +259,7 @@ public:
         m_rate_limit_max_requests = 100;
         m_rate_limit_window_seconds = std::chrono::seconds{60};
         m_rate_limit_key_extractor = safe_rate_limit_key_extractor;
+        m_rate_limiter.reset();
     }
 
     // CORS configuration
@@ -620,13 +622,15 @@ private:
     // Returns middleware factory if rate limiting is enabled, otherwise returns empty optional
     std::optional<middleware_factory> rate_limiting_middleware() const
     {
-        if(not m_rate_limiting_enabled)
+        if(not m_rate_limiting_enabled or not m_rate_limiter)
             return std::nullopt;
-        
+
+        // Share one limiter across all routes so limits apply API-wide.
         return ::http::middleware::rate_limiting_middleware(
             m_rate_limit_max_requests,
             m_rate_limit_window_seconds,
-            m_rate_limit_key_extractor
+            m_rate_limit_key_extractor,
+            m_rate_limiter
         );
     }
 
@@ -1876,6 +1880,7 @@ private:
     std::size_t m_rate_limit_max_requests = 100;
     std::chrono::seconds m_rate_limit_window_seconds{60};
     std::function<std::string(std::string_view request, const ::http::headers&)> m_rate_limit_key_extractor = safe_rate_limit_key_extractor;
+    ::http::middleware::rate_limiter_ptr m_rate_limiter;
     
     // CORS configuration (optional)
     bool m_cors_enabled = false;

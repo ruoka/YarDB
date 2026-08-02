@@ -25,6 +25,10 @@ stamps/
 # (e.g., "yardb" was matching "yar-details.c++m")
 tools/cb
 
+# CB / clangd artifacts written at the project root
+compile_commands.json
+graph.json
+
 ###############################################################################
 # IDE and Editor Files
 ###############################################################################

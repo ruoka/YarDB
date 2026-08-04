@@ -19,7 +19,7 @@ Each repository uses SemVer tags: `vMAJOR.MINOR.PATCH`.
 | Repo | Current modules-era tag | Prior line (historical) | Policy |
 |------|-------------------------|-------------------------|--------|
 | [YarDB](https://github.com/ruoka/YarDB) | [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0) | untagged `master` history | this document |
-| [tester](https://github.com/ruoka/tester) | [`v2.1.2`](https://github.com/ruoka/tester/releases/tag/v2.1.2) | `v1.0.0` pre-release / pre-JSONL | [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md) |
+| [tester](https://github.com/ruoka/tester) | [`v3.0.0`](https://github.com/ruoka/tester/releases/tag/v3.0.0) | `v2.x` / `v1.0.0` pre-release / pre-JSONL | [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md) |
 | [cryptic](https://github.com/ruoka/cryptic) | [`v2.0.0`](https://github.com/ruoka/cryptic/releases/tag/v2.0.0) | untagged header history treated as v1 | [`deps/cryptic/docs/release-policy.md`](../deps/cryptic/docs/release-policy.md) |
 | [net4cpp](https://github.com/ruoka/net4cpp) | [`v3.0.1`](https://github.com/ruoka/net4cpp/releases/tag/v3.0.1) | `v1.0` / `v2.0` / `v2.1` | [`deps/net/docs/release-policy.md`](../deps/net/docs/release-policy.md) |
 | [json4cpp](https://github.com/ruoka/json4cpp) (`deps/xson`) | [`v3.0.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.0.0) | `v1.0` / `v2.0` | [`deps/xson/docs/release-policy.md`](../deps/xson/docs/release-policy.md) |

@@ -169,7 +169,7 @@ The project uses git submodules for dependencies:
 - `net`: Network library / net4cpp ([`v3.0.1`](https://github.com/ruoka/net4cpp/releases/tag/v3.0.1)+)
 - `xson`: JSON/FSON library / json4cpp ([`v3.0.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.0.0)+)
 - `cryptic`: Cryptographic functions ([`v2.0.0`](https://github.com/ruoka/cryptic/releases/tag/v2.0.0)+)
-- `tester`: Testing framework ([`v2.1.2`](https://github.com/ruoka/tester/releases/tag/v2.1.2)+)
+- `tester`: Testing framework ([`v3.0.0`](https://github.com/ruoka/tester/releases/tag/v3.0.0)+)
 
 **Versioning:** YarDB [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0); SemVer per repo; product majors ≠ dependency majors. **All `deps/tester` gitlinks (top-level and nested) must share one SHA** — see [`docs/versioning.md`](docs/versioning.md).
 

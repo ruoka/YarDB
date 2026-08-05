@@ -326,6 +326,26 @@ public:
         setup_routes();
     }
 
+    // Access the persistence engine (e.g. domain projections in a2a).
+    yar::db::engine& engine() noexcept
+    {
+        return m_engine;
+    }
+
+    const yar::db::engine& engine() const noexcept
+    {
+        return m_engine;
+    }
+
+    // Read-only virtual collection: GET /{name} runs reader(engine); writes return 405.
+    // Survives rebuild_routes() (handlers live in this map, not in the router alone).
+    using virtual_collection_reader = std::function<xson::object(yar::db::engine&)>;
+
+    void register_virtual_collection(std::string name, virtual_collection_reader reader)
+    {
+        m_virtual_collections.insert_or_assign(std::move(name), std::move(reader));
+    }
+
     // Native MCP over HTTP+SSE (`GET /sse`, `POST /messages/?session_id=`).
     // Enabled by default; tools call the engine directly (not the Python bridge).
     void enable_mcp(bool enabled = true)
@@ -762,6 +782,8 @@ private:
             }
             
             const auto ctx = handler_context{request, m_engine};
+            if(is_virtual_collection(ctx.collection))
+                return virtual_collection_write_rejected();
             auto document = xson::json::parse(body);
             const auto created = m_engine.create(ctx.collection, document);
             if(not created)
@@ -788,7 +810,13 @@ private:
         // List all collections - Refactored to use middleware pattern
         auto list_collections_handler = [this]([[maybe_unused]] ::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
         {
-            auto response = xson::object{"collections", m_engine.collections()};
+            auto names = m_engine.collections();
+            for(const auto& [name, _] : m_virtual_collections)
+            {
+                if(std::ranges::find(names, name) == names.end())
+                    names.push_back(name);
+            }
+            auto response = xson::object{"collections", names};
 
             // Add OData metadata if requested
             const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
@@ -893,6 +921,15 @@ private:
         auto get_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
         {
             const auto ctx = handler_context{request, m_engine};
+            if(is_virtual_collection(ctx.collection))
+            {
+                auto error = xson::object{
+                    {"error", "Not Found"s},
+                    {"message", "Virtual collections have no document ids"s},
+                    {"collection", ctx.collection}
+                };
+                return response_with_headers{status_not_found, xson::json::stringify(error), std::optional<::http::headers>{}};
+            }
             const auto id = utils::stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
@@ -973,6 +1010,20 @@ private:
             const auto uri = ::http::uri{request};
             auto document = xson::object{};
             auto selector = xson::object{};
+
+            // Virtual collections short-circuit before OData query handling.
+            if(not uri.path[1].empty())
+            {
+                const auto collection_name = validate_collection_name(uri.path[1]);
+                if(auto it = m_virtual_collections.find(collection_name); it != m_virtual_collections.end())
+                {
+                    document = it->second(m_engine);
+                    return response_with_headers{
+                        status_ok,
+                        xson::json::stringify(document),
+                        std::optional<::http::headers>{}};
+                }
+            }
             
             // Parse OData query parameters
             auto params = parse_query_params(uri);
@@ -1607,6 +1658,8 @@ private:
 
             const auto selector = xson::object{"_id", id};
             const auto collection = validate_collection_name(uri.path[1]);
+            if(is_virtual_collection(collection))
+                return virtual_collection_write_rejected();
             auto response_headers = ::http::headers{};
             const auto resource_path = "/"s + collection + "/"s + std::to_string(id);
             const auto preconditions = put_preconditions_from_headers(headers);
@@ -1667,6 +1720,8 @@ private:
             const auto id = utils::stoll(uri.path[2]); // Regex ensures numeric format
             const auto selector = xson::object{"_id", id};
             const auto collection = validate_collection_name(uri.path[1]);
+            if(is_virtual_collection(collection))
+                return virtual_collection_write_rejected();
             auto existing_docs = xson::object{};
             const auto exists = m_engine.read(collection, selector, existing_docs);
             if(not exists or existing_docs.get<xson::object::array>().empty())
@@ -1747,6 +1802,8 @@ private:
         auto delete_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, [[maybe_unused]] ::http::headers& headers)
         {
             const auto ctx = handler_context{request, m_engine};
+            if(is_virtual_collection(ctx.collection))
+                return virtual_collection_write_rejected();
             const auto id = utils::stoll(ctx.uri.path[2]); // Regex ensures numeric format
             auto documents = xson::object{};
             const auto selector = xson::object{"_id", id};
@@ -1783,6 +1840,8 @@ private:
             auto documents = xson::object{};
             const auto selector = xson::object{"$top", 1ll};
             const auto collection_name = validate_collection_name(uri.path[1]);
+            if(is_virtual_collection(collection_name))
+                return virtual_collection_write_rejected();
             const auto deleted = m_engine.destroy(collection_name, selector, documents);
             if(not deleted)
                 return database_error_response(deleted.error());
@@ -1896,6 +1955,22 @@ private:
     std::function<bool(std::string_view token)> m_validate_token = nullptr;
     std::function<bool(std::string_view token)> m_validate_admin_token = nullptr;
     std::string m_auth_realm = "YarDB API"s;
+
+    // Domain-owned read projections (e.g. 3xS GET /balances).
+    std::map<std::string, virtual_collection_reader> m_virtual_collections;
+
+    bool is_virtual_collection(std::string_view name) const
+    {
+        return m_virtual_collections.contains(std::string{name});
+    }
+
+    static response_with_headers virtual_collection_write_rejected()
+    {
+        return make_error_response_with_headers(
+            status_method_not_allowed,
+            "Method Not Allowed"s,
+            "Collection is a read-only virtual projection"s);
+    }
 };
 
 } // namespace yar::http

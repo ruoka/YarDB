@@ -38,19 +38,10 @@ public:
         fs.open(file, ios::out);
         fs.close();
         server = std::make_unique<yar::http::rest_api_server>(file, m_port);
-        server->start();
-        // Wait until listen() has bound and published the ephemeral port.
-        for(auto attempt = 0; attempt < 200; ++attempt)
-        {
-            const auto bound = server->bound_port();
-            if(bound != 0)
-            {
-                m_port = std::to_string(bound);
-                return;
-            }
-            std::this_thread::sleep_for(10ms);
-        }
-        throw std::runtime_error{"HTTP fixture failed to bind an ephemeral port"};
+        const auto bound = server->start();
+        if(bound.wait_for(2s) != std::future_status::ready)
+            throw std::runtime_error{"HTTP fixture failed to bind an ephemeral port"};
+        m_port = std::to_string(bound.get());
     }
 
     const std::string& port() const { return m_port; }

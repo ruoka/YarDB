@@ -533,7 +533,7 @@ inline Result make_error_response(const std::string& status, const std::string& 
 // Specialized versions for common error types
 inline ::http::response_with_headers make_error_response_with_headers(const std::string& status, const std::string& error_type, const std::string& message)
 {
-    return make_error_response<::http::response_with_headers>(status, error_type, message);
+    return ::http::make_error_response(status, error_type, message);
 }
 
 inline auto make_error_response_simple(const std::string& status, const std::string& error_type, const std::string& message)

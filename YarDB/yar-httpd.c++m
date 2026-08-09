@@ -137,11 +137,18 @@ public:
         setup_routes();
     }
 
-    void start()
+    // Starts listen on a background thread. The returned future becomes ready
+    // with the bound port once the accept socket is up (including ephemeral "0"),
+    // or throws if bind/listen fails or stop() wins the race.
+    std::shared_future<std::uint16_t> start()
     {
         std::lock_guard<std::mutex> lock{m_start_mutex};
         if(m_listen_thread.joinable())
-            return;
+            return m_bound_port_future;
+
+        m_bound_port_promise = std::promise<std::uint16_t>{};
+        m_bound_port_future = m_bound_port_promise.get_future().share();
+        m_bound_port_completed.store(false, std::memory_order_release);
 
         m_state.store(server_state::starting);
         m_listen_thread = std::thread{[this]()
@@ -155,9 +162,12 @@ public:
                 m_server.listen(m_bind_host, m_port_or_service, [this]()
                 {
                     m_state.store(server_state::ready);
+                    complete_bound_port(m_server.bound_port());
                 });
                 if(m_state.load() != server_state::draining)
                     m_state.store(server_state::stopped);
+                fail_bound_port(std::make_exception_ptr(
+                    std::runtime_error{"listen ended before bind"}));
             }
             catch(const std::exception& e)
             {
@@ -165,8 +175,10 @@ public:
                 slog << error("SERVER_START_ERROR") << "Failed to start server: " << e.what()
                       << std::pair{"port"sv, m_port_or_service}
                       << flush;
+                fail_bound_port(std::current_exception());
             }
         }};
+        return m_bound_port_future;
     }
 
     void drain()
@@ -1864,6 +1876,20 @@ private:
             detach_mcp_routes();
     }
 
+    void complete_bound_port(std::uint16_t port)
+    {
+        if(m_bound_port_completed.exchange(true, std::memory_order_acq_rel))
+            return;
+        m_bound_port_promise.set_value(port);
+    }
+
+    void fail_bound_port(std::exception_ptr error)
+    {
+        if(m_bound_port_completed.exchange(true, std::memory_order_acq_rel))
+            return;
+        m_bound_port_promise.set_exception(std::move(error));
+    }
+
     std::string m_file;
     std::string m_bind_host;
     std::string m_port_or_service;
@@ -1874,6 +1900,9 @@ private:
     std::atomic<server_state> m_state{server_state::stopped};
     std::thread m_listen_thread;
     mutable std::mutex m_start_mutex;
+    std::promise<std::uint16_t> m_bound_port_promise;
+    std::shared_future<std::uint16_t> m_bound_port_future;
+    std::atomic_bool m_bound_port_completed{false};
     
     // Rate limiting configuration (optional)
     bool m_rate_limiting_enabled = false;

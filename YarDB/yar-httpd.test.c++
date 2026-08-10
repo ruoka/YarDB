@@ -4318,7 +4318,7 @@ auto test_set()
             require_eq(status, "401"s);
             require_eq(reason, "Unauthorized"s);
             require_true(headers.contains("www-authenticate"s));
-            require_eq(body, "Unauthorized"s);
+            require_eq(body, R"({"error":"Unauthorized","message":"Unauthorized"})"s);
         };
 
         section("Protected route with invalid token returns 401") = [setup]

@@ -12,11 +12,12 @@ using namespace std;
 using namespace net;
 
 const auto usage = R"(
-yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--mcp|--no-mcp] [--pat=<token>] [--pat-file=<path>] [--admin-pat=<token>] [--admin-pat-file=<path>] [service_or_port]
+yardb [--help] [--clog] [--slog_level=<level>] [--file=<name>] [--bind=<host>] [--cors] [--mcp|--no-mcp] [--pat=<token>] [--pat-file=<path>] [--admin-pat=<token>] [--admin-pat-file=<path>] [service_or_port]
 
 Listen address (default: 127.0.0.1):
   --bind=<host>       Bind host (default 127.0.0.1). Use --bind=0.0.0.0 for Docker/port-forwarding.
                       Binding to 0.0.0.0 or :: requires --pat or --pat-file.
+  --cors              Enable CORS for http://localhost:* and http://127.0.0.1:* (browser health probes).
 
 Native MCP (HTTP+SSE, default on):
   --mcp               Enable GET /sse + POST /messages/ (http::mcp; default)
@@ -176,6 +177,7 @@ try
     auto bind_host = "127.0.0.1"s;
     auto service_or_port = "2112"s;
     auto enable_mcp = true;
+    auto enable_cors = false;
     auto raw_pats = vector<string>{};
     auto pat_files = vector<string>{};
     auto raw_admin_pats = vector<string>{};
@@ -229,6 +231,12 @@ try
                 cerr << usage << endl;
                 return 1;
             }
+            continue;
+        }
+
+        if(option == "--cors")
+        {
+            enable_cors = true;
             continue;
         }
 
@@ -296,6 +304,13 @@ try
     server.enable_mcp(enable_mcp);
     if(enable_mcp)
         slog << notice << "Native MCP SSE enabled at http://" << bind_host << ":" << service_or_port << "/sse" << flush;
+    if(enable_cors)
+    {
+        server.configure_cors([](string_view origin) {
+            return origin.starts_with("http://localhost:"sv) or origin.starts_with("http://127.0.0.1:"sv);
+        }, {}, {}, true, 3600);
+        slog << notice << "CORS enabled for localhost / 127.0.0.1 origins" << flush;
+    }
 
     if(not hashed_pats.empty() or not hashed_admin_pats.empty())
     {

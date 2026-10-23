@@ -4138,6 +4138,7 @@ auto test_set()
             require_eq(status, "200"s);
             require_eq(reason, "OK"s);
             require_eq(body, "{}"s);
+            require_eq(headers["server"], "YarDB"s);
         };
     };
 

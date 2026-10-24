@@ -96,6 +96,13 @@ inline auto read_http_message(istream& is, ostream& os, bool skip_body = false) 
     getline(is, request_line, '\r') >> ws >> headers >> crlf;
     if(not is)
         return false;
+    // Body framing is Content-Length only (same policy as net::http::server).
+    // Ignoring Transfer-Encoding leaves unread chunk bytes on a keep-alive
+    // client socket, so the next status/request-line parse treats them as a
+    // new request — classic TE/CL desync that can smuggle a DELETE/POST into
+    // the write fan-out. Reject before buffering or forwarding any body.
+    if(headers.contains("transfer-encoding"s))
+        return false;
     os << request_line << crlf << headers << crlf;
     return copy_http_body(is, os, headers, skip_body);
 }

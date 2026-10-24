@@ -481,7 +481,7 @@ directly; Python tools proxy the REST/OData HTTP API.
 ```bash
 ./tests/mcp/smoke.sh                 # Python stdio oracle (still useful)
 ./tests/mcp/smoke.sh --case sse      # optional Python SSE
-./tools/CB.sh debug test "native MCP" --tags='\[yardb\]'
+./tools/CB.sh debug test "native MCP"
 ```
 
 ## yarproxy - HTTP Fan-out Proxy

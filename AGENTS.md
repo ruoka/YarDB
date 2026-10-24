@@ -15,7 +15,7 @@ git submodule update --init --recursive --depth 1 deps/cryptic deps/net deps/tes
 
 `tools/CB.sh` is a thin wrapper over `deps/tester/tools/CB.sh.core`. Requires **Clang 21+** with libc++ modules (`std.cppm`).
 
-**Tester pins:** top-level and nested `deps/tester` must be the same commit — see [`docs/versioning.md`](docs/versioning.md).
+**Tester pins:** YarDB owns `deps/tester`. Nested copies under cryptic, net, and xson move when those repos do — see [`docs/versioning.md`](docs/versioning.md).
 
 ## Coding standards
 
@@ -46,7 +46,7 @@ git submodule update --init --recursive --depth 1 deps/cryptic deps/net deps/tes
 ./tools/CB.sh debug test --list --jsonl=failures
 ```
 
-**Tag syntax:** YarDB tests use `[yardb]`. Escape brackets in shell: `--tags='\[yardb\]'`. Substring/regex filters also work: `--tags='ETag'`.
+**Tag syntax:** YarDB tests use `[yardb]`. Escape brackets in shell: `--tags='\[yardb\]'`. A name filter is that same slot: `--tags='ETag'`, or a bare argument anywhere after `test` (`./tools/CB.sh debug test --jsonl=failures "ETag"`). Giving both is an error (CB exits `2`, `test_runner` exits `1`).
 
 **Hidden tags:** bracket tags starting with `.` (Catch2-style, e.g. `[.jsonl-probe]`) are **skipped on unfiltered runs**. In YarDB, unfiltered runs also pull in `deps/tester` `[jsonl-probe]` intentional failures — always scope with `--tags='\[yardb\]'`.
 
@@ -57,7 +57,11 @@ git submodule update --init --recursive --depth 1 deps/cryptic deps/net deps/tes
 - `--jsonl=summary` — lifecycle and final aggregates only
 - `--jsonl=trace` — complete telemetry, including passing assertions
 
-**CB flag forwarding:** `--tags=`, `--list`, `--jsonl[=summary|failures|trace]`, `--jsonl-output-max-bytes=…`, and `--slowest=…` may appear after `test` without `--`.
+**CB flag forwarding:** `--tags=`, `--list`, `--jsonl[=summary|failures|trace]`, `--jsonl-output-max-bytes=…`, `--slowest=…`, `--timeout=<seconds>`, and repeatable `--test-id=<id>` may appear after `test` without `--`.
+
+**Timeouts:** `--timeout=<seconds>` (or `TESTER_TIMEOUT`) ends a hung run with a `timeout` event whose `test_id` names the test. It is off by default. A case can set its own limit with `test_case("…", {.timeout = std::chrono::seconds{30}})` (the same field on `scenario`); that replaces `--timeout` for that test while timeouts are on.
+
+**Rerun:** `summary.rerun_ids` lists the failed top-level cases. Pass each id as `--test-id=<id>` to rerun only those. MCP `cb_test` (`.cursor/mcp.json`, default tags `[yardb]`) accepts `test_ids` and returns `rerun_ids`. It passes `--timeout=60` unless told otherwise. `filter` and `tags` cannot be combined: `filter` replaces the default tag scope.
 
 **Examples excluded:** `deps/tester/examples/` are not built or run (`CB_INCLUDE_EXAMPLES_MODE=never`). Use project tags in `YarDB/*.test.c++`.
 
@@ -74,13 +78,14 @@ git submodule update --init --recursive --depth 1 deps/cryptic deps/net deps/tes
 
 ## Triage workflow (test failure)
 
-1. Find the last `summary` or `run_end` event on stdout.
+1. Find the last `summary` or `run_end` event on stdout. If stdout ends in a `crash` or `timeout` event instead, its `test_id` names the test that died or hung. On Linux, CB reports that runner as `signaled:true` with the signal.
 
 2. Check the result:
    - If `passed` (or `run_end.passed`) is `true` → this scoped run succeeded. You're done.
    - If `false`:
-     - Read `first_failure` — `file`, `line`, `message`, and usually the failing `matcher` with `actual` / `expected`. Open the source at that location.
+     - Read `first_failure` — `file`, `line`, `column`, `message`, and the failing `matcher` with `actual` / `expected`. `file` / `line` point at the assertion. Open the source at that location.
      - Read `failed_test_ids` for the full failure set.
+     - To rerun only what failed, pass each id in `summary.rerun_ids` as `--test-id=<id>`.
 
 3. For detailed diagnosis, inspect `assertion_failed`:
    - `matcher` — e.g. `require_eq`, `check_contains` (not generic `require` / `check`)
@@ -93,8 +98,9 @@ If `matcher` is `"require"` or `"check"` on a `require_eq` / `check_eq` line, st
 ## Triage workflow (build failure)
 
 1. Find `command_end` with `"ok": false` — use the `argv` array to rerun without shell parsing.
-2. Check `compile_end` events: `cache_hit: false` means that translation unit recompiled; `cache_hit: true` means incremental skip. When `rebuild_reason` is `profile_change`, read the single `profile_changed` event for `profile_diff` (not repeated on each `compile_end`). Prefer `build_end.rebuild_summary` for a per-kind rollup.
-3. Rebuild: `./tools/CB.sh debug build --jsonl=failures`, then re-run tests.
+2. A build error is in `diagnostics.text` on the failed `compile_end` (also `link_end` / `command_end`). `signaled` / `signal` on that event distinguish a crashed toolchain process from a non-zero exit.
+3. Check `compile_end` events: `cache_hit: false` means that translation unit recompiled; `cache_hit: true` means incremental skip. When `rebuild_reason` is `profile_change`, read the single `profile_changed` event for `profile_diff` (not repeated on each `compile_end`). Prefer `build_end.rebuild_summary` for a per-kind rollup. `build_end.up_to_date` is `true` when nothing was compiled or linked.
+4. Rebuild: `./tools/CB.sh debug build --jsonl=failures`, then re-run tests.
 
 ## Event reference (stdout)
 
@@ -126,8 +132,10 @@ Filter `run_id=<cb>` or `parent_run_id=<cb>` to correlate `list` → `build` →
 | `assertion_failed` | Always on failed assertions (`matcher`, `actual`, `expected`, optional `message`) |
 | `assertion_passed` | Trace mode |
 | `test` | Per-test rollup (`success`, `output`, assertion counts) |
-| `summary` | `tests_ok`/`tests_total`, `failed_test_ids`, `first_failure` |
+| `summary` | `tests_ok`/`tests_total`, `failed_test_ids`, `rerun_ids`, `first_failure` (`file`, `line`, `column`, `matcher`, `actual`, `expected`) |
 | `exception` | Uncaught exceptions (`exception_type`, `message`, `file`, `line`) |
+| `crash` | Runner died on a signal; `test_id` names the test. CB's `test_end` reports `signaled:true` with the signal (Linux included) |
+| `timeout` | A test outlived `--timeout`; `test_id` names it. Same `signaled:true` reporting as a crash |
 | `eof` | End of JSONL stream |
 
 ### Build phase (CB)
@@ -137,7 +145,7 @@ Filter `run_id=<cb>` or `parent_run_id=<cb>` to correlate `list` → `build` →
 | `list_start` | TU inventory start (`config`, `include_tests`, `include_examples`, `source_dir`) |
 | `unit` | Per translation unit (`path`, `module`, `kind`, `imports[]`, `level`, `has_main`, `is_test`, `is_modular`) |
 | `list_summary` | Inventory totals (`units_total`, `main_count`, `test_count`, `max_level`) |
-| `build_start` / `build_end` | Whole build; `rebuild_summary` lists compile rebuilds by kind + `top_modules` |
+| `build_start` / `build_end` | Whole build; `up_to_date` is `true` when nothing was compiled or linked; `rebuild_summary` lists compile rebuilds by kind + `top_modules` |
 | `command_start` / `command_end` | Subprocesses (`cmd` + `argv`) |
 | `profile_changed` | Once per build when object-cache profile mismatches (`reason`, `profile_diff`) |
 | `cache_status` | `cache status` subcommand (`object_cache_path`, `profile_match`, `legacy_header`, entry counts, `current_profile`) |
@@ -177,6 +185,8 @@ HTTP integration tests use a `fixture` that starts `rest_api_server` on port `21
 - Infer pass/fail from exit code alone — read `summary.passed` or `run_end.passed`
 - Parse stderr as structured JSONL
 - Use an unfiltered full-suite run as the default fix loop — scope with `--tags='\[yardb\]'` (unfiltered runs include `deps/tester` `[jsonl-probe]` intentional failures)
+- Pass both `--tags` and a bare test-name filter — they are one filter, and CB exits `2`
+- Rerun a build just to read a compiler error — it is in `diagnostics.text` on the failed `compile_end`
 - Run `[.tag]` probe fixtures unless explicitly selected (they are hidden by default)
 - Run release-only verification until debug tests pass
 - **Modify production code to simulate errors.** Do not add `fail_*` friends, private inject flags, `consume_*` / `inject_*` hooks, synthetic `badbit` / truncate / torn-append branches, `#ifndef NDEBUG` test seams, or any other instrumentation inside `yar-engine`, `yar-httpd`, or other product modules solely so tests can force failures. Write paths must only handle real I/O and API errors. Prefer ordinary behavioral tests against the public API; exercise recovery via real fixtures (corrupt/truncated files on disk, lock files, invalid inputs) rather than by wiring test knobs into production code. Never reintroduce removed fault-injection machinery unless a human **explicitly** requests it and accepts production-path pollution.

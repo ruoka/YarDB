@@ -20,7 +20,7 @@ git submodule update --init --recursive
 git pull --recurse-submodules
 ```
 
-**Tester pin rule:** YarDB `deps/tester` and every nested `deps/*/deps/tester` must be the same commit. See [`versioning.md`](versioning.md).
+**Tester pin rule:** YarDB owns `deps/tester`. Nested copies under cryptic, net, and xson move when those repos do. See [`versioning.md`](versioning.md).
 
 ### Environment Setup
 

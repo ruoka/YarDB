@@ -19,12 +19,12 @@ Each repository uses SemVer tags: `vMAJOR.MINOR.PATCH`.
 | Repo | Current modules-era tag | Prior line (historical) | Policy |
 |------|-------------------------|-------------------------|--------|
 | [YarDB](https://github.com/ruoka/YarDB) | [`v1.0.1`](https://github.com/ruoka/YarDB/releases/tag/v1.0.1) | [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0) | this document |
-| [tester](https://github.com/ruoka/tester) | [`v3.0.0`](https://github.com/ruoka/tester/releases/tag/v3.0.0) | `v2.x` / `v1.0.0` pre-release / pre-JSONL | [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md) |
+| [tester](https://github.com/ruoka/tester) | [`v3.1.0`](https://github.com/ruoka/tester/releases/tag/v3.1.0) | `v2.x` / `v1.0.0` pre-release / pre-JSONL | [`deps/tester/docs/release-policy.md`](../deps/tester/docs/release-policy.md) |
 | [cryptic](https://github.com/ruoka/cryptic) | [`v2.0.0`](https://github.com/ruoka/cryptic/releases/tag/v2.0.0) | untagged header history treated as v1 | [`deps/cryptic/docs/release-policy.md`](../deps/cryptic/docs/release-policy.md) |
 | [net4cpp](https://github.com/ruoka/net4cpp) | [`v3.4.1`](https://github.com/ruoka/net4cpp/releases/tag/v3.4.1) | `v1.0` / `v2.0` / `v2.1` | [`deps/net/docs/release-policy.md`](../deps/net/docs/release-policy.md) |
 | [json4cpp](https://github.com/ruoka/json4cpp) (`deps/xson`) | [`v3.1.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.1.0) | `v1.0` / `v2.0` | [`deps/xson/docs/release-policy.md`](../deps/xson/docs/release-policy.md) |
 
-**Current YarDB release: [`v1.0.1`](https://github.com/ruoka/YarDB/releases/tag/v1.0.1)** — patch on the modules-era product surface (`yardb`, REST/OData HTTP API, FSON engine, companion CLIs). It pins net4cpp `v3.3.0`, json4cpp `v3.1.0`, cryptic `4686efd`, and tester `4ad9c1e`. `start()` reports the bound port, `yardb --cors` serves browser health checks, and `/health`, `/ready`, and `/metrics` no longer require `Accept: application/json`. Prior tag: [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0). Between tags, prefer an explicit commit or `master` tip and keep submodule pins aligned. `master` pins net4cpp [`v3.4.1`](https://github.com/ruoka/net4cpp/releases/tag/v3.4.1); tester stays at `v3.0.1`.
+**Current YarDB release: [`v1.0.1`](https://github.com/ruoka/YarDB/releases/tag/v1.0.1)** — patch on the modules-era product surface (`yardb`, REST/OData HTTP API, FSON engine, companion CLIs). It pins net4cpp `v3.3.0`, json4cpp `v3.1.0`, cryptic `4686efd`, and tester `4ad9c1e`. `start()` reports the bound port, `yardb --cors` serves browser health checks, and `/health`, `/ready`, and `/metrics` no longer require `Accept: application/json`. Prior tag: [`v1.0.0`](https://github.com/ruoka/YarDB/releases/tag/v1.0.0). Between tags, prefer an explicit commit or `master` tip and keep submodule pins aligned. `master` pins net4cpp [`v3.4.1`](https://github.com/ruoka/net4cpp/releases/tag/v3.4.1) and tester [`v3.1.0`](https://github.com/ruoka/tester/releases/tag/v3.1.0). Nested `deps/tester` copies inside cryptic, net, and xson still record `v3.0.1` until those repos bump.
 
 ## When not to bump
 
@@ -38,15 +38,15 @@ Land those on the default branch and keep pins aligned. Cut a tag when the publi
 
 ## Tester pin rule
 
-**All `deps/tester` gitlinks must be the same commit** — YarDB’s top-level `deps/tester` and every nested `deps/*/deps/tester` (cryptic, net, xson).
+YarDB owns `deps/tester`. Nested copies under cryptic, net, and xson are those repositories’ submodules.
 
 When bumping tester:
 
 1. Land the change on tester `main` (CI green); prefer a release tag when cutting a supported tester version.
-2. Update nested pins in cryptic, net, and xson to that SHA and push those repos.
-3. Update YarDB’s `deps/tester` **and** the three library submodule pointers together in one YarDB commit.
+2. Update nested pins in cryptic, net, and xson in those repositories.
+3. Update YarDB’s `deps/tester`. Bump a library pointer only after that library’s tip records the new tester commit. Do not commit inside another dependency’s submodule.
 
-Do not leave YarDB on a newer tester tip while libraries still pin an older nested tester.
+A nested copy that still lags stays at the parent library’s recorded commit until that library picks up the tester tag.
 
 ## Release bar
 
@@ -54,7 +54,7 @@ Cut or move a SemVer tag only when:
 
 1. The repo’s default-branch CI is green on the tagged commit.
 2. Open PRs that affect the release surface are merged or closed.
-3. Nested `deps/tester` pins match across consumers (see above).
+3. Before a YarDB tag, nested `deps/tester` pins match the tester commit this repo records (those library pointers move in their own repos first).
 
 Prefer tagging the default-branch tip (`main` / `master`), not a feature branch. Per-repo criteria and public-surface tables live in each library’s `docs/release-policy.md`.
 

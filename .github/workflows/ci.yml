@@ -84,6 +84,8 @@ jobs:
       # --jobs forwards to test_runner for parallel top-level cases (HTTP fixtures
       # bind ephemeral ports so --jobs>1 is safe); --junit= writes an additive
       # xUnit report beside JSONL (see ruoka/tester CI).
+      # Do not also pass a bare test-name filter: --tags and a name filter are
+      # one filter, and CB exits 2 if a command gives both.
       - name: Run tests (${{ matrix.config }})
         run: |
           set -euo pipefail

@@ -84,6 +84,8 @@ YarDB uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++
 ./tools/CB.sh debug list
 ```
 
+A name filter is the same slot as `--tags`, and may follow the options (`./tools/CB.sh debug test --jsonl=failures "ETag"`). CB exits 2 if a command gives both. `--timeout=<seconds>` is off by default; `summary.rerun_ids` with `--test-id=<id>` reruns only what failed.
+
 **Build Output**: Artifacts are generated in `build-<os>-<config>/`:
 - `build-<os>-<config>/bin/` - Executable programs
 - `build-<os>-<config>/obj/` - Object files

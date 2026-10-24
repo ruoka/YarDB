@@ -484,11 +484,10 @@ inline auto not_acceptable_response()
 
 inline ::http::response_with_headers not_acceptable_response_with_headers()
 {
-    auto error = xson::object{
-        {"error", "Not Acceptable"s},
-        {"message", "Only application/json is supported"s}
-    };
-    return {status_not_acceptable, xson::json::stringify(error), std::optional<::http::headers>{}};
+    return ::http::make_error_response(
+        status_not_acceptable,
+        "Not Acceptable"sv,
+        "Only application/json is supported"sv);
 }
 
 // Query parameter parsing
@@ -519,15 +518,14 @@ struct handler_context {
 template<typename Result>
 inline Result make_error_response(const std::string& status, const std::string& error_type, const std::string& message)
 {
+    if constexpr(std::is_same_v<Result, ::http::response_with_headers>)
+        return ::http::make_error_response(status, error_type, message);
+
     auto error = xson::object{
         {"error", error_type},
         {"message", message}
     };
-    
-    if constexpr(std::is_same_v<Result, ::http::response_with_headers>)
-        return {status, xson::json::stringify(error), std::optional<::http::headers>{}};
-    else
-        return std::make_pair(status, xson::json::stringify(error));
+    return std::make_pair(status, xson::json::stringify(error));
 }
 
 // Specialized versions for common error types

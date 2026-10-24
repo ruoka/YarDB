@@ -39,7 +39,7 @@ inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$|sse
 inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*/[0-9]+"s;
 
 // Handler type aliases for middleware composition
-using handler = ::http::callback_with_headers;
+using handler = ::http::callback;
 using middleware_factory = ::http::middleware_factory;
 
 // Do not trust client-supplied proxy headers for the default rate-limit key.
@@ -52,36 +52,24 @@ inline auto database_error_response(const yar::db::db_error& error)
 {
     if(error.code == yar::db::db_error_code::precondition_failed)
     {
-        auto body = xson::object{
-            {"error", "Precondition Failed"s},
-            {"message", error.message}
-        };
-        return response_with_headers{
+        return ::http::make_error_response(
             status_precondition_failed,
-            xson::json::stringify(body),
-            std::optional<::http::headers>{}};
+            "Precondition Failed"sv,
+            error.message);
     }
 
     if(error.code == yar::db::db_error_code::conflict)
     {
-        auto body = xson::object{
-            {"error", "Conflict"s},
-            {"message", error.message}
-        };
-        return response_with_headers{
+        return ::http::make_error_response(
             status_conflict,
-            xson::json::stringify(body),
-            std::optional<::http::headers>{}};
+            "Conflict"sv,
+            error.message);
     }
 
-    auto body = xson::object{
-        {"error", "Internal Server Error"s},
-        {"message", error.message}
-    };
-    return response_with_headers{
+    return ::http::make_error_response(
         status_internal_server_error,
-        xson::json::stringify(body),
-        std::optional<::http::headers>{}};
+        "Internal Server Error"sv,
+        error.message);
 }
 
 enum class server_state
@@ -525,7 +513,7 @@ private:
                       << std::pair{"correlation_id", correlation_id}
                       << flush;
 
-                return response_with_headers{status, content, headers};
+                return ::http::make_response(status, content, headers);
             };
         };
     }
@@ -546,7 +534,7 @@ private:
                     else
                     {
                         auto [status, content] = not_acceptable_response();
-                        return response_with_headers{status, content, std::optional<::http::headers>{}};
+                        return ::http::make_response(status, content, std::optional<::http::headers>{});
                     }
                 }
                 return next(req, body, hdr);
@@ -575,11 +563,10 @@ private:
                           << std::pair{"status", status_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
-                            auto error = xson::object{
-                                {"error", "Bad Request"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        e.what());
                 }
                 catch(const std::out_of_range& e)
                 {
@@ -591,11 +578,10 @@ private:
                           << std::pair{"status", status_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        e.what());
                 }
                 catch(const std::runtime_error& e)
                 {
@@ -607,11 +593,10 @@ private:
                           << std::pair{"status", status_bad_request}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        e.what());
                 }
                 catch(const std::exception& e)
                 {
@@ -623,11 +608,10 @@ private:
                           << std::pair{"status", status_internal_server_error}
                           << std::pair{"correlation_id", correlation_id}
                           << flush;
-                    auto error = xson::object{
-                        {"error", "Internal Server Error"s},
-                        {"message", "An unexpected error occurred"s}
-                    };
-                    return response_with_headers{status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_internal_server_error,
+                        "Internal Server Error"sv,
+                        "An unexpected error occurred"sv);
                 }
             };
         };
@@ -797,11 +781,11 @@ private:
             // Add OData metadata if requested
             yar::http::odata::add_metadata_if_requested(document, headers, ctx.collection, id);
             
-            return response_with_headers{status_created, xson::json::stringify(document), std::make_optional(response_headers)};
+            return ::http::make_response(status_created, xson::json::stringify(document), std::make_optional(response_headers));
         };
 
         auto create_middlewares = build_middleware_chain(method_post, "POST_DOCUMENT"sv, "CREATE_ERROR"sv, true);
-        m_server.post(collection_route).response_with_headers(
+        m_server.post(collection_route).response(
             "application/json"sv,
             ::http::middleware::wrap(create_handler, create_middlewares));
 
@@ -819,11 +803,11 @@ private:
                 response["@odata.context"s] = "/$metadata#Collections"s;
             }
 
-            return response_with_headers{status_ok, xson::json::stringify(response), std::optional<::http::headers>{}};
+            return ::http::make_response(status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
         };
 
         auto list_middlewares = build_middleware_chain(method_get, "LIST_COLLECTIONS"sv, "LIST_COLLECTIONS_ERROR"sv, false);
-        m_server.get("/"s).response_with_headers(
+        m_server.get("/"s).response(
             "application/json"sv,
             ::http::middleware::wrap(list_collections_handler, list_middlewares));
 
@@ -831,11 +815,11 @@ private:
                                  [[maybe_unused]] ::http::body_view body,
                                  [[maybe_unused]] ::http::headers& headers)
         {
-            return response_with_headers{
+            return ::http::make_response(
                 status_ok,
                 "{}"s,
                 std::optional<::http::headers>{}
-            };
+            );
         };
 
         auto ready_handler = [this]([[maybe_unused]] ::http::request_view request,
@@ -845,28 +829,28 @@ private:
             const auto state = m_state.load();
             if(state == server_state::ready)
             {
-                return response_with_headers{
+                return ::http::make_response(
                     status_ok,
                     "{}"s,
                     std::optional<::http::headers>{}
-                };
+                );
             }
 
-            return response_with_headers{
+            return ::http::make_response(
                 status_service_unavailable,
                 ready_probe_body(state),
                 std::optional<::http::headers>{}
-            };
+            );
         };
 
         // Public probes: no Accept: json gate (browser health dialog / k8s scrapers).
         auto health_middlewares = build_middleware_chain(method_get, "HEALTH_CHECK"sv, "HEALTH_CHECK_ERROR"sv, false, false);
-        m_server.get("/health"s).response_with_headers(
+        m_server.get("/health"s).response(
             "application/json"sv,
             ::http::middleware::wrap(health_handler, health_middlewares));
 
         auto ready_middlewares = build_middleware_chain(method_get, "READY_CHECK"sv, "READY_CHECK_ERROR"sv, false, false);
-        m_server.get("/ready"s).response_with_headers(
+        m_server.get("/ready"s).response(
             "application/json"sv,
             ::http::middleware::wrap(ready_handler, ready_middlewares));
 
@@ -875,10 +859,10 @@ private:
                                   [[maybe_unused]] ::http::body_view body,
                                   [[maybe_unused]] ::http::headers& headers)
         {
-            return response_with_headers{status_ok, ""s, std::optional<::http::headers>{}};
+            return ::http::make_response(status_ok, ""s, std::optional<::http::headers>{});
         };
         auto metrics_middlewares = build_middleware_chain(method_get, "METRICS_SCRAPE"sv, "METRICS_SCRAPE_ERROR"sv, false, false);
-        m_server.get("/metrics"s).response_with_headers(
+        m_server.get("/metrics"s).response(
             "text/plain"sv,
             ::http::middleware::wrap(metrics_handler, metrics_middlewares));
 
@@ -892,11 +876,11 @@ private:
             auto metadata = yar::http::odata::generate_metadata(m_engine);
             
             // Return as JSON
-            return response_with_headers{
+            return ::http::make_response(
                 status_ok, 
                 xson::json::stringify(metadata), 
                 std::optional<::http::headers>{}
-            };
+            );
         };
 
         auto metadata_middlewares = build_middleware_chain(
@@ -907,7 +891,7 @@ private:
         );
         
         // Route pattern: $ needs to be escaped in regex, use \\$ to match literal $
-        m_server.get("/\\$metadata"s).response_with_headers(
+        m_server.get("/\\$metadata"s).response(
             "application/json"sv,
             ::http::middleware::wrap(metadata_handler, metadata_middlewares));
 
@@ -935,7 +919,7 @@ private:
                     {"collection", ctx.collection},
                     {"id", id}
                 };
-                return response_with_headers{status_not_found, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_response(status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
             }
 
             // Return single object (first element of array)
@@ -962,7 +946,7 @@ private:
                         const auto last_modified = format_http_date(revision.timestamp.value());
                         response_headers.set("last-modified"s, last_modified);
                     }
-                    return response_with_headers{status_not_modified, ""s, std::make_optional(response_headers)};
+                    return ::http::make_response(status_not_modified, ""s, std::make_optional(response_headers));
                 }
             }
             
@@ -976,15 +960,15 @@ private:
                 if(modified_check.has_value() and not modified_check.value())
                 {
                     // Document not modified since client's date - return 304 Not Modified
-                    return response_with_headers{status_not_modified, ""s, std::make_optional(response_headers)};
+                    return ::http::make_response(status_not_modified, ""s, std::make_optional(response_headers));
                 }
             }
             
-            return response_with_headers{::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers)};
+            return ::http::make_response(::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers));
         };
 
         auto get_document_middlewares = build_middleware_chain(method_get, "GET_DOCUMENT"sv, "GET_DOCUMENT_ERROR"sv, true);
-        m_server.get(collection_route_with_id).response_with_headers(
+        m_server.get(collection_route_with_id).response(
             "application/json"sv,
             ::http::middleware::wrap(get_document_handler, get_document_middlewares));
 
@@ -1011,17 +995,13 @@ private:
                 {
                     if(params.contains(std::string{name}))
                     {
-                        auto error = xson::object{
-                            {"error", "Unprocessable Entity"s},
-                            {"message", "$apply cannot be combined with "s + std::string{name}
+                        return ::http::make_error_response(
+                            status_unprocessable_entity,
+                            "Unprocessable Entity"sv,
+                            "$apply cannot be combined with "s + std::string{name}
                                 + (name == "$compute"sv
                                     ? " (use compute(...) inside $apply)"s
-                                    : ""s)}
-                        };
-                        return response_with_headers{
-                            status_unprocessable_entity,
-                            xson::json::stringify(error),
-                            std::optional<::http::headers>{}};
+                                    : ""s));
                     }
                 }
 
@@ -1034,21 +1014,17 @@ private:
                         filter = yar::http::odata::parse_filter(params["$filter"s]);
                     const auto document = yar::http::odata::read_with_apply(
                         m_engine, collection_name, pipeline, filter);
-                    return response_with_headers{
+                    return ::http::make_response(
                         ::http::status_ok,
                         xson::json::stringify(document),
-                        std::optional<::http::headers>{}};
+                        std::optional<::http::headers>{});
                 }
                 catch(const std::invalid_argument& e)
                 {
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{
+                    return ::http::make_error_response(
                         status_unprocessable_entity,
-                        xson::json::stringify(error),
-                        std::optional<::http::headers>{}};
+                        "Unprocessable Entity"sv,
+                        e.what());
                 }
             }
             
@@ -1078,21 +1054,17 @@ private:
                         const auto count = documents.is_array()
                             ? documents.get<xson::object::array>().size()
                             : std::size_t{0};
-                        return response_with_headers{
+                        return ::http::make_response(
                             ::http::status_ok,
                             std::to_string(static_cast<long long>(count)),
-                            std::optional<::http::headers>{}};
+                            std::optional<::http::headers>{});
                     }
                     catch(const std::invalid_argument& e)
                     {
-                        auto error = xson::object{
-                            {"error", "Unprocessable Entity"s},
-                            {"message", std::string{e.what()}}
-                        };
-                        return response_with_headers{
+                        return ::http::make_error_response(
                             status_unprocessable_entity,
-                            xson::json::stringify(error),
-                            std::optional<::http::headers>{}};
+                            "Unprocessable Entity"sv,
+                            e.what());
                     }
                 }
                 const auto count = [&]()
@@ -1108,7 +1080,7 @@ private:
                 
                 // Return count as JSON number (OData spec: $count=true returns just the number)
                 // JSON numbers are valid as plain strings (e.g., "42" is valid JSON)
-                return response_with_headers{::http::status_ok, std::to_string(static_cast<long long>(count)), std::optional<::http::headers>{}};
+                return ::http::make_response(::http::status_ok, std::to_string(static_cast<long long>(count)), std::optional<::http::headers>{});
             }
 
             // Handle $top (OData: $top=n)
@@ -1122,11 +1094,10 @@ private:
                 catch(const std::invalid_argument& e)
                 {
                     // Return 422 for OData query parameter validation errors
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        e.what());
                 }
             }
             
@@ -1141,11 +1112,10 @@ private:
                 catch(const std::invalid_argument& e)
                 {
                     // Return 422 for OData query parameter validation errors
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        e.what());
                 }
             }
             
@@ -1164,11 +1134,10 @@ private:
                 catch(const std::invalid_argument& e)
                 {
                     // Return 422 for OData query parameter validation errors
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{status_unprocessable_entity, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        e.what());
                 }
             }
             const auto collection_name = validate_collection_name(uri.path[1]);
@@ -1235,14 +1204,10 @@ private:
                 }
                 catch(const std::invalid_argument& e)
                 {
-                    auto error = xson::object{
-                        {"error", "Unprocessable Entity"s},
-                        {"message", std::string{e.what()}}
-                    };
-                    return response_with_headers{
+                    return ::http::make_error_response(
                         status_unprocessable_entity,
-                        xson::json::stringify(error),
-                        std::optional<::http::headers>{}};
+                        "Unprocessable Entity"sv,
+                        e.what());
                 }
             }
 
@@ -1272,11 +1237,11 @@ private:
                 }
             }
             
-            return response_with_headers{::http::status_ok, xson::json::stringify(document), std::optional<::http::headers>{}};
+            return ::http::make_response(::http::status_ok, xson::json::stringify(document), std::optional<::http::headers>{});
         };
 
         auto get_collection_middlewares = build_middleware_chain(method_get, "GET_COLLECTION"sv, "GET_COLLECTION_ERROR"sv, false);
-        m_server.get(collection_route_with_query).response_with_headers(
+        m_server.get(collection_route_with_query).response(
             "application/json"sv,
             ::http::middleware::wrap(get_collection_handler, get_collection_middlewares));
 
@@ -1287,11 +1252,10 @@ private:
             // Validate body is not empty
             if(body.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body is required"sv);
             }
             
             const auto uri = ::http::uri{request};
@@ -1300,32 +1264,29 @@ private:
             // Validate request body has "keys" field
             if(not request_body.has("keys"s))
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body must contain 'keys' field with array of field names"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body must contain 'keys' field with array of field names"sv);
             }
             
             // Extract and validate keys
             auto keys_value = request_body["keys"s];
             if(not keys_value.is_array())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' must be an array of field names"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "'keys' must be an array of field names"sv);
             }
             
             auto keys_array = keys_value.get<xson::object::array>();
             if(keys_array.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' array cannot be empty"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "'keys' array cannot be empty"sv);
             }
             
             // Convert keys array to vector of strings
@@ -1334,32 +1295,29 @@ private:
             {
                 if(not key.is_string())
                 {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "All keys must be strings"s}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "All keys must be strings"sv);
                 }
                 
                 auto key_str = static_cast<std::string>(key);
                 // Validate key name (basic validation)
                 if(key_str.empty() or key_str.size() > yar::db::max_field_name_length)
                 {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)");
                 }
                 
                 // Don't allow reserved field names
                 if(key_str == yar::db::reserved_field_id)
                 {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Cannot index reserved field: "s + key_str}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "Cannot index reserved field: "s + key_str);
                 }
                 
                 keys.push_back(key_str);
@@ -1386,11 +1344,10 @@ private:
             if(not found or db_documents.get<xson::object::array>().empty())
             {
                 // This shouldn't happen, but handle it gracefully
-                auto error = xson::object{
-                    {"error", "Internal Server Error"s},
-                    {"message", "Failed to retrieve index configuration after update"s}
-                };
-                return response_with_headers{status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_internal_server_error,
+                    "Internal Server Error"sv,
+                    "Failed to retrieve index configuration after update"sv);
             }
             
             auto result_document = db_documents.get<xson::object::array>()[0];
@@ -1409,11 +1366,11 @@ private:
             auto response_headers = ::http::headers{};
             response_headers.set("location"s, "/_db/"s + collection_name);
             
-            return response_with_headers{::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers)};
+            return ::http::make_response(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
         };
 
         auto put_index_middlewares = build_middleware_chain(method_put, "PUT_INDEX"sv, "PUT_INDEX_ERROR"sv, true);
-        m_server.put("/_db/[a-z][a-z0-9]*"s).response_with_headers(
+        m_server.put("/_db/[a-z][a-z0-9]*"s).response(
             "application/json"sv,
             ::http::middleware::wrap(put_index_handler, put_index_middlewares));
 
@@ -1423,11 +1380,10 @@ private:
             // Validate body is not empty
             if(body.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body is required"sv);
             }
             
             const auto uri = ::http::uri{request};
@@ -1436,32 +1392,29 @@ private:
             // Validate request body has "keys" field
             if(not request_body.has("keys"s))
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body must contain 'keys' field with array of field names"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body must contain 'keys' field with array of field names"sv);
             }
             
             // Extract and validate keys
             const auto keys_value = request_body["keys"s];
             if(not keys_value.is_array())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' must be an array of field names"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "'keys' must be an array of field names"sv);
             }
             
             const auto keys_array = keys_value.get<xson::object::array>();
             if(keys_array.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "'keys' array cannot be empty"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "'keys' array cannot be empty"sv);
             }
             
             // Extract collection name from path
@@ -1494,11 +1447,10 @@ private:
             {
                 if(not key.is_string())
                 {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "All keys must be strings"s}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "All keys must be strings"sv);
                 }
                 
                 auto key_str = static_cast<std::string>(key);
@@ -1506,21 +1458,19 @@ private:
                 // Validate key name
                 if(key_str.empty() or key_str.size() > yar::db::max_field_name_length)
                 {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "Key name is invalid or too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)");
                 }
                 
                 // Don't allow reserved field names
                 if(key_str == yar::db::reserved_field_id)
                 {
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "Cannot index reserved field: "s + key_str}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "Cannot index reserved field: "s + key_str);
                 }
                 
                 // Only add if not already in existing keys (deduplicate)
@@ -1548,16 +1498,15 @@ private:
                     
                     auto response_headers = ::http::headers{};
                     response_headers.set("location"s, "/_db/"s + collection_name);
-                    return response_with_headers{::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers)};
+                    return ::http::make_response(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
                 }
                 else
                 {
                     // No existing document and no new keys - this shouldn't happen but handle gracefully
-                    auto error = xson::object{
-                        {"error", "Bad Request"s},
-                        {"message", "All specified keys already exist or no keys to add"s}
-                    };
-                    return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "All specified keys already exist or no keys to add"sv);
                 }
             }
             
@@ -1577,11 +1526,10 @@ private:
             
             if(not found or db_documents.get<xson::object::array>().empty())
             {
-                auto error = xson::object{
-                    {"error", "Internal Server Error"s},
-                    {"message", "Failed to retrieve index configuration after update"s}
-                };
-                return response_with_headers{status_internal_server_error, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_internal_server_error,
+                    "Internal Server Error"sv,
+                    "Failed to retrieve index configuration after update"sv);
             }
             
             auto result_document = db_documents.get<xson::object::array>()[0];
@@ -1598,11 +1546,11 @@ private:
             response_headers.set("location"s, "/_db/"s + collection_name);
             
             // Return 200 OK for update (PATCH is always an update operation)
-            return response_with_headers{::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers)};
+            return ::http::make_response(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
         };
 
         auto patch_index_middlewares = build_middleware_chain(method_patch, "PATCH_INDEX"sv, "PATCH_INDEX_ERROR"sv, true);
-        m_server.patch("/_db/[a-z][a-z0-9]*"s).response_with_headers(
+        m_server.patch("/_db/[a-z][a-z0-9]*"s).response(
             "application/json"sv,
             ::http::middleware::wrap(patch_index_handler, patch_index_middlewares));
 
@@ -1614,11 +1562,10 @@ private:
             // Validate body is not empty
             if(body.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body is required"sv);
             }
 
             const auto uri = ::http::uri{request};
@@ -1652,21 +1599,21 @@ private:
             if(*outcome == yar::db::put_outcome::created)
             {
                 response_headers.set("location"s, resource_path);
-                return response_with_headers{
+                return ::http::make_response(
                     status_created,
                     xson::json::stringify(document),
-                    std::make_optional(response_headers)};
+                    std::make_optional(response_headers));
             }
 
             response_headers.set("content-location"s, resource_path);
-            return response_with_headers{
+            return ::http::make_response(
                 ::http::status_ok,
                 xson::json::stringify(document),
-                std::make_optional(response_headers)};
+                std::make_optional(response_headers));
         };
 
         auto put_document_middlewares = build_middleware_chain(method_put, "PUT_DOCUMENT"sv, "PUT_DOCUMENT_ERROR"sv, true);
-        m_server.put(collection_route_with_id).response_with_headers(
+        m_server.put(collection_route_with_id).response(
             "application/json"sv,
             ::http::middleware::wrap(put_document_handler, put_document_middlewares));
 
@@ -1677,11 +1624,10 @@ private:
             // Validate body is not empty
             if(body.empty())
             {
-                auto error = xson::object{
-                    {"error", "Bad Request"s},
-                    {"message", "Request body is required"s}
-                };
-                return response_with_headers{status_bad_request, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body is required"sv);
             }
             
             const auto uri = ::http::uri{request};
@@ -1700,10 +1646,10 @@ private:
                     {"collection", collection},
                     {"id", id}
                 };
-                return response_with_headers{
+                return ::http::make_response(
                     status_not_found,
                     xson::json::stringify(error),
-                    std::optional<::http::headers>{}};
+                    std::optional<::http::headers>{});
             }
 
             const auto preconditions = write_preconditions_from_headers(headers);
@@ -1720,10 +1666,10 @@ private:
                     {"collection", collection},
                     {"id", id}
                 };
-                return response_with_headers{
+                return ::http::make_response(
                     status_not_found,
                     xson::json::stringify(error),
-                    std::optional<::http::headers>{}};
+                    std::optional<::http::headers>{});
             }
 
             // Add OData metadata if requested
@@ -1757,11 +1703,11 @@ private:
                 response_headers.set("etag"s, new_etag);
             }
             
-            return response_with_headers{::http::status_ok, xson::json::stringify(documents), std::make_optional(response_headers)};
+            return ::http::make_response(::http::status_ok, xson::json::stringify(documents), std::make_optional(response_headers));
         };
 
         auto patch_document_middlewares = build_middleware_chain(method_patch, "PATCH_DOCUMENT"sv, "PATCH_DOCUMENT_ERROR"sv, true);
-        m_server.patch(collection_route_with_id).response_with_headers(
+        m_server.patch(collection_route_with_id).response(
             "application/json"sv,
             ::http::middleware::wrap(patch_document_handler, patch_document_middlewares));
 
@@ -1787,15 +1733,15 @@ private:
                     {"collection", ctx.collection},
                     {"id", id}
                 };
-                return response_with_headers{status_not_found, xson::json::stringify(error), std::optional<::http::headers>{}};
+                return ::http::make_response(status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
             }
 
             // Return 204 No Content for successful deletion
-            return response_with_headers{status_no_content, ""s, std::optional<::http::headers>{}};
+            return ::http::make_response(status_no_content, ""s, std::optional<::http::headers>{});
         };
 
         auto delete_document_middlewares = build_middleware_chain(method_delete, "DELETE_DOCUMENT"sv, "DELETE_DOCUMENT_ERROR"sv, false);
-        m_server.destroy(collection_route_with_id).response_with_headers(
+        m_server.destroy(collection_route_with_id).response(
             "application/json"sv,
             ::http::middleware::wrap(delete_document_handler, delete_document_middlewares));
 
@@ -1809,11 +1755,11 @@ private:
             const auto deleted = m_engine.destroy(collection_name, selector, documents);
             if(not deleted)
                 return database_error_response(deleted.error());
-            return response_with_headers{::http::status_ok, xson::json::stringify(documents), std::optional<::http::headers>{}};
+            return ::http::make_response(::http::status_ok, xson::json::stringify(documents), std::optional<::http::headers>{});
         };
 
         auto delete_first_middlewares = build_middleware_chain(method_delete, "DELETE_FIRST"sv, "DELETE_FIRST_ERROR"sv, false);
-        m_server.destroy("/[a-z]+\\?\\$top"s).response_with_headers(
+        m_server.destroy("/[a-z]+\\?\\$top"s).response(
             "application/json"sv,
             ::http::middleware::wrap(delete_first_handler, delete_first_middlewares));
 
@@ -1837,11 +1783,11 @@ private:
                 response["@odata.context"s] = "/$metadata#ReindexResult"s;
             }
 
-            return response_with_headers{status_ok, xson::json::stringify(response), std::optional<::http::headers>{}};
+            return ::http::make_response(status_ok, xson::json::stringify(response), std::optional<::http::headers>{});
         };
 
         auto reindex_middlewares = build_middleware_chain(method_get, "REINDEX"sv, "REINDEX_ERROR"sv, false);
-        m_server.get("/_reindex"s).response_with_headers(
+        m_server.get("/_reindex"s).response(
             "application/json"sv,
             ::http::middleware::wrap(reindex_handler, reindex_middlewares));
 
@@ -1853,7 +1799,7 @@ private:
                                   [[maybe_unused]] ::http::body_view body,
                                   [[maybe_unused]] ::http::headers& headers)
         {
-            return response_with_headers{status_no_content, ""s, std::optional<::http::headers>{}};
+            return ::http::make_response(status_no_content, ""s, std::optional<::http::headers>{});
         };
         auto options_callback = handler{options_handler};
         if(m_cors_enabled)
@@ -1876,7 +1822,7 @@ private:
                 "/_db/[a-z][a-z0-9]*"s,
                 "/_reindex"s})
         {
-            m_server.options(path).response_with_headers("*/*"sv, options_callback);
+            m_server.options(path).response("*/*"sv, options_callback);
         }
 
         if(m_mcp_enabled)

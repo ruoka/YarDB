@@ -44,20 +44,22 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 
 | Feature | Example | Status |
 |---------|---------|--------|
+| `$batch` | `POST /$batch` | Planned |
 | Multi-key `$apply` groupby | `groupby((country,status),aggregate(...))` | Planned |
 | `$count` aggregate | `aggregate($count as Total)` | Planned |
+
+`$batch` target: `POST /$batch` in the OData 4.01 JSON batch format. The body is a `requests` array; each entry has `id`, `method`, `url`, `headers`, `body`, and `atomicityGroup`, and may set `dependsOn`. Every request in an atomicity group commits, or none does. Per-request preconditions (`If-Match` / `If-None-Match`) are checked inside the group; one failure fails the group, and the response shows which request failed and why. The 1 MiB request body limit applies to the whole batch.
 
 ### Later
 
 | Feature | Example |
 |---------|---------|
 | Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs |
-| Multi-field `$orderby` | `$orderby=country,age desc` |
+| Multi-field `$orderby` | `$orderby=country,age desc` — wanted for sort keys such as `settlementDate`, `tradeDate`, `creationDateTime`, `UID` |
 | `$search` | `$search=wireless` |
 | `$skiptoken` / `@odata.nextLink` | Server-driven paging |
 | Collection lambdas | `Lines/any(l:l/Qty gt 0)` |
 | Richer string/date functions | `indexof`, `tolower`, `year(...)` |
-| `$batch` | `POST /$batch` |
 | Delta queries | `$deltaToken` |
 | Bound actions / functions | `POST /users(1)/Default.ResetPassword` |
 | XML CSDL `$metadata` | Beyond JSON CSDL |

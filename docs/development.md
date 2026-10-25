@@ -311,10 +311,30 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **Timeline**: 1-2 months
 - **Alternatives Considered**: Direct TLS in database (rejected for architectural reasons)
 
+#### 4. ⚛️ Atomic multi-document writes (`$batch` atomicity groups)
+- **Priority**: HIGH
+- **Current State**: Each HTTP write stores one document. A client that must create and update several documents together keeps its own journal and replays it after a restart. A crash between two writes (an append to a feed, then a patch of a related document) can leave only the first write applied.
+- **Planned Implementation**:
+  - `POST /$batch` in the OData 4.01 JSON batch format (`requests` with `id`, `method`, `url`, `headers`, `body`, `atomicityGroup`, optionally `dependsOn`)
+  - Every request in an atomicity group commits, or none does
+  - Per-request preconditions (`If-Match` / `If-None-Match`) are checked inside the group; one failure fails the group, and the response names the failed request and why
+  - The 1 MiB request body limit applies to the whole batch
+- **Impact**: Clients stop keeping their own write journals. An append and a related update (event feed and outbox) become one write.
+
+#### 5. 🔑 Unique keys
+- **Priority**: HIGH
+- **Current State**: Document ids are numeric (`/[a-z][a-z0-9]*/[0-9]+`). A natural key such as `UID` is enforced only by check-then-insert under an in-process lock, so only one process per database is safe. Parallel requests have inserted duplicate documents when no unique key was enforced. "Create only if absent" cannot be expressed on that natural key.
+- **Planned Implementation**:
+  - A unique secondary index declared through `PUT /_db/{collection}`, for example `{"keys":["UID"],"unique":["UID"]}`
+  - A write that would duplicate a unique value answers `409 Conflict` and names the existing document in `Location`, so the client can read it and decide replay versus conflict
+  - **Alternative considered**: string document ids and `PUT /{collection}/{key}` with `If-None-Match: *`. The index is preferred because it needs no route or id-type change and works for `POST`
+- **Impact**: Idempotent creates are safe across multiple service instances.
+
 ### 📋 Future Enhancements (Post-MVP)
 
 #### Data Management & Operations
 - **Compaction**: ✅ **IMPLEMENTED** (offline) — `yarexport --live` + `yarimport` rewrite current documents only
+- **Change feed**: Deferred. A store-level `GET /_changes` feed is not planned while consumers want domain events, which services already serve from their own append-only collections. Revisit for replication and change data capture.
 - **Backup/Restore**: Point-in-time recovery, incremental backups
 - **Data Migration**: Schema evolution, migration tools
 - **Advanced Indexing**: Compound indexes, full-text search

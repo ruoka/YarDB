@@ -66,6 +66,14 @@ inline auto database_error_response(const yar::db::db_error& error)
             error.message);
     }
 
+    if(error.code == yar::db::db_error_code::not_found)
+    {
+        return ::http::make_error_response(
+            status_not_found,
+            "Not Found"sv,
+            error.message);
+    }
+
     return ::http::make_error_response(
         status_internal_server_error,
         "Internal Server Error"sv,
@@ -894,6 +902,261 @@ private:
         m_server.get("/\\$metadata"s).response(
             "application/json"sv,
             ::http::middleware::wrap(metadata_handler, metadata_middlewares));
+
+        // POST /$batch — OData JSON batch, atomicity groups only.
+        auto batch_handler = [this](::http::request_view, ::http::body_view body, ::http::headers&)
+        {
+            const auto unprocessable = [](std::string_view message)
+            {
+                return ::http::make_error_response(
+                    status_unprocessable_entity,
+                    "Unprocessable Entity"sv,
+                    message);
+            };
+
+            if(body.empty())
+            {
+                return ::http::make_error_response(
+                    status_bad_request,
+                    "Bad Request"sv,
+                    "Request body is required"sv);
+            }
+
+            const auto payload = xson::json::parse(body);
+            if(not payload.is_object() or not payload.has("requests"s) or not payload["requests"s].is_array())
+                return unprocessable("Batch body must be an object with a requests array"sv);
+
+            struct parsed_request
+            {
+                std::string id;
+                std::string group;
+                yar::db::batch_request request;
+            };
+
+            auto parsed = std::vector<parsed_request>{};
+            auto seen_ids = std::vector<std::string>{};
+            auto seen_groups = std::vector<std::string>{};
+            auto previous_group = std::string{};
+
+            for(const auto& entry : payload["requests"s].get<xson::object::array>())
+            {
+                if(not entry.is_object())
+                    return unprocessable("Each batch request must be an object"sv);
+                if(entry.has("dependsOn"s))
+                    return unprocessable("dependsOn is not supported"sv);
+                if(not entry.has("id"s) or not entry["id"s].is_string())
+                    return unprocessable("Each batch request needs a string id"sv);
+                if(not entry.has("method"s) or not entry["method"s].is_string())
+                    return unprocessable("Each batch request needs a method"sv);
+                if(not entry.has("url"s) or not entry["url"s].is_string())
+                    return unprocessable("Each batch request needs a url"sv);
+                if(not entry.has("atomicityGroup"s) or not entry["atomicityGroup"s].is_string())
+                    return unprocessable("Each batch request needs an atomicityGroup"sv);
+
+                auto id = static_cast<std::string>(entry["id"s]);
+                auto group = static_cast<std::string>(entry["atomicityGroup"s]);
+                auto method = static_cast<std::string>(entry["method"s]);
+                auto url = static_cast<std::string>(entry["url"s]);
+                if(id.empty() or group.empty())
+                    return unprocessable("Batch request id and atomicityGroup must be non-empty"sv);
+                if(std::ranges::contains(seen_ids, id))
+                    return unprocessable("Batch request ids must be unique"sv);
+                seen_ids.push_back(id);
+
+                if(group != previous_group)
+                {
+                    if(std::ranges::contains(seen_groups, group))
+                        return unprocessable("Requests in one atomicityGroup must be adjacent"sv);
+                    seen_groups.push_back(group);
+                    previous_group = group;
+                }
+
+                auto engine_request = yar::db::batch_request{};
+                if(method == "POST"s)
+                    engine_request.method = yar::db::batch_method::create;
+                else if(method == "PUT"s)
+                    engine_request.method = yar::db::batch_method::replace;
+                else if(method == "PATCH"s)
+                    engine_request.method = yar::db::batch_method::update;
+                else if(method == "DELETE"s)
+                    engine_request.method = yar::db::batch_method::destroy;
+                else
+                    return unprocessable("Batch requests support POST, PUT, PATCH, and DELETE"sv);
+
+                if(url.starts_with('/'))
+                    url.erase(0, 1);
+                if(url.empty() or url.find('?') != std::string::npos or url.find('#') != std::string::npos
+                    or url.find('$') != std::string::npos or url.starts_with('_'))
+                    return unprocessable("Batch urls must be collection documents, not admin or nested batch routes"sv);
+
+                auto segments = std::vector<std::string>{};
+                auto segment = std::string{};
+                for(const auto character : url)
+                {
+                    if(character == '/')
+                    {
+                        if(segment.empty())
+                            return unprocessable("Batch url is not a collection document"sv);
+                        segments.push_back(std::move(segment));
+                        segment.clear();
+                    }
+                    else
+                        segment.push_back(character);
+                }
+                if(segment.empty())
+                    return unprocessable("Batch url is not a collection document"sv);
+                segments.push_back(std::move(segment));
+
+                if(engine_request.method == yar::db::batch_method::create)
+                {
+                    if(segments.size() != 1)
+                        return unprocessable("POST url must be a collection"sv);
+                }
+                else if(segments.size() != 2)
+                    return unprocessable("PUT, PATCH, and DELETE urls must be collection/id"sv);
+
+                engine_request.collection = validate_collection_name(segments[0]);
+                if(engine_request.method != yar::db::batch_method::create)
+                {
+                    const auto& id_text = segments[1];
+                    if(id_text.empty() or not std::ranges::all_of(id_text, [](char character)
+                        {
+                            return character >= '0' and character <= '9';
+                        }))
+                        return unprocessable("Document id must be an integer"sv);
+                    engine_request.id = utils::stoll(id_text);
+                }
+
+                if(engine_request.method != yar::db::batch_method::destroy)
+                {
+                    if(not entry.has("body"s) or not entry["body"s].is_object())
+                        return unprocessable("POST, PUT, and PATCH need an object body"sv);
+                    engine_request.body = entry["body"s];
+                }
+
+                if(entry.has("headers"s))
+                {
+                    if(not entry["headers"s].is_object())
+                        return unprocessable("Batch request headers must be an object"sv);
+                    auto request_headers = ::http::headers{};
+                    for(const auto& [name, value] : entry["headers"s].get<xson::object::map>())
+                    {
+                        if(not value.is_string())
+                            return unprocessable("Batch request header values must be strings"sv);
+                        auto lower = name;
+                        for(auto& character : lower)
+                        {
+                            if(character >= 'A' and character <= 'Z')
+                                character = static_cast<char>(character - 'A' + 'a');
+                        }
+                        request_headers.set(lower, static_cast<std::string>(value));
+                    }
+                    engine_request.preconditions = put_preconditions_from_headers(request_headers);
+                }
+
+                parsed.push_back({std::move(id), std::move(group), std::move(engine_request)});
+            }
+
+            auto responses = xson::object{xson::object::array{}};
+            const auto push_failure = [&](const parsed_request& source, const yar::db::db_error& error)
+            {
+                auto status = xson::integer_type{500};
+                auto error_name = "Internal Server Error"s;
+                if(error.code == yar::db::db_error_code::not_found)
+                {
+                    status = 404;
+                    error_name = "Not Found"s;
+                }
+                else if(error.code == yar::db::db_error_code::precondition_failed)
+                {
+                    status = 412;
+                    error_name = "Precondition Failed"s;
+                }
+                else if(error.code == yar::db::db_error_code::conflict)
+                {
+                    status = 409;
+                    error_name = "Conflict"s;
+                }
+
+                auto failure = xson::object{};
+                failure["id"s] = source.id;
+                failure["status"s] = status;
+                auto failure_body = xson::object{};
+                failure_body["error"s] = error_name;
+                failure_body["message"s] = error.message;
+                failure["body"s] = std::move(failure_body);
+                responses += std::move(failure);
+            };
+
+            for(std::size_t offset = 0; offset < parsed.size();)
+            {
+                auto end = offset + 1;
+                while(end < parsed.size() and parsed[end].group == parsed[offset].group)
+                    ++end;
+
+                auto group = std::vector<yar::db::batch_request>{};
+                group.reserve(end - offset);
+                for(std::size_t index = offset; index < end; ++index)
+                    group.push_back(parsed[index].request);
+
+                const auto applied = m_engine.apply_group(group);
+                if(not applied)
+                {
+                    const auto failed = applied.error().request_index.value_or(0);
+                    const auto which = offset + std::min(failed, end - offset - 1);
+                    push_failure(parsed[which], applied.error());
+                    offset = end;
+                    continue;
+                }
+
+                for(std::size_t index = 0; index < applied->size(); ++index)
+                {
+                    const auto& item = (*applied)[index];
+                    const auto& source = parsed[offset + index];
+                    auto response = xson::object{};
+                    response["id"s] = source.id;
+
+                    if(item.effect == yar::db::batch_effect::deleted)
+                    {
+                        response["status"s] = xson::integer_type{204};
+                        responses += std::move(response);
+                        continue;
+                    }
+
+                    const auto id = static_cast<xson::integer_type>(item.document["_id"s]);
+                    const auto path = "/"s + source.request.collection + "/"s + std::to_string(id);
+                    auto response_headers = xson::object{};
+                    if(item.revision.position.has_value())
+                        response_headers["etag"s] = generate_etag(*item.revision.position);
+                    if(item.effect == yar::db::batch_effect::created)
+                    {
+                        response["status"s] = xson::integer_type{201};
+                        response_headers["location"s] = path;
+                    }
+                    else
+                    {
+                        response["status"s] = xson::integer_type{200};
+                        response_headers["content-location"s] = path;
+                    }
+                    response["headers"s] = std::move(response_headers);
+                    response["body"s] = item.document;
+                    responses += std::move(response);
+                }
+                offset = end;
+            }
+
+            auto envelope = xson::object{};
+            envelope["responses"s] = std::move(responses);
+            return ::http::make_response(
+                status_ok,
+                xson::json::stringify(envelope),
+                std::optional<::http::headers>{});
+        };
+
+        auto batch_middlewares = build_middleware_chain(method_post, "POST_BATCH"sv, "POST_BATCH_ERROR"sv, true);
+        m_server.post("/\\$batch"s).response(
+            "application/json"sv,
+            ::http::middleware::wrap(batch_handler, batch_middlewares));
 
         // Read _id - Refactored to use middleware pattern and helper functions
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric

@@ -4737,6 +4737,193 @@ auto test_set()
         };
     };
 
+    test_case("POST /$batch atomicity groups, [yardb]") = []
+    {
+        const auto test_file = "./httpd_batch_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto batch_body = [](object requests)
+        {
+            auto envelope = object{};
+            envelope["requests"s] = std::move(requests);
+            return json::stringify(envelope);
+        };
+
+        section("two creates commit and each response carries an ETag") = [setup, batch_body]
+        {
+            auto requests = object{object::array{}};
+            auto first = object{};
+            first["id"s] = "1"s;
+            first["method"s] = "POST"s;
+            first["url"s] = "batchitems"s;
+            first["atomicityGroup"s] = "g1"s;
+            first["body"s] = object{{"name"s, "ada"s}};
+            requests += std::move(first);
+            auto second = object{};
+            second["id"s] = "2"s;
+            second["method"s] = "POST"s;
+            second["url"s] = "batchitems"s;
+            second["atomicityGroup"s] = "g1"s;
+            second["body"s] = object{{"name"s, "grace"s}};
+            requests += std::move(second);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 2u);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 201);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 201);
+            require_false(static_cast<string>(responses[0]["headers"s]["etag"s]).empty());
+            require_eq(static_cast<string>(responses[0]["headers"s]["location"s]), "/batchitems/1"s);
+            require_eq(static_cast<string>(responses[1]["body"s]["name"s]), "grace"s);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/batchitems"s);
+            require_eq(get_status, "200"s);
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 2u);
+        };
+
+        section("one precondition failure applies nothing in the group") = [setup, batch_body]
+        {
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(), "POST"s, "/lockeditems"s, R"({"name":"ada"})"s);
+            require_eq(post_status, "201"s);
+
+            auto requests = object{object::array{}};
+            auto created = object{};
+            created["id"s] = "new"s;
+            created["method"s] = "POST"s;
+            created["url"s] = "lockeditems"s;
+            created["atomicityGroup"s] = "g1"s;
+            created["body"s] = object{{"name"s, "bob"s}};
+            requests += std::move(created);
+
+            auto patched = object{};
+            patched["id"s] = "patch"s;
+            patched["method"s] = "PATCH"s;
+            patched["url"s] = "lockeditems/1"s;
+            patched["atomicityGroup"s] = "g1"s;
+            patched["body"s] = object{{"name"s, "nope"s}};
+            auto match = object{};
+            match["If-Match"s] = "\"999999\""s;
+            patched["headers"s] = std::move(match);
+            requests += std::move(patched);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 1u);
+            require_eq(static_cast<string>(responses[0]["id"s]), "patch"s);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 412);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/lockeditems"s);
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "ada"s);
+        };
+
+        section("requests outside an atomicity group are rejected") = [setup, batch_body]
+        {
+            auto requests = object{object::array{}};
+            auto loose = object{};
+            loose["id"s] = "1"s;
+            loose["method"s] = "POST"s;
+            loose["url"s] = "looseitems"s;
+            loose["body"s] = object{{"name"s, "ada"s}};
+            requests += std::move(loose);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "422"s);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/looseitems"s);
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 0u);
+        };
+
+        section("admin routes and dependsOn are rejected") = [setup]
+        {
+            auto [admin_status, admin_reason, admin_headers, admin_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"1","method":"POST","url":"/_db/batchitems","body":{"keys":["name"]},"atomicityGroup":"g1"}]})"s);
+            require_eq(admin_status, "422"s);
+
+            auto [depends_status, depends_reason, depends_headers, depends_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"1","method":"POST","url":"batchitems","body":{"name":"x"},"atomicityGroup":"g1","dependsOn":[]}]})"s);
+            require_eq(depends_status, "422"s);
+        };
+
+        section("request body over 1 MiB is rejected") = [setup]
+        {
+            // Cap is enforced from Content-Length before the body is read.
+            // Declaring 1 MiB + 1 on POST /$batch must use the same limit as a
+            // single document write. Omit the body so the client does not race
+            // the server closing after 413.
+            auto stream = connect("localhost"s, setup->port());
+            stream << "POST /$batch HTTP/1.1" << crlf
+                   << "Host: localhost:" << setup->port() << crlf
+                   << "Accept: application/json" << crlf
+                   << "Content-Type: application/json" << crlf
+                   << "Content-Length: " << (1024 * 1024 + 1) << crlf
+                   << crlf << flush;
+
+            auto [status, reason, headers, response_body] = parse_http_response(stream, "POST"s);
+            require_eq(status, "413"s);
+            require_eq(reason, "Payload Too Large"s);
+        };
+    };
+
+    test_case("POST /$batch requires the data PAT, [yardb]") = []
+    {
+        const auto test_file = "./httpd_batch_auth_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+        const auto data_pat = "Bearer data-pat"s;
+        const auto admin_pat = "Bearer admin-pat"s;
+        setup->get_server().configure_authentication(
+            is_public_api_path,
+            [data_pat](string_view authorization){ return authorization == data_pat; },
+            "YarDB API"sv,
+            [admin_pat](string_view authorization){ return authorization == admin_pat; });
+
+        const auto payload =
+            R"({"requests":[{"id":"1","method":"POST","url":"authitems","body":{"name":"ada"},"atomicityGroup":"g1"}]})"s;
+
+        section("missing Authorization is 401") = [setup, payload]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, payload);
+            require_eq(status, "401"s);
+        };
+
+        section("admin PAT is not accepted") = [setup, payload, admin_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", admin_pat}};
+            auto [status, reason, headers, response_body] = make_request_with_headers(
+                setup->port(), "POST"s, "/$batch"s, auth_headers, payload);
+            require_eq(status, "401"s);
+        };
+
+        section("data PAT applies the group") = [setup, payload, data_pat]
+        {
+            auto auth_headers = std::map<string, string>{{"Authorization", data_pat}};
+            auto [status, reason, headers, response_body] = make_request_with_headers(
+                setup->port(), "POST"s, "/$batch"s, auth_headers, payload);
+            require_eq(status, "200"s);
+            auto envelope = json::parse(response_body);
+            require_eq(static_cast<xson::integer_type>(envelope["responses"s][0]["status"s]), 201);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

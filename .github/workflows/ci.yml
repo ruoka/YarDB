@@ -295,7 +295,7 @@ jobs:
       - name: Setup LLVM 21 toolchain with analysis tools
         uses: ./.github/actions/setup-llvm
         with:
-          packages: "libc++-21-dev libc++abi-21-dev clang-21 clang-tools-21 cppcheck lld-21 lldb-21 jq libssl-dev"
+          packages: "libc++-21-dev libc++abi-21-dev clang-21 clang-tools-21 cppcheck lld-21 lldb-21 jq"
 
       - name: Run clang-tidy on core files
         run: |

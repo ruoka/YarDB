@@ -11,7 +11,7 @@ RUN set -ex && \
     echo "deb [signed-by=/usr/share/keyrings/apt-llvm.gpg] https://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" > /etc/apt/sources.list.d/apt.llvm.org.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        git cmake make file jq libssl-dev \
+        git cmake make file jq \
         clang-21 clang-tools-21 lldb-21 lld-21 libc++-21-dev libc++abi-21-dev && \
     rm -rf /var/lib/apt/lists/*
 

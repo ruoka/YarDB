@@ -162,7 +162,6 @@ When running tests, logs appear in the test output. Use appropriate log levels f
 ### Linking Issues
 - Check that all submodules are built: `./tools/CB.sh debug build`
 - Verify include paths in `tools/CB.sh` script
-- Ensure OpenSSL libraries are available (for cryptic submodule)
 
 ### Module Issues
 - Ensure module names follow project prefix convention

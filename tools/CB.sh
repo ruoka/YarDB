@@ -22,14 +22,6 @@ CB_INCLUDE_EXAMPLES_MODE=never
 
 CB_INCLUDE_DIRS=("$PROJECT_ROOT/deps/net/net" "$PROJECT_ROOT/deps/cryptic/cryptic")
 [[ -n "$TESTER_ROOT" && -d "$TESTER_ROOT/tester" ]] && CB_INCLUDE_DIRS+=("$TESTER_ROOT/tester")
-if [[ "$(uname -s)" == "Darwin" && -d "/opt/homebrew/include" ]]; then
-  CB_INCLUDE_DIRS+=("/opt/homebrew/include")
-fi
-
-CB_LINK_FLAGS="-lcrypto"
-if [[ "$(uname -s)" == "Darwin" && -d "/opt/homebrew/lib" ]]; then
-  CB_LINK_FLAGS="-L/opt/homebrew/lib $CB_LINK_FLAGS"
-fi
 
 CB_CORE=""
 if [[ -n "$TESTER_ROOT" ]]; then

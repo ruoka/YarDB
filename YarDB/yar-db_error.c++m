@@ -7,15 +7,16 @@ import std;
 
 export namespace yar::db {
 
-// Write operations are atomic for detected process-level I/O failures.
-// Crash durability requires a separate WAL or committed transaction record.
+// Single-document writes are atomic for detected process-level I/O failures.
+// apply_group appends a commit record; reopen discards a group that lacks one.
 enum class db_error_code
 {
     io_failure,
     rollback_failure,
     corrupt_storage,
     precondition_failed,
-    conflict
+    conflict,
+    not_found
 };
 
 enum class db_operation
@@ -25,7 +26,8 @@ enum class db_operation
     destroy,
     replace,
     index,
-    reindex
+    reindex,
+    batch
 };
 
 struct db_error
@@ -33,6 +35,7 @@ struct db_error
     db_error_code code;
     db_operation operation;
     std::string message;
+    std::optional<std::size_t> request_index{};
 };
 
 template<typename T = void>

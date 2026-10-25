@@ -105,6 +105,7 @@ Once running, `yardb` provides the following REST endpoints:
 - `HEAD /{collection}` - Get collection headers (same as GET but no body)
 - `HEAD /{collection}/{id}` - Get document headers (same as GET but no body)
 - `GET /$metadata` - OData 4.01 JSON CSDL service metadata
+- `POST /$batch` - Atomic multi-document writes (OData JSON batch; atomicity groups only)
 - `GET /_reindex` - Rebuild all collection indexes
 - `PUT /_db/{collection}` - Configure secondary index keys for a collection
 - `PATCH /_db/{collection}` - Add secondary index keys incrementally
@@ -155,6 +156,24 @@ YarDB supports conditional HTTP requests for efficient caching and optimistic lo
 - **If-Unmodified-Since**: Used with PUT/PATCH/DELETE
   - Example: `PUT /users/123` with `If-Unmodified-Since: Wed, 21 Oct 2015 07:28:00 GMT`
   - Returns `412 Precondition Failed` if document was modified after the date
+
+### Atomic batch (`POST /$batch`)
+
+`POST /$batch` accepts an OData 4.01 JSON batch body. This version runs **atomicity groups only**. A request with no `atomicityGroup`, a `dependsOn` entry, a nested `/$batch`, or a `/_*` URL is rejected with `422` before any write. The 1 MiB body limit applies to the whole batch (`413`). Authentication is the data PAT used for a single document write; when an admin PAT is configured it is not accepted here.
+
+```json
+{"requests":[{"id":"1","method":"POST","url":"orders","headers":{"If-Match":"\"12\""},"body":{"name":"Ada"},"atomicityGroup":"g1"}]}
+```
+
+Requests in one group must be adjacent in `requests`. Each group is committed on its own, in order. A later group that fails does not roll back an earlier group in the same POST. Inside a group the allowed methods are `POST`, `PUT`, `PATCH`, and `DELETE` on collection documents (`/collection` or `/collection/id`).
+
+The engine holds `m_rwlock` for the whole group, so a reader never observes a half-applied group. It appends a `group_begin` record, then one `created` record per new document version, then a `group_commit` record whose body lists prior file positions to mark `updated` or `deleted`. Those status bytes are written only after the commit record is flushed. Priors stay live on disk until that commit is durable, so a crash cannot drop the previous row.
+
+Reopen keeps the existing torn-tail trim, then discards a group that has no commit record by truncating at `group_begin`. If a commit record is durable but its tombstones did not finish, reopen applies the listed positions before indexing. Two `created` rows for one `_id` are still healed by the dual-live rule (the later row wins, the earlier status becomes `updated`).
+
+Each successful create, replace, or update returns that document's ETag (the new record's file position), the same value a single write would return. `DELETE` is `204` with no ETag. `If-Match` / `If-None-Match` / `If-Unmodified-Since` are evaluated against the version visible at that step in the group, before any byte is appended. One failure fails the group and nothing in it is applied. `If-Match` of a specific ETag does not observe a successor written earlier in the same group (`dependsOn` is not supported); `If-Match: *` still means the document must already exist.
+
+The HTTP status of a well-formed batch is `200`. The body is `{"responses":[{"id","status","headers","body"}]}`. A failed group contributes the failing request's id, status (`404`, `409`, `412`, …), and error body. An I/O failure is `500` on that request; earlier groups in the POST stay committed.
 
 ### OData Query Parameters
 

@@ -1410,6 +1410,243 @@ auto test_set()
         };
     };
 
+    test_case("atomic group commits or discards, [yardb]") = []
+    {
+        section("Group create update and delete survive reopen") = []
+        {
+            const auto test_file = "./engine_group_commit_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "groupitems"s;
+
+            auto prior_position = std::int64_t{0};
+            auto prior_id = xson::integer_type{0};
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index(collection, {"name"s}).has_value());
+                auto alice = object{{"name"s, "alice"s}};
+                require_true(engine.create(collection, alice).has_value());
+                prior_id = static_cast<xson::integer_type>(alice["_id"s]);
+                const auto position = engine.metadata_position(collection, object{{"_id"s, prior_id}});
+                require_true(position.has_value());
+                prior_position = *position;
+
+                auto requests = std::vector<yar::db::batch_request>{};
+                auto create_carol = yar::db::batch_request{};
+                create_carol.method = yar::db::batch_method::create;
+                create_carol.collection = collection;
+                create_carol.body = object{{"name"s, "carol"s}};
+                requests.push_back(std::move(create_carol));
+
+                auto patch_alice = yar::db::batch_request{};
+                patch_alice.method = yar::db::batch_method::update;
+                patch_alice.collection = collection;
+                patch_alice.id = prior_id;
+                patch_alice.body = object{{"name"s, "bob"s}};
+                patch_alice.preconditions.write.if_match_position = prior_position;
+                requests.push_back(std::move(patch_alice));
+
+                auto remove_extra = yar::db::batch_request{};
+                remove_extra.method = yar::db::batch_method::create;
+                remove_extra.collection = collection;
+                remove_extra.body = object{{"_id"s, 40}, {"name"s, "temp"s}};
+                requests.push_back(std::move(remove_extra));
+
+                auto drop_temp = yar::db::batch_request{};
+                drop_temp.method = yar::db::batch_method::destroy;
+                drop_temp.collection = collection;
+                drop_temp.id = 40;
+                requests.push_back(std::move(drop_temp));
+
+                const auto applied = engine.apply_group(requests);
+                require_true(applied.has_value());
+                require_eq(applied->size(), 4u);
+                require_eq((*applied)[0].effect, yar::db::batch_effect::created);
+                require_eq((*applied)[1].effect, yar::db::batch_effect::updated);
+                require_true((*applied)[0].revision.position.has_value());
+                require_true((*applied)[1].revision.position.has_value());
+                require_true(*(*applied)[1].revision.position != prior_position);
+                require_false((*applied)[3].revision.position.has_value());
+
+                auto by_name = object{};
+                require_true(engine.read(collection, object{{"name"s, "bob"s}}, by_name));
+                require_eq(by_name.size(), 1u);
+                require_false(engine.read(collection, object{{"name"s, "alice"s}}, by_name));
+                require_true(engine.read(collection, object{{"name"s, "carol"s}}, by_name));
+                require_false(engine.read(collection, object{{"_id"s, 40}}, by_name));
+                const auto names = engine.collections();
+                require_true(std::ranges::find(names, "_batch"s) == names.end());
+            }
+
+            auto reopened = yar::db::engine{test_file};
+            auto bob = object{};
+            require_true(reopened.read(collection, object{{"name"s, "bob"s}}, bob));
+            require_eq(static_cast<string>(bob[0]["name"s]), "bob"s);
+            auto alice = object{};
+            require_false(reopened.read(collection, object{{"name"s, "alice"s}}, alice));
+            auto carol = object{};
+            require_true(reopened.read(collection, object{{"name"s, "carol"s}}, carol));
+            auto temp = object{};
+            require_false(reopened.read(collection, object{{"_id"s, 40}}, temp));
+            require_true(reopened.read(collection, object{{"_id"s, prior_id}}, bob));
+            require_eq(static_cast<string>(bob[0]["name"s]), "bob"s);
+        };
+
+        section("In-group patch sees the create") = []
+        {
+            const auto test_file = "./engine_group_overlay_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "overlayitems"s;
+            auto engine = yar::db::engine{test_file};
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            auto created = yar::db::batch_request{};
+            created.method = yar::db::batch_method::create;
+            created.collection = collection;
+            created.body = object{{"_id"s, 7}, {"name"s, "ada"s}};
+            requests.push_back(std::move(created));
+
+            auto patched = yar::db::batch_request{};
+            patched.method = yar::db::batch_method::update;
+            patched.collection = collection;
+            patched.id = 7;
+            patched.body = object{{"name"s, "grace"s}};
+            requests.push_back(std::move(patched));
+
+            const auto applied = engine.apply_group(requests);
+            require_true(applied.has_value());
+            require_eq((*applied)[1].effect, yar::db::batch_effect::updated);
+
+            auto documents = object{};
+            require_true(engine.read(collection, object{}, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "grace"s);
+        };
+
+        section("Precondition failure applies nothing") = []
+        {
+            const auto test_file = "./engine_group_precondition_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "preitems"s;
+            auto engine = yar::db::engine{test_file};
+            auto alice = object{{"name"s, "alice"s}};
+            require_true(engine.create(collection, alice).has_value());
+            const auto id = static_cast<xson::integer_type>(alice["_id"s]);
+            const auto position = engine.metadata_position(collection, object{{"_id"s, id}});
+            require_true(position.has_value());
+            const auto size_before = std::filesystem::file_size(test_file);
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            auto created = yar::db::batch_request{};
+            created.method = yar::db::batch_method::create;
+            created.collection = collection;
+            created.body = object{{"name"s, "bob"s}};
+            requests.push_back(std::move(created));
+
+            auto patched = yar::db::batch_request{};
+            patched.method = yar::db::batch_method::update;
+            patched.collection = collection;
+            patched.id = id;
+            patched.body = object{{"name"s, "carol"s}};
+            patched.preconditions.write.if_match_position = *position + 1;
+            requests.push_back(std::move(patched));
+
+            const auto applied = engine.apply_group(requests);
+            require_false(applied.has_value());
+            require_eq(applied.error().code, yar::db::db_error_code::precondition_failed);
+            require_true(applied.error().request_index.has_value());
+            require_eq(*applied.error().request_index, 1u);
+
+            require_eq(std::filesystem::file_size(test_file), size_before);
+            auto documents = object{};
+            require_true(engine.read(collection, object{{"_id"s, id}}, documents));
+            require_eq(static_cast<string>(documents[0]["name"s]), "alice"s);
+            auto bob = object{};
+            require_false(engine.read(collection, object{{"name"s, "bob"s}}, bob));
+        };
+
+        section("Reopen discards a group without its commit record") = []
+        {
+            const auto test_file = "./engine_group_crash_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "crashitems"s;
+            const auto size_before = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto alice = object{{"name"s, "alice"s}};
+                require_true(engine.create(collection, alice).has_value());
+                return std::filesystem::file_size(test_file);
+            }();
+
+            {
+                using xson::fson::operator <<;
+                auto storage = std::fstream{test_file, std::ios::in | std::ios::out | std::ios::binary};
+                require_true(storage.is_open());
+                storage.seekp(0, std::ios::end);
+                auto begin = yar::db::metadata{yar::db::metadata::group_begin};
+                begin.collection = "_batch"s;
+                auto marker = object{};
+                storage << begin << marker;
+                auto document_metadata = yar::db::metadata{collection};
+                auto bob = object{{"_id"s, 99}, {"name"s, "bob"s}};
+                storage << document_metadata << bob;
+                storage.flush();
+                require_false(storage.fail());
+            }
+
+            {
+                auto reopened = yar::db::engine{test_file};
+                require_eq(std::filesystem::file_size(test_file), size_before);
+                auto bob = object{};
+                require_false(reopened.read(collection, object{{"_id"s, 99}}, bob));
+                auto alice = object{};
+                require_true(reopened.read(collection, object{{"name"s, "alice"s}}, alice));
+                auto next = object{{"name"s, "cara"s}};
+                require_true(reopened.create(collection, next).has_value());
+                require_eq(static_cast<xson::integer_type>(next["_id"s]), 2);
+            }
+        };
+
+        section("Reopen finishes tombstones named by the commit record") = []
+        {
+            const auto test_file = "./engine_group_tombstone_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "tombitems"s;
+            const auto prior = [&]
+            {
+                auto engine = yar::db::engine{test_file};
+                auto alice = object{{"name"s, "alice"s}};
+                require_true(engine.create(collection, alice).has_value());
+                const auto id = static_cast<xson::integer_type>(alice["_id"s]);
+                const auto position = engine.metadata_position(collection, object{{"_id"s, id}});
+                require_true(position.has_value());
+
+                auto requests = std::vector<yar::db::batch_request>{};
+                auto drop = yar::db::batch_request{};
+                drop.method = yar::db::batch_method::destroy;
+                drop.collection = collection;
+                drop.id = id;
+                requests.push_back(std::move(drop));
+                require_true(engine.apply_group(requests).has_value());
+                auto gone = object{};
+                require_false(engine.read(collection, object{{"_id"s, id}}, gone));
+                return std::pair{*position, id};
+            }();
+
+            {
+                auto storage = std::fstream{test_file, std::ios::in | std::ios::out | std::ios::binary};
+                require_true(storage.is_open());
+                storage.seekp(prior.first, storage.beg);
+                storage << yar::db::metadata{yar::db::metadata::created};
+                require_false(storage.fail());
+                storage.flush();
+            }
+
+            auto reopened = yar::db::engine{test_file};
+            auto documents = object{};
+            require_false(reopened.read(collection, object{{"_id"s, prior.second}}, documents));
+        };
+    };
+
     return true;
 }
 

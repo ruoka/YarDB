@@ -175,6 +175,105 @@ void neutralize_appended_records(
     storage.flush();
 }
 
+bool is_group_marker(yar::db::metadata::action status)
+{
+    return status == yar::db::metadata::group_begin
+        or status == yar::db::metadata::group_commit;
+}
+
+bool is_known_status(yar::db::metadata::action status)
+{
+    return status == yar::db::metadata::created
+        or status == yar::db::metadata::updated
+        or status == yar::db::metadata::deleted
+        or is_group_marker(status);
+}
+
+// Replay tombstones named by a durable group_commit. Idempotent: rewriting an
+// already-updated or already-deleted status byte is a no-op. Runs before
+// indexing so a crash between the commit record and the status bytes cannot
+// resurrect a row the group deleted, and cannot leave a stale pre-image live
+// beside its successor.
+void finish_group_commits(std::fstream& storage, const std::string& db)
+{
+    using xson::fson::operator >>;
+    using xson::fson::operator <<;
+
+    struct mark
+    {
+        yar::db::position_type position;
+        yar::db::metadata::action status;
+    };
+
+    auto size_error = std::error_code{};
+    const auto file_size = std::filesystem::file_size(db, size_error);
+    if(size_error)
+        throw std::runtime_error{"Failed to determine database size: "s + size_error.message()};
+
+    auto marks = std::vector<mark>{};
+    storage.clear();
+    storage.seekg(0, storage.beg);
+    while(storage.peek() != std::char_traits<char>::eof())
+    {
+        const auto record_start = storage.tellg();
+        auto metadata = yar::db::metadata{};
+        auto document = yar::db::object{};
+        try
+        {
+            storage >> metadata >> document;
+        }
+        catch(const std::runtime_error&)
+        {
+            throw std::runtime_error{
+                "Corrupt database record at offset "s + std::to_string(record_start)};
+        }
+        if(storage.fail())
+            throw std::runtime_error{
+                "Failed to read database record at offset "s + std::to_string(record_start)};
+
+        if(metadata.status != yar::db::metadata::group_commit)
+            continue;
+
+        const auto collect = [&](const std::string& field, yar::db::metadata::action status)
+        {
+            if(not document.has(field) or not document[field].is_array())
+                return;
+            for(const auto& item : document[field].get<yar::db::object::array>())
+            {
+                if(not item.is_integer())
+                    throw std::runtime_error{
+                        "Group commit lists a non-integer position at offset "s
+                        + std::to_string(record_start)};
+                const auto position = static_cast<yar::db::position_type>(
+                    static_cast<xson::integer_type>(item));
+                if(position < 0 or static_cast<std::uintmax_t>(position) >= file_size)
+                    throw std::runtime_error{
+                        "Group commit lists a position outside the file at offset "s
+                        + std::to_string(record_start)};
+                marks.push_back({position, status});
+            }
+        };
+        collect("updated", yar::db::metadata::updated);
+        collect("deleted", yar::db::metadata::deleted);
+    }
+
+    for(const auto& entry : marks)
+    {
+        if(storage.fail())
+            break;
+        storage.clear();
+        storage.seekp(entry.position, storage.beg);
+        storage << yar::db::metadata{entry.status};
+        if(storage.fail())
+            break;
+    }
+    storage.flush();
+    if(storage.fail())
+        throw std::runtime_error{"Failed to finish group commit tombstones"s};
+    storage.clear();
+    storage.seekg(0, storage.beg);
+}
+
 void validate_and_recover_storage(std::fstream& storage, const std::string& db)
 {
     using xson::fson::operator >>;
@@ -185,6 +284,7 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
         throw std::runtime_error{"Failed to determine database size: "s + size_error.message()};
 
     auto last_complete = std::streamoff{0};
+    auto open_group = std::optional<std::streamoff>{};
     storage.clear();
     storage.seekg(0, storage.beg);
 
@@ -212,9 +312,7 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
             break;
         }
 
-        if(metadata.status != yar::db::metadata::created
-            and metadata.status != yar::db::metadata::updated
-            and metadata.status != yar::db::metadata::deleted)
+        if(not is_known_status(metadata.status))
             throw std::runtime_error{
                 "Invalid database record status at offset "s + std::to_string(record_start)};
 
@@ -226,13 +324,31 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
             throw std::runtime_error{
                 "Invalid database history link at offset "s + std::to_string(record_start)};
 
+        if(metadata.status == yar::db::metadata::group_begin)
+        {
+            if(not open_group.has_value())
+                open_group = record_start;
+        }
+        else if(metadata.status == yar::db::metadata::group_commit)
+        {
+            if(not open_group.has_value())
+                throw std::runtime_error{
+                    "Group commit without a begin record at offset "s
+                    + std::to_string(record_start)};
+            open_group.reset();
+        }
+
         last_complete = storage.tellg();
         if(last_complete <= record_start)
             throw std::runtime_error{
                 "Database scan made no progress at offset "s + std::to_string(record_start)};
     }
 
-    if(static_cast<std::uintmax_t>(last_complete) == file_size)
+    // An open group has no commit record. Drop it entirely, including complete
+    // document records inside it. A torn tail that is not inside a group still
+    // trims back to the last complete record.
+    const auto recover_to = open_group.value_or(last_complete);
+    if(static_cast<std::uintmax_t>(recover_to) == file_size)
     {
         storage.clear();
         return;
@@ -240,10 +356,10 @@ void validate_and_recover_storage(std::fstream& storage, const std::string& db)
 
     storage.close();
     auto resize_error = std::error_code{};
-    std::filesystem::resize_file(db, static_cast<std::uintmax_t>(last_complete), resize_error);
+    std::filesystem::resize_file(db, static_cast<std::uintmax_t>(recover_to), resize_error);
     if(resize_error or not reopen(storage, db))
         throw std::runtime_error{
-            "Failed to recover truncated database tail at offset "s + std::to_string(last_complete)};
+            "Failed to recover truncated database tail at offset "s + std::to_string(recover_to)};
 }
 
 template<typename T, typename Extractor>
@@ -354,6 +470,7 @@ yar::db::engine::engine(std::string_view db) :
     if(not m_storage.is_open())
         throw std::runtime_error{"Failed to open/create DB "s + m_db};
     validate_and_recover_storage(m_storage, m_db);
+    finish_group_commits(m_storage, m_db);
     setup_index_structure();
     populate_indexes();
 }
@@ -413,6 +530,9 @@ void yar::db::engine::setup_index_structure()
         if(m_storage.fail())
             break;
 
+        if(is_group_marker(metadata.status))
+            continue;
+
         m_index[metadata.collection].update(document);
 
         if(metadata.collection == "_db"s)
@@ -444,6 +564,9 @@ void yar::db::engine::populate_indexes()
 
         if(m_storage.fail())
             break;
+
+        if(is_group_marker(metadata.status))
+            continue;
 
         if(metadata.status == metadata::deleted or metadata.status == metadata::updated)
             continue;
@@ -485,6 +608,9 @@ yar::db::db_result<> yar::db::engine::reindex()
                 db_operation::reindex,
                 "Failed to read a stored document while rebuilding indexes"s)};
         }
+
+        if(is_group_marker(metadata.status))
+            continue;
 
         auto& rebuilt_index = rebuilt[metadata.collection];
         rebuilt_index.update(document);
@@ -1678,4 +1804,423 @@ yar::db::db_result<std::size_t> yar::db::engine::upsert_impl(
         return std::unexpected{created.error()};
     documents += updates;
     return 1;
+}
+
+yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_group(
+    const std::vector<batch_request>& requests)
+{
+    using xson::fson::operator >>;
+    using xson::fson::operator <<;
+
+    auto lock = std::unique_lock{m_rwlock};
+
+    if(not m_writable)
+        return std::unexpected{db_error(
+            db_error_code::rollback_failure,
+            db_operation::batch,
+            "Database writes are disabled after an unsuccessful rollback"s)};
+
+    if(requests.empty())
+        return std::vector<batch_item>{};
+
+    const auto fail = [](std::size_t index, db_error_code code, std::string message)
+    {
+        auto error = db_error{code, db_operation::batch, std::move(message)};
+        error.request_index = index;
+        return error;
+    };
+
+    struct planned_append
+    {
+        std::string collection;
+        object document;
+        bool mark_updated = false;
+        bool mark_deleted = false;
+        metadata metadata_record{};
+    };
+
+    struct prior_mark
+    {
+        position_type position;
+        bool deleted = false;
+    };
+
+    struct item_plan
+    {
+        batch_effect effect{};
+        object document;
+        std::optional<std::size_t> append_index;
+    };
+
+    struct current_doc
+    {
+        bool found = false;
+        bool corrupt = false;
+        object document;
+        metadata metadata_record{};
+        std::optional<std::size_t> append_index;
+    };
+
+    auto staged = m_index;
+    auto appends = std::vector<planned_append>{};
+    auto priors = std::vector<prior_mark>{};
+    auto plans = std::vector<item_plan>{};
+    auto live_appends = std::flat_map<std::pair<std::string, std::int64_t>, std::size_t>{};
+    plans.reserve(requests.size());
+
+    auto lookup = [&](const std::string& collection, std::int64_t id) mutable
+    {
+        auto current = current_doc{};
+        const auto key = std::pair{collection, id};
+        if(const auto overlay = live_appends.find(key); overlay != live_appends.end())
+        {
+            current.found = true;
+            current.append_index = overlay->second;
+            current.document = appends[overlay->second].document;
+            current.metadata_record.collection = collection;
+            current.metadata_record.status = metadata::created;
+            current.metadata_record.position = -1;
+            return current;
+        }
+
+        const auto* index = find_index(staged, collection);
+        if(index == nullptr or not index->contains_id(static_cast<sequence_type>(id)))
+            return current;
+
+        const auto position = index->position(static_cast<sequence_type>(id));
+        if(not position.has_value() or *position < 0)
+            return current;
+
+        m_storage.clear();
+        m_storage.seekg(*position, m_storage.beg);
+        m_storage >> current.metadata_record >> current.document;
+        if(m_storage.fail())
+            current.corrupt = true;
+        else
+            current.found = true;
+        return current;
+    };
+
+    const auto precondition_failed = [&](const current_doc& current, const put_preconditions& pre)
+    {
+        if(pre.if_none_match_star)
+            return true;
+        if(pre.if_none_match_position.has_value()
+            and current.metadata_record.position == *pre.if_none_match_position)
+            return true;
+        return not preconditions_met(current.metadata_record, pre.write);
+    };
+
+    for(std::size_t index = 0; index < requests.size(); ++index)
+    {
+        const auto& request = requests[index];
+        if(request.collection.empty() or request.collection.starts_with('_'))
+            return std::unexpected{fail(index, db_error_code::conflict, "Collection is reserved"s)};
+
+        if(request.method != batch_method::create and not request.id.has_value())
+            return std::unexpected{fail(index, db_error_code::conflict, "Document id is required"s)};
+
+        const auto remember = [&](batch_effect effect, object document, std::optional<std::size_t> append_index)
+        {
+            auto plan = item_plan{};
+            plan.effect = effect;
+            plan.document = std::move(document);
+            plan.append_index = append_index;
+            plans.push_back(std::move(plan));
+        };
+
+        const auto queue_append = [&](object document, batch_effect effect)
+        {
+            const auto id = static_cast<std::int64_t>(document["_id"s]);
+            auto& collection_index = staged[request.collection];
+            collection_index.insert(document, static_cast<position_type>(-1));
+            const auto slot = appends.size();
+            appends.push_back({request.collection, document, false, false, {}});
+            live_appends[{request.collection, id}] = slot;
+            remember(effect, std::move(document), slot);
+        };
+
+        if(request.method == batch_method::create)
+        {
+            if(request.preconditions.require_existing)
+                return std::unexpected{fail(
+                    index, db_error_code::precondition_failed, "Write preconditions were not met"s)};
+
+            auto document = request.body;
+            auto explicit_id = std::optional<std::int64_t>{};
+            if(document.has("_id"s))
+            {
+                if(not document["_id"s].is_integer())
+                    return std::unexpected{fail(
+                        index, db_error_code::conflict, "Document _id must be an integer"s)};
+                explicit_id = static_cast<std::int64_t>(document["_id"s]);
+            }
+
+            if(explicit_id.has_value())
+            {
+                auto current = lookup(request.collection, *explicit_id);
+                if(current.corrupt)
+                    return std::unexpected{fail(
+                        index, db_error_code::corrupt_storage, "Failed to read a document selected for create"s)};
+                if(current.found)
+                {
+                    if(precondition_failed(current, request.preconditions))
+                        return std::unexpected{fail(
+                            index, db_error_code::precondition_failed, "Write preconditions were not met"s)};
+                    return std::unexpected{fail(
+                        index,
+                        db_error_code::conflict,
+                        "Document with _id "s + std::to_string(*explicit_id) + " already exists"s)};
+                }
+            }
+
+            staged[request.collection].update(document);
+            queue_append(std::move(document), batch_effect::created);
+            continue;
+        }
+
+        const auto id = *request.id;
+        auto current = lookup(request.collection, id);
+        if(current.corrupt)
+            return std::unexpected{fail(
+                index, db_error_code::corrupt_storage, "Failed to read a document selected for the group"s)};
+
+        if(request.method == batch_method::destroy)
+        {
+            if(not current.found)
+                return std::unexpected{fail(index, db_error_code::not_found, "Document not found"s)};
+            if(precondition_failed(current, request.preconditions))
+                return std::unexpected{fail(
+                    index, db_error_code::precondition_failed, "Write preconditions were not met"s)};
+
+            if(current.append_index.has_value())
+                appends[*current.append_index].mark_deleted = true;
+            else
+                priors.push_back({current.metadata_record.position, true});
+
+            staged[request.collection].erase(current.document);
+            live_appends.erase({request.collection, id});
+            remember(batch_effect::deleted, current.document, std::nullopt);
+            continue;
+        }
+
+        if(request.method == batch_method::replace or request.method == batch_method::update)
+        {
+            if(not current.found)
+            {
+                if(request.method == batch_method::update or request.preconditions.require_existing)
+                {
+                    const auto code = request.method == batch_method::update
+                        ? db_error_code::not_found
+                        : db_error_code::precondition_failed;
+                    const auto message = request.method == batch_method::update
+                        ? "Document not found"s
+                        : "Write preconditions were not met"s;
+                    return std::unexpected{fail(index, code, message)};
+                }
+
+                auto document = request.body;
+                document["_id"s] = id;
+                staged[request.collection].update(document);
+                queue_append(std::move(document), batch_effect::created);
+                continue;
+            }
+
+            if(precondition_failed(current, request.preconditions))
+                return std::unexpected{fail(
+                    index, db_error_code::precondition_failed, "Write preconditions were not met"s)};
+
+            if(request.method == batch_method::update and request.body.has("_id"s))
+            {
+                if(not request.body["_id"s].is_integer()
+                    or static_cast<std::int64_t>(request.body["_id"s]) != id)
+                    return std::unexpected{fail(
+                        index, db_error_code::conflict, "Document _id is immutable"s)};
+            }
+
+            auto document = request.method == batch_method::update
+                ? current.document
+                : request.body;
+            if(request.method == batch_method::update)
+            {
+                auto updates = request.body;
+                document += std::move(updates);
+            }
+            document["_id"s] = id;
+
+            if(current.append_index.has_value())
+                appends[*current.append_index].mark_updated = true;
+            else
+                priors.push_back({current.metadata_record.position, false});
+
+            staged[request.collection].erase(current.document);
+            staged[request.collection].update(document);
+            const auto effect = request.method == batch_method::update
+                ? batch_effect::updated
+                : batch_effect::replaced;
+            queue_append(std::move(document), effect);
+            continue;
+        }
+    }
+
+    auto file_size_error = std::error_code{};
+    const auto original_size = std::filesystem::file_size(m_db, file_size_error);
+    if(file_size_error)
+        return std::unexpected{db_error(
+            db_error_code::io_failure,
+            db_operation::batch,
+            "Failed to determine database size: "s + file_size_error.message())};
+
+    m_storage.clear();
+    auto begin_metadata = metadata{metadata::group_begin};
+    begin_metadata.collection = "_batch"s;
+    auto begin_document = object{};
+    m_storage.seekp(0, m_storage.end);
+    m_storage << begin_metadata << begin_document;
+    auto writes_ok = not m_storage.fail();
+
+    for(auto& item : appends)
+    {
+        if(not writes_ok or m_storage.fail())
+        {
+            writes_ok = false;
+            break;
+        }
+
+        m_storage.clear();
+        m_storage.seekp(0, m_storage.end);
+        item.metadata_record = metadata{item.collection};
+        m_storage << item.metadata_record << item.document;
+        if(m_storage.fail())
+            writes_ok = false;
+    }
+
+    auto commit_written = false;
+    if(writes_ok)
+    {
+        auto updated = object{object::array{}};
+        auto deleted = object{object::array{}};
+        const auto push_position = [](object& list, position_type position)
+        {
+            list.get<object::array>().push_back(
+                object{static_cast<xson::integer_type>(position)});
+        };
+        for(const auto& prior : priors)
+            push_position(prior.deleted ? deleted : updated, prior.position);
+        for(const auto& item : appends)
+        {
+            if(item.mark_deleted)
+                push_position(deleted, item.metadata_record.position);
+            else if(item.mark_updated)
+                push_position(updated, item.metadata_record.position);
+        }
+
+        auto commit_document = object{};
+        commit_document["updated"s] = std::move(updated);
+        commit_document["deleted"s] = std::move(deleted);
+        auto commit_metadata = metadata{metadata::group_commit};
+        commit_metadata.collection = "_batch"s;
+        m_storage.clear();
+        m_storage.seekp(0, m_storage.end);
+        m_storage << commit_metadata << commit_document;
+        commit_written = not m_storage.fail();
+        writes_ok = commit_written;
+    }
+
+    m_storage.flush();
+    if(not writes_ok or m_storage.fail())
+    {
+        const auto rolled_back = rollback(m_storage, m_db, original_size, {});
+        const auto full_count = appends.size() + 2;
+        if(rolled_back == rollback_result::truncate_failed
+            and commit_written
+            and complete_appended_records(m_storage, m_db, original_size, full_count))
+        {
+            writes_ok = true;
+        }
+        else
+        {
+            if(rolled_back == rollback_result::truncate_failed)
+                neutralize_appended_records(m_storage, m_db, original_size);
+            if(rolled_back != rollback_result::ok)
+                m_writable = false;
+            const auto code = rolled_back == rollback_result::ok
+                ? db_error_code::io_failure
+                : db_error_code::rollback_failure;
+            const auto message = rolled_back == rollback_result::ok
+                ? "Failed to append and flush the group"s
+                : "Group append failed and could not be rolled back"s;
+            return std::unexpected{db_error(code, db_operation::batch, message)};
+        }
+    }
+
+    auto mark_status = [&](position_type position, metadata::action status) mutable
+    {
+        if(m_storage.fail())
+            return;
+        m_storage.clear();
+        m_storage.seekp(position, m_storage.beg);
+        m_storage << metadata{status};
+    };
+
+    for(const auto& prior : priors)
+        mark_status(prior.position, prior.deleted ? metadata::deleted : metadata::updated);
+    for(const auto& item : appends)
+    {
+        if(item.mark_deleted)
+            mark_status(item.metadata_record.position, metadata::deleted);
+        else if(item.mark_updated)
+            mark_status(item.metadata_record.position, metadata::updated);
+    }
+    m_storage.flush();
+    if(m_storage.fail())
+    {
+        m_storage.clear();
+        for(const auto& prior : priors)
+            mark_status(prior.position, prior.deleted ? metadata::deleted : metadata::updated);
+        for(const auto& item : appends)
+        {
+            if(item.mark_deleted)
+                mark_status(item.metadata_record.position, metadata::deleted);
+            else if(item.mark_updated)
+                mark_status(item.metadata_record.position, metadata::updated);
+        }
+        m_storage.flush();
+        if(m_storage.fail())
+        {
+            for(const auto& [key, slot] : live_appends)
+            {
+                auto& item = appends[slot];
+                staged[item.collection].erase(item.document);
+                staged[item.collection].insert(item.document, item.metadata_record.position);
+            }
+            m_index = std::move(staged);
+            m_writable = false;
+            return std::unexpected{db_error(
+                db_error_code::rollback_failure,
+                db_operation::batch,
+                "Group commit is durable but tombstones could not be written"s)};
+        }
+    }
+
+    for(const auto& [key, slot] : live_appends)
+    {
+        auto& item = appends[slot];
+        staged[item.collection].erase(item.document);
+        staged[item.collection].insert(item.document, item.metadata_record.position);
+    }
+    m_index = std::move(staged);
+
+    auto items = std::vector<batch_item>{};
+    items.reserve(plans.size());
+    for(const auto& plan : plans)
+    {
+        auto item = batch_item{};
+        item.effect = plan.effect;
+        item.document = plan.document;
+        if(plan.append_index.has_value())
+            assign_revision(&item.revision, appends[*plan.append_index].metadata_record);
+        items.push_back(std::move(item));
+    }
+    return items;
 }

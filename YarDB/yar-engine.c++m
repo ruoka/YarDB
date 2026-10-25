@@ -44,6 +44,43 @@ struct document_revision
     std::optional<std::chrono::system_clock::time_point> timestamp;
 };
 
+// One document write inside an atomic group. create is POST; replace is PUT;
+// update is PATCH; destroy is DELETE. id is the URL _id for every method
+// except create, where it is optional and the body may supply _id instead.
+enum class batch_method
+{
+    create,
+    replace,
+    update,
+    destroy
+};
+
+enum class batch_effect
+{
+    created,
+    replaced,
+    updated,
+    deleted
+};
+
+struct batch_request
+{
+    batch_method method{};
+    std::string collection;
+    std::optional<std::int64_t> id;
+    object body;
+    put_preconditions preconditions{};
+};
+
+// One applied request. revision is the ETag source for created, replaced, and
+// updated documents (the new record's file position). Deletes leave it empty.
+struct batch_item
+{
+    batch_effect effect{};
+    object document;
+    document_revision revision{};
+};
+
 // Sort a document array by a field (OData $orderby). Missing/non-primitive
 // values sort after present ones; ties break on _id ascending. When descending,
 // field order is reversed; missing values stay last.
@@ -126,6 +163,11 @@ public:
         object& document,
         put_preconditions preconditions = {},
         document_revision* revision = nullptr);
+
+    // Apply every request or none. Holds the exclusive lock for the whole
+    // group. A failure sets db_error::request_index and leaves the database
+    // unchanged. Crash before the group commit record is discarded on reopen.
+    db_result<std::vector<batch_item>> apply_group(const std::vector<batch_request>& requests);
 
     db_result<std::size_t> update(std::string_view collection, const object& selector, const object& updates)
     {

@@ -21,7 +21,9 @@ struct metadata
     enum action : char {
         created = 'C',  // Document was created
         updated = 'U',  // Document was updated (old version)
-        deleted = 'D'   // Document was deleted
+        deleted = 'D',  // Document was deleted
+        group_begin = 'B',  // Start of an atomic group; not a document
+        group_commit = 'M'  // Commit of an atomic group; body lists tombstones
     };
     
     // Construct metadata with action
@@ -99,6 +101,8 @@ inline auto to_string(metadata::action a)
     if(a == metadata::created) return "created"s;
     if(a == metadata::updated) return "updated"s;
     if(a == metadata::deleted) return "deleted"s;
+    if(a == metadata::group_begin) return "group_begin"s;
+    if(a == metadata::group_commit) return "group_commit"s;
     std::unreachable();
 }
 

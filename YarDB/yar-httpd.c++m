@@ -964,7 +964,9 @@ private:
             "application/json"sv,
             ::http::middleware::wrap(metadata_handler, metadata_middlewares));
 
-        // POST /$batch — OData JSON batch, atomicity groups only.
+        // POST /$batch — OData JSON batch. Requests that share an atomicityGroup
+        // commit together. A request with no group commits on its own. dependsOn
+        // names earlier requests that must have succeeded first.
         auto batch_handler = [this](::http::request_view, ::http::body_view body, ::http::headers&)
         {
             const auto unprocessable = [](std::string_view message)
@@ -992,6 +994,7 @@ private:
                 std::string id;
                 std::string group;
                 yar::db::batch_request request;
+                std::vector<std::string> depends_on;
             };
 
             auto parsed = std::vector<parsed_request>{};
@@ -1003,34 +1006,60 @@ private:
             {
                 if(not entry.is_object())
                     return unprocessable("Each batch request must be an object"sv);
-                if(entry.has("dependsOn"s))
-                    return unprocessable("dependsOn is not supported"sv);
                 if(not entry.has("id"s) or not entry["id"s].is_string())
                     return unprocessable("Each batch request needs a string id"sv);
                 if(not entry.has("method"s) or not entry["method"s].is_string())
                     return unprocessable("Each batch request needs a method"sv);
                 if(not entry.has("url"s) or not entry["url"s].is_string())
                     return unprocessable("Each batch request needs a url"sv);
-                if(not entry.has("atomicityGroup"s) or not entry["atomicityGroup"s].is_string())
-                    return unprocessable("Each batch request needs an atomicityGroup"sv);
 
                 auto id = static_cast<std::string>(entry["id"s]);
-                auto group = static_cast<std::string>(entry["atomicityGroup"s]);
+                auto group = std::string{};
+                if(entry.has("atomicityGroup"s))
+                {
+                    if(not entry["atomicityGroup"s].is_string())
+                        return unprocessable("atomicityGroup must be a string"sv);
+                    group = static_cast<std::string>(entry["atomicityGroup"s]);
+                    if(group.empty())
+                        return unprocessable("atomicityGroup must be non-empty"sv);
+                }
                 auto method = static_cast<std::string>(entry["method"s]);
                 auto url = static_cast<std::string>(entry["url"s]);
-                if(id.empty() or group.empty())
-                    return unprocessable("Batch request id and atomicityGroup must be non-empty"sv);
+                if(id.empty())
+                    return unprocessable("Batch request id must be non-empty"sv);
                 if(std::ranges::contains(seen_ids, id))
                     return unprocessable("Batch request ids must be unique"sv);
+
+                auto depends_on = std::vector<std::string>{};
+                if(entry.has("dependsOn"s))
+                {
+                    if(not entry["dependsOn"s].is_array())
+                        return unprocessable("dependsOn must be an array of request ids"sv);
+                    for(const auto& item : entry["dependsOn"s].get<xson::object::array>())
+                    {
+                        if(not item.is_string())
+                            return unprocessable("dependsOn entries must be strings"sv);
+                        auto target = static_cast<std::string>(item);
+                        if(target.empty() or not std::ranges::contains(seen_ids, target))
+                            return unprocessable("dependsOn references an unknown request"sv);
+                        if(not std::ranges::contains(depends_on, target))
+                            depends_on.push_back(std::move(target));
+                    }
+                }
                 seen_ids.push_back(id);
 
-                if(group != previous_group)
+                if(not group.empty())
                 {
-                    if(std::ranges::contains(seen_groups, group))
-                        return unprocessable("Requests in one atomicityGroup must be adjacent"sv);
-                    seen_groups.push_back(group);
+                    if(group != previous_group)
+                    {
+                        if(std::ranges::contains(seen_groups, group))
+                            return unprocessable("Requests in one atomicityGroup must be adjacent"sv);
+                        seen_groups.push_back(group);
+                    }
                     previous_group = group;
                 }
+                else
+                    previous_group.clear();
 
                 auto engine_request = yar::db::batch_request{};
                 if(method == "POST"s)
@@ -1115,7 +1144,11 @@ private:
                     engine_request.preconditions = put_preconditions_from_headers(request_headers);
                 }
 
-                parsed.push_back({std::move(id), std::move(group), std::move(engine_request)});
+                parsed.push_back({
+                    std::move(id),
+                    std::move(group),
+                    std::move(engine_request),
+                    std::move(depends_on)});
             }
 
             auto responses = xson::object{xson::object::array{}};
@@ -1158,11 +1191,54 @@ private:
                 responses += std::move(failure);
             };
 
+            const auto push_dependency_failure = [&](const parsed_request& source)
+            {
+                auto failure = xson::object{};
+                failure["id"s] = source.id;
+                failure["status"s] = xson::integer_type{424};
+                auto failure_body = xson::object{};
+                failure_body["error"s] = "Failed Dependency"s;
+                failure_body["message"s] = "A dependsOn request did not succeed"s;
+                failure["body"s] = std::move(failure_body);
+                responses += std::move(failure);
+            };
+
+            auto succeeded = std::vector<std::string>{};
+            const auto dependency_blocked = [&](const parsed_request& source)
+            {
+                for(const auto& dependency : source.depends_on)
+                {
+                    const auto earlier = std::ranges::find(parsed, dependency, &parsed_request::id);
+                    if(not source.group.empty() and earlier->group == source.group)
+                        continue;
+                    if(not std::ranges::contains(succeeded, dependency))
+                        return true;
+                }
+                return false;
+            };
+
             for(std::size_t offset = 0; offset < parsed.size();)
             {
                 auto end = offset + 1;
-                while(end < parsed.size() and parsed[end].group == parsed[offset].group)
-                    ++end;
+                if(not parsed[offset].group.empty())
+                {
+                    while(end < parsed.size() and parsed[end].group == parsed[offset].group)
+                        ++end;
+                }
+
+                auto blocked = false;
+                for(std::size_t index = offset; index < end; ++index)
+                {
+                    if(dependency_blocked(parsed[index]))
+                        blocked = true;
+                }
+                if(blocked)
+                {
+                    for(std::size_t index = offset; index < end; ++index)
+                        push_dependency_failure(parsed[index]);
+                    offset = end;
+                    continue;
+                }
 
                 auto group = std::vector<yar::db::batch_request>{};
                 group.reserve(end - offset);
@@ -1212,6 +1288,8 @@ private:
                     response["body"s] = item.document;
                     responses += std::move(response);
                 }
+                for(std::size_t index = offset; index < end; ++index)
+                    succeeded.push_back(parsed[index].id);
                 offset = end;
             }
 

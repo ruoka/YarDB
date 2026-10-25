@@ -313,10 +313,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 4. ⚛️ Atomic multi-document writes (`$batch` atomicity groups)
 - **Priority**: HIGH
-- **Current State**: ✅ Shipped for atomicity groups — `POST /$batch`. The engine appends a `group_begin`, the new document versions, and a `group_commit`; reopen discards a group that has no commit record. `dependsOn` and requests outside a group are `422`. See [programs.md](programs.md#atomic-batch-post-batch) and [changelog.md](changelog.md).
-- **Planned Implementation**:
-  - `dependsOn` between requests
-  - Requests that are not in an atomicity group, run independently
+- **Current State**: ✅ Shipped — `POST /$batch`. Atomicity groups commit together. A request with no group commits on its own. `dependsOn` names earlier requests and answers `424` when one of them did not succeed. The engine appends a `group_begin`, the new document versions, and a `group_commit`; reopen discards a group that has no commit record. See [programs.md](programs.md#atomic-batch-post-batch) and [changelog.md](changelog.md).
 - **Impact**: Clients stop keeping their own write journals. An append and a related update (event feed and outbox) become one write.
 
 #### 5. 🔑 Unique keys

@@ -4830,7 +4830,7 @@ auto test_set()
             require_eq(static_cast<string>(documents[0]["name"s]), "ada"s);
         };
 
-        section("requests outside an atomicity group are rejected") = [setup, batch_body]
+        section("requests outside an atomicity group commit on their own") = [setup, batch_body]
         {
             auto requests = object{object::array{}};
             auto loose = object{};
@@ -4842,25 +4842,155 @@ auto test_set()
 
             auto [status, reason, headers, response_body] = make_request(
                 setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
-            require_eq(status, "422"s);
+            require_eq(status, "200"s);
+            auto envelope = json::parse(response_body);
+            require_eq(static_cast<xson::integer_type>(envelope["responses"s][0]["status"s]), 201);
 
             auto [get_status, get_reason, get_headers, get_body] = make_request(
                 setup->port(), "GET"s, "/looseitems"s);
             auto documents = json::parse(get_body);
-            require_eq(documents.get<object::array>().size(), 0u);
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "ada"s);
         };
 
-        section("admin routes and dependsOn are rejected") = [setup]
+        section("a failed independent request leaves its neighbors committed") = [setup, batch_body]
+        {
+            auto requests = object{object::array{}};
+            auto first = object{};
+            first["id"s] = "a"s;
+            first["method"s] = "POST"s;
+            first["url"s] = "neighboritems"s;
+            first["body"s] = object{{"name"s, "ada"s}};
+            requests += std::move(first);
+            auto missing = object{};
+            missing["id"s] = "b"s;
+            missing["method"s] = "PATCH"s;
+            missing["url"s] = "neighboritems/99"s;
+            missing["body"s] = object{{"name"s, "missing"s}};
+            requests += std::move(missing);
+            auto third = object{};
+            third["id"s] = "c"s;
+            third["method"s] = "POST"s;
+            third["url"s] = "neighboritems"s;
+            third["body"s] = object{{"name"s, "grace"s}};
+            requests += std::move(third);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 3u);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 201);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 404);
+            require_eq(static_cast<xson::integer_type>(responses[2]["status"s]), 201);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/neighboritems"s);
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 2u);
+        };
+
+        section("dependsOn runs after success and skips after failure") = [setup, batch_body]
+        {
+            auto requests = object{object::array{}};
+            auto first = object{};
+            first["id"s] = "a"s;
+            first["method"s] = "POST"s;
+            first["url"s] = "dependitems"s;
+            first["body"s] = object{{"name"s, "ada"s}};
+            requests += std::move(first);
+            auto second = object{};
+            second["id"s] = "b"s;
+            second["method"s] = "POST"s;
+            second["url"s] = "dependitems"s;
+            second["body"s] = object{{"name"s, "grace"s}};
+            second["dependsOn"s] = object{object::array{object{"a"s}}};
+            requests += std::move(second);
+            auto missing = object{};
+            missing["id"s] = "c"s;
+            missing["method"s] = "PATCH"s;
+            missing["url"s] = "dependitems/99"s;
+            missing["body"s] = object{{"name"s, "missing"s}};
+            requests += std::move(missing);
+            auto blocked = object{};
+            blocked["id"s] = "d"s;
+            blocked["method"s] = "POST"s;
+            blocked["url"s] = "dependitems"s;
+            blocked["body"s] = object{{"name"s, "nope"s}};
+            blocked["dependsOn"s] = object{object::array{object{"c"s}}};
+            requests += std::move(blocked);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 4u);
+            require_eq(static_cast<string>(responses[0]["id"s]), "a"s);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 201);
+            require_eq(static_cast<string>(responses[1]["id"s]), "b"s);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 201);
+            require_eq(static_cast<xson::integer_type>(responses[2]["status"s]), 404);
+            require_eq(static_cast<string>(responses[3]["id"s]), "d"s);
+            require_eq(static_cast<xson::integer_type>(responses[3]["status"s]), 424);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/dependitems"s);
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 2u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "ada"s);
+            require_eq(static_cast<string>(documents[1]["name"s]), "grace"s);
+        };
+
+        section("dependsOn inside one atomicity group still commits together") = [setup, batch_body]
+        {
+            auto requests = object{object::array{}};
+            auto first = object{};
+            first["id"s] = "a"s;
+            first["method"s] = "POST"s;
+            first["url"s] = "groupdepend"s;
+            first["atomicityGroup"s] = "g1"s;
+            first["body"s] = object{{"name"s, "ada"s}};
+            requests += std::move(first);
+            auto second = object{};
+            second["id"s] = "b"s;
+            second["method"s] = "POST"s;
+            second["url"s] = "groupdepend"s;
+            second["atomicityGroup"s] = "g1"s;
+            second["dependsOn"s] = object{object::array{object{"a"s}}};
+            second["body"s] = object{{"name"s, "grace"s}};
+            requests += std::move(second);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 2u);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 201);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 201);
+        };
+
+        section("admin routes are rejected and dependsOn must name an earlier request") = [setup]
         {
             auto [admin_status, admin_reason, admin_headers, admin_body] = make_request(
                 setup->port(), "POST"s, "/$batch"s,
                 R"({"requests":[{"id":"1","method":"POST","url":"/_db/batchitems","body":{"keys":["name"]},"atomicityGroup":"g1"}]})"s);
             require_eq(admin_status, "422"s);
 
-            auto [depends_status, depends_reason, depends_headers, depends_body] = make_request(
+            auto [unknown_status, unknown_reason, unknown_headers, unknown_body] = make_request(
                 setup->port(), "POST"s, "/$batch"s,
-                R"({"requests":[{"id":"1","method":"POST","url":"batchitems","body":{"name":"x"},"atomicityGroup":"g1","dependsOn":[]}]})"s);
-            require_eq(depends_status, "422"s);
+                R"({"requests":[{"id":"1","method":"POST","url":"baddepend","body":{"name":"x"},"dependsOn":["missing"]}]})"s);
+            require_eq(unknown_status, "422"s);
+            auto [forward_status, forward_reason, forward_headers, forward_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"1","method":"POST","url":"baddepend","body":{"name":"x"},"dependsOn":["2"]},{"id":"2","method":"POST","url":"baddepend","body":{"name":"y"}}]})"s);
+            require_eq(forward_status, "422"s);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/baddepend"s);
+            require_eq(json::parse(get_body).get<object::array>().size(), 0u);
         };
 
         section("request body over 1 MiB is rejected") = [setup]

@@ -13,7 +13,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$filter` | See below |
 | `$select` | Projection; `_id` always included |
 | `$count=true` | Returns a JSON number; works with `$filter` |
-| `$batch` | `POST /$batch` atomicity groups only (`dependsOn` and requests outside a group are `422`); see [programs.md](programs.md#atomic-batch-post-batch) |
+| `$batch` | `POST /$batch` atomicity groups, independent requests, and `dependsOn`; see [programs.md](programs.md#atomic-batch-post-batch) |
 | `$expand` | v1: `{singular}_id` → plural collection `_id` |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
 | `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max` |

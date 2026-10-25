@@ -319,6 +319,15 @@ private:
     std::optional<std::size_t> m_known_size;
 };
 
+// A unique secondary value is already held by another live document, or the
+// field is present but not a primitive. id is that document when one is known.
+struct unique_conflict
+{
+    std::string field;
+    std::optional<primary_key_type> id{};
+    bool primitive = true;
+};
+
 // Index for fast document lookup by primary key (_id) and secondary keys
 // Maintains primary index (by _id) and secondary indexes (by user-defined fields)
 class index
@@ -335,8 +344,24 @@ public:
     // @param keys Field names to index
     void add(std::span<const std::string> keys);
 
+    // Mark indexed fields unique. Names that are not secondary keys are ignored.
+    void add_unique(std::span<const std::string> fields);
+
     // Secondary index key names (view into the index; valid while this object lives)
     std::span<const std::string> keys() const;
+
+    // Unique secondary key names (view into the index; valid while this object lives)
+    std::span<const std::string> unique_keys() const;
+
+    // Another live row holds a unique value of document, or a unique field is an
+    // object or array. Missing fields and JSON null do not collide.
+    std::optional<unique_conflict> conflicts_with(const xson::object& document) const;
+
+    // A unique primitive value is stored on more than one live row. Nulls are ignored.
+    std::optional<unique_conflict> duplicate_unique() const;
+
+    // A unique field on this document is an object or array.
+    std::optional<unique_conflict> non_primitive_unique(const xson::object& document) const;
 
     // Check if selector uses primary key (_id)
     // @param selector Query selector
@@ -387,11 +412,15 @@ public:
 
 private:
 
+    std::optional<primary_key_type> id_at(position_type position) const;
+
     xson::integer_type m_sequence = 0;
 
     primary_index_type m_primary_keys;
 
     secondary_index_map m_secondary_keys;
+
+    std::vector<std::string> m_unique_keys;
 };
 
 } // namespace yar::db

@@ -68,6 +68,13 @@ auto parse_import_row(string_view line, size_t line_no)
         parsed["document"s]};
 }
 
+struct index_config
+{
+    string collection;
+    vector<string> keys;
+    vector<string> unique_fields;
+};
+
 auto keys_from_db_document(const object& document, size_t line_no)
 {
     if(not document.has("collection"s) or not document.has("keys"s))
@@ -85,7 +92,23 @@ auto keys_from_db_document(const object& document, size_t line_no)
     if(keys.empty())
         throw runtime_error{"line "s + to_string(line_no) + ": _db keys must not be empty"s};
 
-    return pair{static_cast<string>(document["collection"s]), std::move(keys)};
+    auto unique_fields = vector<string>{};
+    if(document.has("unique"s))
+    {
+        if(not document["unique"s].is_array())
+            throw runtime_error{"line "s + to_string(line_no) + ": _db unique must be an array"s};
+        for(const auto& field : document["unique"s].get<object::array>())
+        {
+            if(not field.is_string())
+                throw runtime_error{"line "s + to_string(line_no) + ": _db unique fields must be strings"s};
+            unique_fields.push_back(static_cast<string>(field));
+        }
+    }
+
+    return index_config{
+        static_cast<string>(document["collection"s]),
+        std::move(keys),
+        std::move(unique_fields)};
 }
 
 struct temporary_database
@@ -222,11 +245,14 @@ try
 
         for(auto& [source_line, row] : db_rows)
         {
-            auto [collection_name, keys] = keys_from_db_document(row.document, source_line);
-            const auto indexed = engine.index(collection_name, std::move(keys));
+            auto config = keys_from_db_document(row.document, source_line);
+            const auto indexed = engine.index(
+                config.collection,
+                std::move(config.keys),
+                std::move(config.unique_fields));
             if(not indexed)
                 throw runtime_error{
-                    "index failed for collection "s + collection_name + ": "s + indexed.error().message};
+                    "index failed for collection "s + config.collection + ": "s + indexed.error().message};
         }
 
         const auto reindexed = engine.reindex();

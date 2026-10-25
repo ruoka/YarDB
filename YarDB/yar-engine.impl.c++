@@ -456,6 +456,25 @@ void supersede_prior_live_row(
     storage.seekg(resume, storage.beg);
 }
 
+yar::db::db_error unique_error(
+    yar::db::db_operation operation,
+    const yar::db::unique_conflict& clash,
+    bool duplicates)
+{
+    auto message = ""s;
+    if(not clash.primitive)
+        message = "Unique field "s + clash.field + " must be a primitive"s;
+    else if(duplicates)
+        message = "Unique field "s + clash.field + " already has duplicate values"s;
+    else
+        message = "Unique value for "s + clash.field + " already exists"s;
+
+    auto error = yar::db::db_error{yar::db::db_error_code::conflict, operation, std::move(message)};
+    if(clash.id.has_value())
+        error.conflict_id = static_cast<std::int64_t>(*clash.id);
+    return error;
+}
+
 } // namespace
 
 yar::db::engine::engine(std::string_view db) :
@@ -544,6 +563,16 @@ void yar::db::engine::setup_index_structure()
                 temp.push_back(k);
 
             m_index[collection_name].add(temp);
+            if(document.has("unique"s) and document["unique"s].is_array())
+            {
+                auto unique_names = std::vector<std::string>{};
+                for(const auto& field : document["unique"s].get<yar::db::object::array>())
+                {
+                    if(field.is_string())
+                        unique_names.push_back(static_cast<std::string>(field));
+                }
+                m_index[collection_name].add_unique(unique_names);
+            }
         }
     }
 }
@@ -591,7 +620,11 @@ yar::db::db_result<> yar::db::engine::reindex()
 
     auto rebuilt = decltype(m_index){};
     for(const auto& [collection, current] : m_index)
-        rebuilt[collection].add(current.keys());
+    {
+        auto& rebuilt_index = rebuilt[collection];
+        rebuilt_index.add(current.keys());
+        rebuilt_index.add_unique(current.unique_keys());
+    }
 
     m_storage.clear();
     m_storage.seekg(0, m_storage.beg);
@@ -636,7 +669,19 @@ std::vector<std::string> yar::db::engine::indexed_keys(std::string_view collecti
     return index->keys() | std::ranges::to<std::vector<std::string>>();
 }
 
-yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::vector<std::string> keys)
+std::vector<std::string> yar::db::engine::unique_keys(std::string_view collection) const
+{
+    auto lock = std::shared_lock{m_rwlock};
+    const auto* index = find_index(m_index, collection);
+    if(index == nullptr)
+        return {};
+    return index->unique_keys() | std::ranges::to<std::vector<std::string>>();
+}
+
+yar::db::db_result<> yar::db::engine::index(
+    std::string_view collection,
+    std::vector<std::string> keys,
+    std::vector<std::string> unique)
 {
     using xson::fson::operator >>;
 
@@ -651,6 +696,18 @@ yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::ve
     auto original = m_index;
     auto& current_index = m_index[std::string{collection}];
     current_index.add(keys);
+    for(const auto& field : unique)
+    {
+        if(not std::ranges::contains(current_index.keys(), field))
+        {
+            m_index = std::move(original);
+            return std::unexpected{db_error(
+                db_error_code::conflict,
+                db_operation::index,
+                "Unique field "s + field + " is not an index key"s)};
+        }
+    }
+    current_index.add_unique(unique);
 
     // Populate new secondaries from live primary rows before unlock. add()
     // creates empty maps; view() then treats the field as indexed and returns
@@ -677,11 +734,29 @@ yar::db::db_result<> yar::db::engine::index(std::string_view collection, std::ve
                 db_operation::index,
                 "Failed to read a live document while populating secondary indexes"s)};
         }
+        if(const auto clash = current_index.non_primitive_unique(document))
+        {
+            m_index = std::move(original);
+            return std::unexpected{unique_error(db_operation::index, *clash, false)};
+        }
         current_index.insert(document, position);
+    }
+
+    if(const auto clash = current_index.duplicate_unique())
+    {
+        m_index = std::move(original);
+        return std::unexpected{unique_error(db_operation::index, *clash, true)};
     }
 
     auto selector = yar::db::object{"collection"s, std::string{collection}};
     auto document = yar::db::object{selector, {"keys"s, current_index.keys()}};
+    if(not current_index.unique_keys().empty())
+    {
+        auto unique_values = yar::db::object{yar::db::object::array{}};
+        for(const auto& name : current_index.unique_keys())
+            unique_values += yar::db::object{name};
+        document["unique"s] = std::move(unique_values);
+    }
     auto documents = yar::db::object{};
     auto result = upsert_impl("_db"s, selector, document, documents);
     if(not result)
@@ -749,6 +824,9 @@ yar::db::db_result<> yar::db::engine::create_impl(
                 db_operation::create,
                 "Document with _id "s + std::to_string(id) + " already exists"s)};
     }
+
+    if(const auto clash = index.conflicts_with(document))
+        return std::unexpected{unique_error(db_operation::create, *clash, false)};
 
     auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
@@ -1081,6 +1159,18 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
 
     if(pending.empty())
         return 0;
+
+    {
+        auto checking = m_index;
+        auto& checking_index = checking[std::string{collection}];
+        for(auto& entry : pending)
+        {
+            checking_index.erase(entry.old_document);
+            if(const auto clash = checking_index.conflicts_with(entry.new_document))
+                return std::unexpected{unique_error(db_operation::update, *clash, false)};
+            checking_index.insert(entry.new_document, entry.position);
+        }
+    }
 
     auto file_size_error = std::error_code{};
     const auto original_size = std::filesystem::file_size(m_db, file_size_error);
@@ -1514,6 +1604,9 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             db_operation::replace,
             "Document with _id "s + std::to_string(new_id) + " already exists"s)};
 
+    if(const auto clash = staged_index.conflicts_with(document))
+        return std::unexpected{unique_error(db_operation::replace, *clash, false)};
+
     staged_index.update(document);
 
     auto metadata = *chain_metadata;
@@ -1830,6 +1923,13 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         return error;
     };
 
+    const auto fail_unique = [&](std::size_t index, const unique_conflict& clash)
+    {
+        auto error = unique_error(db_operation::batch, clash, false);
+        error.request_index = index;
+        return error;
+    };
+
     struct planned_append
     {
         std::string collection;
@@ -1933,7 +2033,11 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
             auto& collection_index = staged[request.collection];
-            collection_index.insert(document, static_cast<position_type>(-1));
+            // Distinct negative positions so a unique-value lookup can name the
+            // in-group owner. -1 stays "no file position" for If-Match.
+            const auto placeholder = static_cast<position_type>(
+                -static_cast<position_type>(appends.size()) - 2);
+            collection_index.insert(document, placeholder);
             const auto slot = appends.size();
             appends.push_back({request.collection, document, false, false, {}});
             live_appends[{request.collection, id}] = slot;
@@ -1975,6 +2079,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             }
 
             staged[request.collection].update(document);
+            if(const auto clash = staged[request.collection].conflicts_with(document))
+                return std::unexpected{fail_unique(index, *clash)};
             queue_append(std::move(document), batch_effect::created);
             continue;
         }
@@ -2022,6 +2128,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
                 auto document = request.body;
                 document["_id"s] = id;
                 staged[request.collection].update(document);
+                if(const auto clash = staged[request.collection].conflicts_with(document))
+                    return std::unexpected{fail_unique(index, *clash)};
                 queue_append(std::move(document), batch_effect::created);
                 continue;
             }
@@ -2055,6 +2163,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
 
             staged[request.collection].erase(current.document);
             staged[request.collection].update(document);
+            if(const auto clash = staged[request.collection].conflicts_with(document))
+                return std::unexpected{fail_unique(index, *clash)};
             const auto effect = request.method == batch_method::update
                 ? batch_effect::updated
                 : batch_effect::replaced;

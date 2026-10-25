@@ -36,6 +36,8 @@ struct db_error
     db_operation operation;
     std::string message;
     std::optional<std::size_t> request_index{};
+    // Set when a unique-value conflict names an existing document.
+    std::optional<std::int64_t> conflict_id{};
 };
 
 template<typename T = void>

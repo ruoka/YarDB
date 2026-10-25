@@ -107,8 +107,8 @@ Once running, `yardb` provides the following REST endpoints:
 - `GET /$metadata` - OData 4.01 JSON CSDL service metadata
 - `POST /$batch` - Atomic multi-document writes (OData JSON batch; atomicity groups only)
 - `GET /_reindex` - Rebuild all collection indexes
-- `PUT /_db/{collection}` - Configure secondary index keys for a collection
-- `PATCH /_db/{collection}` - Add secondary index keys incrementally
+- `PUT /_db/{collection}` - Configure secondary index keys for a collection (`unique` marks keys that reject duplicate values)
+- `PATCH /_db/{collection}` - Add secondary index keys, and unique constraints, incrementally
 
 ### HTTP Methods and Status Codes
 
@@ -174,6 +174,14 @@ Reopen keeps the existing torn-tail trim, then discards a group that has no comm
 Each successful create, replace, or update returns that document's ETag (the new record's file position), the same value a single write would return. `DELETE` is `204` with no ETag. `If-Match` / `If-None-Match` / `If-Unmodified-Since` are evaluated against the version visible at that step in the group, before any byte is appended. One failure fails the group and nothing in it is applied. `If-Match` of a specific ETag does not observe a successor written earlier in the same group (`dependsOn` is not supported); `If-Match: *` still means the document must already exist.
 
 The HTTP status of a well-formed batch is `200`. The body is `{"responses":[{"id","status","headers","body"}]}`. A failed group contributes the failing request's id, status (`404`, `409`, `412`, …), and error body. An I/O failure is `500` on that request; earlier groups in the POST stay committed.
+
+### Unique secondary indexes
+
+`PUT /_db/{collection}` and `PATCH /_db/{collection}` still take `keys`. `unique` is an optional array of those key names, for example `{"keys":["UID"],"unique":["UID"]}`. A name in `unique` that is not an index key (this request or an existing key) is `400`. Malformed `unique` — not an array of field names, or `_id` — is `400`. The constraint is stored on the `_db` document and restored on reopen, `reindex`, and `yarimport`. `PATCH` adds unique names the same way it adds keys. It does not remove them.
+
+A unique field may be missing or JSON `null`; those values do not collide. A present object or array is rejected. Two live documents cannot share the same primitive value (`1` and `"1"` stay distinct, as they do for ordinary secondary keys). `POST`, `PUT`, `PATCH`, and `$batch` check the constraint before appending. A duplicate answers `409 Conflict` with `Location: /{collection}/{id}` of a document that already holds the value, so the client can read it and decide replay versus conflict. The same document may keep or change its own value when the new value is free. `DELETE` releases the value.
+
+Declaring `unique` when live documents already share a value, or when a live value is an object or array, is `409` and leaves the previous index unchanged. Inside a `$batch` group the check sees earlier requests in that group. The failing response carries the same `409` and `Location`. If that owner existed only inside the failed group, the group writes nothing and a later `GET` of `Location` is `404`. If the owner was already stored, it remains.
 
 ### OData Query Parameters
 
@@ -384,8 +392,8 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 - `GET /` - List all collections
 - `GET /$metadata` - OData JSON CSDL metadata
 - `GET /_reindex` - Reindex all collections
-- `PUT /_db/collection` - Configure secondary indexes (JSON body: `{"keys":["field"]}`)
-- `PATCH /_db/collection` - Add secondary indexes incrementally
+- `PUT /_db/collection` - Configure secondary indexes (JSON body: `{"keys":["field"],"unique":["field"]}`)
+- `PATCH /_db/collection` - Add secondary indexes, and unique constraints, incrementally
 
 #### Optional Request Headers
 

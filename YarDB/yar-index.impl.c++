@@ -281,9 +281,109 @@ void yar::db::index::add(std::span<const std::string> keys)
     std::ranges::for_each(keys, [this](const std::string& key) { add(key); });
 }
 
+void yar::db::index::add_unique(std::span<const std::string> fields)
+{
+    for(const auto& field : fields)
+    {
+        if(not m_secondary_keys.contains(field))
+            continue;
+        if(std::ranges::contains(m_unique_keys, field))
+            continue;
+        m_unique_keys.push_back(field);
+    }
+}
+
 std::span<const std::string> yar::db::index::keys() const
 {
     return m_secondary_keys.keys();
+}
+
+std::span<const std::string> yar::db::index::unique_keys() const
+{
+    return m_unique_keys;
+}
+
+std::optional<yar::db::primary_key_type> yar::db::index::id_at(yar::db::position_type position) const
+{
+    for(const auto& [id, stored] : m_primary_keys)
+        if(stored == position)
+            return id;
+    return std::nullopt;
+}
+
+std::optional<yar::db::unique_conflict> yar::db::index::non_primitive_unique(
+    const yar::db::object& document) const
+{
+    for(const auto& field : m_unique_keys)
+    {
+        if(not document.has(field))
+            continue;
+
+        const auto& value = document[field];
+        if(value.is_null() or value.has_value())
+            continue;
+
+        auto clash = yar::db::unique_conflict{};
+        clash.field = field;
+        clash.primitive = false;
+        if(document.has("_id"s) and document["_id"s].is_integer())
+            clash.id = make_primary_key(document["_id"s]);
+        return clash;
+    }
+    return std::nullopt;
+}
+
+std::optional<yar::db::unique_conflict> yar::db::index::conflicts_with(
+    const yar::db::object& document) const
+{
+    if(const auto rejected = non_primitive_unique(document))
+        return rejected;
+
+    for(const auto& field : m_unique_keys)
+    {
+        if(not document.has(field))
+            continue;
+
+        const auto& value = document[field];
+        if(not value.has_value() or value.is_null())
+            continue;
+
+        const auto secondary = m_secondary_keys.find(field);
+        if(secondary == m_secondary_keys.end())
+            continue;
+
+        const auto found = secondary->second.find(make_secondary_key(value));
+        if(found == secondary->second.end() or found->second.empty())
+            continue;
+
+        auto clash = yar::db::unique_conflict{};
+        clash.field = field;
+        clash.id = id_at(found->second.front());
+        return clash;
+    }
+    return std::nullopt;
+}
+
+std::optional<yar::db::unique_conflict> yar::db::index::duplicate_unique() const
+{
+    for(const auto& field : m_unique_keys)
+    {
+        const auto secondary = m_secondary_keys.find(field);
+        if(secondary == m_secondary_keys.end())
+            continue;
+
+        for(const auto& [key, positions] : secondary->second)
+        {
+            if(std::holds_alternative<std::monostate>(key) or positions.size() < 2)
+                continue;
+
+            auto clash = yar::db::unique_conflict{};
+            clash.field = field;
+            clash.id = id_at(positions.front());
+            return clash;
+        }
+    }
+    return std::nullopt;
 }
 
 bool yar::db::index::primary_key(const yar::db::object& selector) const

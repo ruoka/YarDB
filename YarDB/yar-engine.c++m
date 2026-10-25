@@ -98,9 +98,15 @@ public:
 
 //  Indexing
 
-    db_result<> index(std::string_view collection, std::vector<std::string> keys);
+    // keys are secondary indexes. unique is additive and each name must already
+    // be, or be added as, a key. An empty unique leaves existing constraints in place.
+    db_result<> index(
+        std::string_view collection,
+        std::vector<std::string> keys,
+        std::vector<std::string> unique = {});
     db_result<> reindex();
     std::vector<std::string> indexed_keys(std::string_view collection) const;
+    std::vector<std::string> unique_keys(std::string_view collection) const;
 
 //  CRUD
 

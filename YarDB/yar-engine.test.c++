@@ -1647,6 +1647,174 @@ auto test_set()
         };
     };
 
+    test_case("unique secondary index rejects duplicates, [yardb]") = []
+    {
+        section("Create update replace and delete honor a unique key") = []
+        {
+            const auto test_file = "./engine_unique_crud_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "orders"s;
+            auto engine = yar::db::engine{test_file};
+            require_true(engine.index(collection, {"UID"s}, {"UID"s}).has_value());
+            require_true(std::ranges::contains(engine.unique_keys(collection), "UID"s));
+
+            auto first = object{{"UID"s, "aaa"s}};
+            require_true(engine.create(collection, first).has_value());
+            const auto first_id = static_cast<xson::integer_type>(first["_id"s]);
+
+            auto duplicate = object{{"UID"s, "aaa"s}};
+            const auto rejected = engine.create(collection, duplicate);
+            require_false(rejected.has_value());
+            require_eq(rejected.error().code, yar::db::db_error_code::conflict);
+            require_eq(rejected.error().message, "Unique value for UID already exists"s);
+            require_true(rejected.error().conflict_id.has_value());
+            require_eq(*rejected.error().conflict_id, first_id);
+
+            auto second = object{{"UID"s, "bbb"s}};
+            require_true(engine.create(collection, second).has_value());
+            const auto second_id = static_cast<xson::integer_type>(second["_id"s]);
+
+            auto note = object{{"note"s, "kept"s}};
+            require_true(engine.update(collection, object{{"_id"s, first_id}}, note).has_value());
+            auto kept = object{};
+            require_true(engine.read(collection, object{{"_id"s, first_id}}, kept));
+            require_eq(static_cast<string>(kept[0]["UID"s]), "aaa"s);
+
+            auto stolen = object{{"UID"s, "bbb"s}};
+            const auto updated = engine.update(collection, object{{"_id"s, first_id}}, stolen);
+            require_false(updated.has_value());
+            require_eq(*updated.error().conflict_id, second_id);
+            require_true(engine.read(collection, object{{"UID"s, "aaa"s}}, kept));
+
+            auto replacement = object{{"UID"s, "bbb"s}, {"note"s, "nope"s}};
+            const auto replaced = engine.replace(collection, object{{"_id"s, first_id}}, replacement);
+            require_false(replaced.has_value());
+            require_eq(*replaced.error().conflict_id, second_id);
+
+            auto moved = object{{"UID"s, "ccc"s}};
+            require_true(engine.update(collection, object{{"_id"s, first_id}}, moved).has_value());
+            auto reused = object{{"UID"s, "aaa"s}};
+            require_true(engine.create(collection, reused).has_value());
+
+            require_true(engine.destroy(collection, object{{"_id"s, second_id}}).has_value());
+            auto after_delete = object{{"UID"s, "bbb"s}};
+            require_true(engine.create(collection, after_delete).has_value());
+
+            auto missing_a = object{{"name"s, "a"s}};
+            auto missing_b = object{{"name"s, "b"s}};
+            require_true(engine.create(collection, missing_a).has_value());
+            require_true(engine.create(collection, missing_b).has_value());
+
+            auto as_number = object{{"UID"s, 1ll}};
+            auto as_text = object{{"UID"s, "1"s}};
+            require_true(engine.create(collection, as_number).has_value());
+            require_true(engine.create(collection, as_text).has_value());
+
+            auto nested = json::parse(R"({"UID":{"part":"x"}})");
+            const auto object_value = engine.create(collection, nested);
+            require_false(object_value.has_value());
+            require_eq(object_value.error().message, "Unique field UID must be a primitive"s);
+
+            constexpr auto other = "trades"s;
+            require_true(engine.index(other, {"UID"s}, {"UID"s}).has_value());
+            auto same = object{{"UID"s, "ccc"s}};
+            require_true(engine.create(other, same).has_value());
+        };
+
+        section("Reopen and reindex keep the constraint") = []
+        {
+            const auto test_file = "./engine_unique_reopen_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "reopenorders"s;
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index(collection, {"UID"s}, {"UID"s}).has_value());
+                require_true(engine.reindex().has_value());
+                auto doc = object{{"UID"s, "abc"s}};
+                require_true(engine.create(collection, doc).has_value());
+            }
+
+            auto reopened = yar::db::engine{test_file};
+            require_true(std::ranges::contains(reopened.unique_keys(collection), "UID"s));
+            auto duplicate = object{{"UID"s, "abc"s}};
+            const auto rejected = reopened.create(collection, duplicate);
+            require_false(rejected.has_value());
+            require_eq(*rejected.error().conflict_id, 1);
+        };
+
+        section("Declaring unique over duplicates changes nothing") = []
+        {
+            const auto test_file = "./engine_unique_declare_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "dupes"s;
+            auto engine = yar::db::engine{test_file};
+            auto first = object{{"UID"s, "same"s}};
+            auto second = object{{"UID"s, "same"s}};
+            require_true(engine.create(collection, first).has_value());
+            require_true(engine.create(collection, second).has_value());
+
+            const auto indexed = engine.index(collection, {"UID"s}, {"UID"s});
+            require_false(indexed.has_value());
+            require_eq(indexed.error().code, yar::db::db_error_code::conflict);
+            require_eq(indexed.error().message, "Unique field UID already has duplicate values"s);
+            require_eq(*indexed.error().conflict_id, static_cast<xson::integer_type>(first["_id"s]));
+            require_true(engine.indexed_keys(collection).empty());
+            require_true(engine.unique_keys(collection).empty());
+
+            auto still = object{};
+            require_true(engine.read(collection, object{{"UID"s, "same"s}}, still));
+            require_eq(still.size(), 2u);
+
+            const auto missing_key = engine.index(collection, {"name"s}, {"UID"s});
+            require_false(missing_key.has_value());
+            require_eq(missing_key.error().message, "Unique field UID is not an index key"s);
+        };
+
+        section("A group rolls back when a unique value collides") = []
+        {
+            const auto test_file = "./engine_unique_group_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "grouporders"s;
+            auto engine = yar::db::engine{test_file};
+            require_true(engine.index(collection, {"UID"s}, {"UID"s}).has_value());
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            for(const auto& uid : {"a"s, "b"s, "a"s})
+            {
+                auto create = yar::db::batch_request{};
+                create.method = yar::db::batch_method::create;
+                create.collection = collection;
+                create.body = object{{"UID"s, uid}};
+                requests.push_back(std::move(create));
+            }
+
+            const auto applied = engine.apply_group(requests);
+            require_false(applied.has_value());
+            require_eq(*applied.error().request_index, 2u);
+            require_eq(*applied.error().conflict_id, 1);
+            auto documents = object{};
+            require_false(engine.read(collection, object{}, documents));
+            require_eq(documents.size(), 0u);
+
+            auto existing = object{{"UID"s, "live"s}};
+            require_true(engine.create(collection, existing).has_value());
+            const auto existing_id = static_cast<xson::integer_type>(existing["_id"s]);
+
+            auto follow = std::vector<yar::db::batch_request>{};
+            auto again = yar::db::batch_request{};
+            again.method = yar::db::batch_method::create;
+            again.collection = collection;
+            again.body = object{{"UID"s, "live"s}};
+            follow.push_back(std::move(again));
+            const auto blocked = engine.apply_group(follow);
+            require_false(blocked.has_value());
+            require_eq(*blocked.error().request_index, 0u);
+            require_eq(*blocked.error().conflict_id, existing_id);
+            require_true(engine.read(collection, object{{"UID"s, "live"s}}, documents));
+            require_eq(documents.size(), 1u);
+        };
+    };
+
     return true;
 }
 

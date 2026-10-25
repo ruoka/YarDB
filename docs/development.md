@@ -321,11 +321,8 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 5. 🔑 Unique keys
 - **Priority**: HIGH
-- **Current State**: Document ids are numeric (`/[a-z][a-z0-9]*/[0-9]+`). A natural key such as `UID` is enforced only by check-then-insert under an in-process lock, so only one process per database is safe. Parallel requests have inserted duplicate documents when no unique key was enforced. "Create only if absent" cannot be expressed on that natural key.
-- **Planned Implementation**:
-  - A unique secondary index declared through `PUT /_db/{collection}`, for example `{"keys":["UID"],"unique":["UID"]}`
-  - A write that would duplicate a unique value answers `409 Conflict` and names the existing document in `Location`, so the client can read it and decide replay versus conflict
-  - **Alternative considered**: string document ids and `PUT /{collection}/{key}` with `If-None-Match: *`. The index is preferred because it needs no route or id-type change and works for `POST`
+- **Current State**: ✅ Shipped — `PUT`/`PATCH /_db/{collection}` accept `{"keys":["UID"],"unique":["UID"]}`. A duplicate primitive value is `409 Conflict` with `Location` of an existing document. Missing values and JSON `null` do not collide. See [programs.md](programs.md#unique-secondary-indexes) and [changelog.md](changelog.md).
+- **Alternative considered**: string document ids and `PUT /{collection}/{key}` with `If-None-Match: *`. The index was preferred because it needs no route or id-type change and works for `POST`
 - **Impact**: Idempotent creates are safe across multiple service instances.
 
 ### 📋 Future Enhancements (Post-MVP)

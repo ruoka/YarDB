@@ -30,7 +30,7 @@ Collections and admin:
 GET /                    List all collections
 GET /_reindex            Reindex all collections
 GET /$metadata           OData 4.01 JSON CSDL metadata
-PUT /_db/collection      Configure secondary indexes (JSON body: {"keys":["field"]})
+PUT /_db/collection      Configure secondary indexes (JSON body: {"keys":["field"],"unique":["field"]})
 PATCH /_db/collection    Add secondary indexes incrementally
 
 Optional request headers (before JSON body; one per line):

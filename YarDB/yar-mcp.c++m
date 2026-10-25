@@ -117,7 +117,7 @@ inline std::vector<::http::mcp::tool_spec> tool_specs()
         {.name = "reindex"s, .description = "GET /_reindex — rebuild indexes"s, .input_schema = empty_schema},
         {
             .name = "configure_indexes"s,
-            .description = "PUT/PATCH /_db/{collection}; keys is {\"keys\":[\"field\"]} or [\"field\"]"s,
+            .description = "PUT/PATCH /_db/{collection}; keys is {\"keys\":[\"field\"],\"unique\":[\"field\"]} or [\"field\"]"s,
             .input_schema = R"({"type":"object","properties":{"collection":{"type":"string"},"keys":{},"incremental":{"type":"boolean","default":false}},"required":["collection","keys"],"additionalProperties":false})"s,
         },
     };
@@ -290,11 +290,26 @@ inline ::http::mcp::tool_result call_tool(
             else
                 throw std::invalid_argument{"keys must be an array or {\"keys\":[...]}"};
 
-            // incremental flag is accepted for API parity; engine.index replaces keys.
+            auto unique = std::vector<std::string>{};
+            if(keys_value.is_object() and keys_value.has("unique"s))
+            {
+                if(not keys_value["unique"s].is_array())
+                    throw std::invalid_argument{"unique must be an array"};
+                for(const auto& field : keys_value["unique"s].get<xson::object::array>())
+                {
+                    if(not field.is_string())
+                        throw std::invalid_argument{"unique fields must be strings"};
+                    unique.push_back(static_cast<std::string>(field));
+                }
+            }
+
+            // incremental flag is accepted for API parity; engine.index adds keys.
             (void)args;
-            const auto indexed = engine.index(collection, std::move(keys));
+            const auto indexed = engine.index(collection, std::move(keys), std::move(unique));
             if(not indexed)
-                return json_text_result(xson::object{{"error"s, "index failed"s}}, true);
+                return json_text_result(
+                    xson::object{{"error"s, "index failed: "s + indexed.error().message}},
+                    true);
             return json_text_result(xson::object{
                 {"collection"s, collection},
                 {"keys"s, engine.indexed_keys(collection)},

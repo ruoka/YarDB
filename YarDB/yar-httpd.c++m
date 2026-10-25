@@ -48,7 +48,9 @@ inline auto safe_rate_limit_key_extractor(std::string_view, const ::http::header
     return "unknown"s;
 }
 
-inline auto database_error_response(const yar::db::db_error& error)
+inline auto database_error_response(
+    const yar::db::db_error& error,
+    std::string_view collection = {})
 {
     if(error.code == yar::db::db_error_code::precondition_failed)
     {
@@ -60,10 +62,20 @@ inline auto database_error_response(const yar::db::db_error& error)
 
     if(error.code == yar::db::db_error_code::conflict)
     {
+        auto headers = std::optional<::http::headers>{};
+        if(error.conflict_id.has_value() and not collection.empty())
+        {
+            auto location = ::http::headers{};
+            location.set(
+                "location"s,
+                "/"s + std::string{collection} + "/"s + std::to_string(*error.conflict_id));
+            headers = std::move(location);
+        }
         return ::http::make_error_response(
             status_conflict,
             "Conflict"sv,
-            error.message);
+            error.message,
+            std::move(headers));
     }
 
     if(error.code == yar::db::db_error_code::not_found)
@@ -78,6 +90,55 @@ inline auto database_error_response(const yar::db::db_error& error)
         status_internal_server_error,
         "Internal Server Error"sv,
         error.message);
+}
+
+// Absent unique is an empty list. A present unique must be an array of field names.
+inline std::expected<std::vector<std::string>, ::http::response_with_headers>
+optional_unique_fields(const xson::object& body)
+{
+    if(not body.has("unique"s))
+        return std::vector<std::string>{};
+
+    const auto& value = body["unique"s];
+    if(not value.is_array())
+    {
+        return std::unexpected{::http::make_error_response(
+            status_bad_request,
+            "Bad Request"sv,
+            "'unique' must be an array of field names"sv)};
+    }
+
+    auto names = std::vector<std::string>{};
+    for(const auto& field : value.get<xson::object::array>())
+    {
+        if(not field.is_string())
+        {
+            return std::unexpected{::http::make_error_response(
+                status_bad_request,
+                "Bad Request"sv,
+                "All unique fields must be strings"sv)};
+        }
+
+        auto name = static_cast<std::string>(field);
+        if(name.empty() or name.size() > yar::db::max_field_name_length)
+        {
+            return std::unexpected{::http::make_error_response(
+                status_bad_request,
+                "Bad Request"sv,
+                "Unique field name is invalid or too long (max "s
+                    + std::to_string(yar::db::max_field_name_length) + " chars)"s)};
+        }
+        if(name == yar::db::reserved_field_id)
+        {
+            return std::unexpected{::http::make_error_response(
+                status_bad_request,
+                "Bad Request"sv,
+                "Cannot use reserved field as a unique key: "s + name)};
+        }
+        if(not std::ranges::contains(names, name))
+            names.push_back(std::move(name));
+    }
+    return names;
 }
 
 enum class server_state
@@ -779,7 +840,7 @@ private:
             auto document = xson::json::parse(body);
             const auto created = m_engine.create(ctx.collection, document);
             if(not created)
-                return database_error_response(created.error());
+                return database_error_response(created.error(), ctx.collection);
             
             // Add Location header pointing to the newly created resource
             auto response_headers = ::http::headers{};
@@ -1085,6 +1146,15 @@ private:
                 failure_body["error"s] = error_name;
                 failure_body["message"s] = error.message;
                 failure["body"s] = std::move(failure_body);
+                if(error.conflict_id.has_value())
+                {
+                    auto failure_headers = xson::object{};
+                    failure_headers["location"s] = "/"s
+                        + source.request.collection
+                        + "/"s
+                        + std::to_string(*error.conflict_id);
+                    failure["headers"s] = std::move(failure_headers);
+                }
                 responses += std::move(failure);
             };
 
@@ -1585,15 +1655,31 @@ private:
                 
                 keys.push_back(key_str);
             }
+
+            auto unique_fields = optional_unique_fields(request_body);
+            if(not unique_fields)
+                return std::move(unique_fields.error());
             
             // Extract collection name from path (e.g., /_db/users -> users)
             const auto collection_name = validate_collection_name(uri.path[2]); // path[0] = "", path[1] = "_db", path[2] = collection_name
+
+            const auto known = m_engine.indexed_keys(collection_name);
+            for(const auto& name : *unique_fields)
+            {
+                if(not std::ranges::contains(keys, name) and not std::ranges::contains(known, name))
+                {
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "Unique field must also be an index key: "s + name);
+                }
+            }
             
             // Switch to target collection. index() populates new secondaries
             // under the same lock; reindex() still rebuilds/heals from storage.
-            const auto indexed = m_engine.index(collection_name, keys);
+            const auto indexed = m_engine.index(collection_name, keys, *unique_fields);
             if(not indexed)
-                return database_error_response(indexed.error());
+                return database_error_response(indexed.error(), collection_name);
             
             const auto reindexed = m_engine.reindex();
             if(not reindexed)
@@ -1743,9 +1829,23 @@ private:
                     existing_keys_set.insert(key_str); // Track for this request too
                 }
             }
+
+            auto unique_fields = optional_unique_fields(request_body);
+            if(not unique_fields)
+                return std::move(unique_fields.error());
+            for(const auto& name : *unique_fields)
+            {
+                if(not existing_keys_set.contains(name))
+                {
+                    return ::http::make_error_response(
+                        status_bad_request,
+                        "Bad Request"sv,
+                        "Unique field must also be an index key: "s + name);
+                }
+            }
             
-            // If no new keys to add, return existing document
-            if(new_keys.empty())
+            // If no new keys or unique constraints to add, return existing document
+            if(new_keys.empty() and unique_fields->empty())
             {
                 if(has_existing and not existing_docs.get<xson::object::array>().empty())
                 {
@@ -1775,9 +1875,9 @@ private:
             
             // index() populates new secondaries under the same lock; reindex()
             // still rebuilds/heals from storage.
-            const auto indexed = m_engine.index(collection_name, new_keys);
+            const auto indexed = m_engine.index(collection_name, new_keys, *unique_fields);
             if(not indexed)
-                return database_error_response(indexed.error());
+                return database_error_response(indexed.error(), collection_name);
             
             const auto reindexed = m_engine.reindex();
             if(not reindexed)
@@ -1850,7 +1950,7 @@ private:
             const auto outcome = m_engine.put(
                 collection, selector, document, preconditions, &revision);
             if(not outcome)
-                return database_error_response(outcome.error());
+                return database_error_response(outcome.error(), collection);
 
             if(revision.position.has_value())
             {
@@ -1920,7 +2020,7 @@ private:
             const auto updated = m_engine.update(
                 collection, selector, updates, documents, preconditions, &revision);
             if(not updated)
-                return database_error_response(updated.error());
+                return database_error_response(updated.error(), collection);
             if(*updated == 0)
             {
                 auto error = xson::object{

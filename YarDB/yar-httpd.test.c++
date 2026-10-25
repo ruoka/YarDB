@@ -4924,6 +4924,202 @@ auto test_set()
         };
     };
 
+    test_case("unique secondary index rejects duplicate values, [yardb]") = []
+    {
+        const auto test_file = "./httpd_unique_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        section("duplicate POST is 409 with Location of the existing document") = [setup]
+        {
+            auto [index_status, index_reason, index_headers, index_body] = make_request(
+                setup->port(), "PUT"s, "/_db/uniqitems"s, R"({"keys":["UID"],"unique":["UID"]})"s);
+            require_eq(index_status, "200"s);
+            (void)index_reason;
+            (void)index_headers;
+            auto config = json::parse(index_body);
+            require_eq(static_cast<string>(config["unique"s][0]), "UID"s);
+
+            auto [created_status, created_reason, created_headers, created_body] = make_request(
+                setup->port(), "POST"s, "/uniqitems"s, R"({"UID":"aaa","name":"ada"})"s);
+            require_eq(created_status, "201"s);
+            (void)created_reason;
+            require_eq(created_headers["location"s], "/uniqitems/1"s);
+            (void)created_body;
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/uniqitems"s, R"({"UID":"aaa","name":"other"})"s);
+            require_eq(status, "409"s);
+            require_eq(reason, "Conflict"s);
+            require_eq(headers["location"s], "/uniqitems/1"s);
+            auto error = json::parse(response_body);
+            require_true(error["message"s].get<string>().contains("UID"s));
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/uniqitems/1"s);
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            require_eq(static_cast<string>(json::parse(get_body)["name"s]), "ada"s);
+
+            auto [missing_status, missing_reason, missing_headers, missing_body] = make_request(
+                setup->port(), "GET"s, "/uniqitems/2"s);
+            require_eq(missing_status, "404"s);
+            (void)missing_reason;
+            (void)missing_headers;
+            (void)missing_body;
+
+            auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
+                setup->port(), "PATCH"s, "/uniqitems/1"s, R"({"name":"ada lovelace"})"s);
+            require_eq(patch_status, "200"s);
+            (void)patch_reason;
+            (void)patch_headers;
+            require_eq(static_cast<string>(json::parse(patch_body)[0]["UID"s]), "aaa"s);
+
+            auto [other_status, other_reason, other_headers, other_body] = make_request(
+                setup->port(), "POST"s, "/uniqitems"s, R"({"UID":"bbb"})"s);
+            require_eq(other_status, "201"s);
+            (void)other_reason;
+            (void)other_headers;
+            (void)other_body;
+
+            auto [delete_status, delete_reason, delete_headers, delete_body] = make_request(
+                setup->port(), "DELETE"s, "/uniqitems/1"s);
+            require_eq(delete_status, "204"s);
+            (void)delete_reason;
+            (void)delete_headers;
+            (void)delete_body;
+
+            auto [reuse_status, reuse_reason, reuse_headers, reuse_body] = make_request(
+                setup->port(), "POST"s, "/uniqitems"s, R"({"UID":"aaa"})"s);
+            require_eq(reuse_status, "201"s);
+            (void)reuse_reason;
+            (void)reuse_headers;
+            (void)reuse_body;
+        };
+
+        section("declaring unique over existing duplicates leaves them in place") = [setup]
+        {
+            auto [first_status, first_reason, first_headers, first_body] = make_request(
+                setup->port(), "POST"s, "/decldupes"s, R"({"UID":"same"})"s);
+            require_eq(first_status, "201"s);
+            (void)first_reason;
+            (void)first_headers;
+            (void)first_body;
+            auto [second_status, second_reason, second_headers, second_body] = make_request(
+                setup->port(), "POST"s, "/decldupes"s, R"({"UID":"same"})"s);
+            require_eq(second_status, "201"s);
+            (void)second_reason;
+            (void)second_headers;
+            (void)second_body;
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "PUT"s, "/_db/decldupes"s, R"({"keys":["UID"],"unique":["UID"]})"s);
+            require_eq(status, "409"s);
+            require_eq(reason, "Conflict"s);
+            require_eq(headers["location"s], "/decldupes/1"s);
+            (void)response_body;
+
+            auto [list_status, list_reason, list_headers, list_body] = make_request(
+                setup->port(), "GET"s, "/decldupes"s);
+            require_eq(list_status, "200"s);
+            (void)list_reason;
+            (void)list_headers;
+            require_eq(json::parse(list_body).get<object::array>().size(), 2u);
+
+            auto [third_status, third_reason, third_headers, third_body] = make_request(
+                setup->port(), "POST"s, "/decldupes"s, R"({"UID":"same"})"s);
+            require_eq(third_status, "201"s);
+            (void)third_reason;
+            (void)third_headers;
+            (void)third_body;
+        };
+
+        section("malformed unique is 400") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "PUT"s, "/_db/badunique"s, R"({"keys":["UID"],"unique":"UID"})"s);
+            require_eq(status, "400"s);
+            (void)reason;
+            (void)headers;
+            require_true(json::parse(response_body)["message"s].get<string>().contains("unique"s));
+
+            auto [id_status, id_reason, id_headers, id_body] = make_request(
+                setup->port(), "PUT"s, "/_db/badunique"s, R"({"keys":["UID"],"unique":["_id"]})"s);
+            require_eq(id_status, "400"s);
+            (void)id_reason;
+            (void)id_headers;
+            (void)id_body;
+
+            auto [key_status, key_reason, key_headers, key_body] = make_request(
+                setup->port(), "PUT"s, "/_db/badunique"s, R"({"keys":["name"],"unique":["UID"]})"s);
+            require_eq(key_status, "400"s);
+            (void)key_reason;
+            (void)key_headers;
+            require_true(json::parse(key_body)["message"s].get<string>().contains("index key"s));
+        };
+
+        section("PATCH /_db adds a unique constraint") = [setup]
+        {
+            auto [put_status, put_reason, put_headers, put_body] = make_request(
+                setup->port(), "PUT"s, "/_db/patchuniq"s, R"({"keys":["email"]})"s);
+            require_eq(put_status, "200"s);
+            (void)put_reason;
+            (void)put_headers;
+            (void)put_body;
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "PATCH"s, "/_db/patchuniq"s, R"({"keys":["email"],"unique":["email"]})"s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            require_eq(static_cast<string>(json::parse(response_body)["unique"s][0]), "email"s);
+
+            auto [created_status, created_reason, created_headers, created_body] = make_request(
+                setup->port(), "POST"s, "/patchuniq"s, R"({"email":"a@example.com"})"s);
+            require_eq(created_status, "201"s);
+            (void)created_reason;
+            (void)created_headers;
+            (void)created_body;
+            auto [dup_status, dup_reason, dup_headers, dup_body] = make_request(
+                setup->port(), "POST"s, "/patchuniq"s, R"({"email":"a@example.com"})"s);
+            require_eq(dup_status, "409"s);
+            require_eq(dup_headers["location"s], "/patchuniq/1"s);
+            (void)dup_reason;
+            (void)dup_body;
+        };
+
+        section("batch unique conflict names the earlier document and writes nothing") = [setup]
+        {
+            auto [index_status, index_reason, index_headers, index_body] = make_request(
+                setup->port(), "PUT"s, "/_db/batchuniq"s, R"({"keys":["UID"],"unique":["UID"]})"s);
+            require_eq(index_status, "200"s);
+            (void)index_reason;
+            (void)index_headers;
+            (void)index_body;
+
+            const auto payload =
+                R"({"requests":[{"id":"a","method":"POST","url":"batchuniq","body":{"UID":"a"},"atomicityGroup":"g"},{"id":"b","method":"POST","url":"batchuniq","body":{"UID":"b"},"atomicityGroup":"g"},{"id":"c","method":"POST","url":"batchuniq","body":{"UID":"a"},"atomicityGroup":"g"}]})"s;
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, payload);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto envelope = json::parse(response_body);
+            require_eq(envelope["responses"s].get<object::array>().size(), 1u);
+            const auto& failure = envelope["responses"s][0];
+            require_eq(static_cast<string>(failure["id"s]), "c"s);
+            require_eq(static_cast<xson::integer_type>(failure["status"s]), 409);
+            require_eq(static_cast<string>(failure["headers"s]["location"s]), "/batchuniq/1"s);
+
+            auto [list_status, list_reason, list_headers, list_body] = make_request(
+                setup->port(), "GET"s, "/batchuniq"s);
+            require_eq(list_status, "200"s);
+            (void)list_reason;
+            (void)list_headers;
+            require_eq(json::parse(list_body).get<object::array>().size(), 0u);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

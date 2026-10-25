@@ -6,6 +6,14 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ---
 
+## October 2026
+
+### Storage & tooling
+
+| Item | Summary |
+|------|---------|
+| **Atomic `$batch`** | `POST /$batch` runs OData 4.01 JSON atomicity groups. The engine appends `group_begin`, the new document versions, and a `group_commit` that lists tombstones; reopen discards a group with no commit record and finishes tombstones when the commit is durable. One failed request (including `If-Match`) applies nothing in that group. `dependsOn`, requests with no group, nested batches, and `/_*` URLs are `422`. The 1 MiB body limit and the data PAT apply to the whole batch. See [programs.md](programs.md#atomic-batch-post-batch) |
+
 ## July 2026
 
 ### Query

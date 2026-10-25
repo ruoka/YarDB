@@ -313,12 +313,10 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 4. ⚛️ Atomic multi-document writes (`$batch` atomicity groups)
 - **Priority**: HIGH
-- **Current State**: Each HTTP write stores one document. A client that must create and update several documents together keeps its own journal and replays it after a restart. A crash between two writes (an append to a feed, then a patch of a related document) can leave only the first write applied.
+- **Current State**: ✅ Shipped for atomicity groups — `POST /$batch`. The engine appends a `group_begin`, the new document versions, and a `group_commit`; reopen discards a group that has no commit record. `dependsOn` and requests outside a group are `422`. See [programs.md](programs.md#atomic-batch-post-batch) and [changelog.md](changelog.md).
 - **Planned Implementation**:
-  - `POST /$batch` in the OData 4.01 JSON batch format (`requests` with `id`, `method`, `url`, `headers`, `body`, `atomicityGroup`, optionally `dependsOn`)
-  - Every request in an atomicity group commits, or none does
-  - Per-request preconditions (`If-Match` / `If-None-Match`) are checked inside the group; one failure fails the group, and the response names the failed request and why
-  - The 1 MiB request body limit applies to the whole batch
+  - `dependsOn` between requests
+  - Requests that are not in an atomicity group, run independently
 - **Impact**: Clients stop keeping their own write journals. An append and a related update (event feed and outbox) become one write.
 
 #### 5. 🔑 Unique keys

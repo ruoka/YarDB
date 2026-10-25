@@ -13,6 +13,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$filter` | See below |
 | `$select` | Projection; `_id` always included |
 | `$count=true` | Returns a JSON number; works with `$filter` |
+| `$batch` | `POST /$batch` atomicity groups only (`dependsOn` and requests outside a group are `422`); see [programs.md](programs.md#atomic-batch-post-batch) |
 | `$expand` | v1: `{singular}_id` → plural collection `_id` |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
 | `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max` |
@@ -44,11 +45,8 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 
 | Feature | Example | Status |
 |---------|---------|--------|
-| `$batch` | `POST /$batch` | Planned |
 | Multi-key `$apply` groupby | `groupby((country,status),aggregate(...))` | Planned |
 | `$count` aggregate | `aggregate($count as Total)` | Planned |
-
-`$batch` target: `POST /$batch` in the OData 4.01 JSON batch format. The body is a `requests` array; each entry has `id`, `method`, `url`, `headers`, `body`, and `atomicityGroup`, and may set `dependsOn`. Every request in an atomicity group commits, or none does. Per-request preconditions (`If-Match` / `If-None-Match`) are checked inside the group; one failure fails the group, and the response shows which request failed and why. The 1 MiB request body limit applies to the whole batch.
 
 ### Later
 

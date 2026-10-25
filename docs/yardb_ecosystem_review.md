@@ -96,7 +96,7 @@ using middleware_factory = ::http::middleware_factory;
 - Build system (`tools/CB.sh`) automatically resolves all module dependencies
 - Reproducible builds: all submodule commits are pinned
 - Each dependency can work standalone or as part of YarDB
-- **Package SemVer:** YarDB [`v1.0.1`](https://github.com/ruoka/YarDB/releases/tag/v1.0.1); libraries publish modules-era tags (`tester` `v3.0.0`, `cryptic` `v2.0.0`, `net4cpp` `v3.3.0`, `json4cpp` `v3.1.0`); ecosystem pin rule and product-vs-dependency majors are in [`docs/versioning.md`](versioning.md).
+- **Package SemVer:** YarDB [`v1.1.0`](https://github.com/ruoka/YarDB/releases/tag/v1.1.0); libraries publish modules-era tags (`tester` `v3.1.0`, `cryptic` `v2.0.1`, `net4cpp` `v3.4.1`, `json4cpp` `v3.1.0`); ecosystem pin rule and product-vs-dependency majors are in [`docs/versioning.md`](versioning.md).
 - **HTTP API versioning** (URL/header scheme for REST clients) is a separate concern from package SemVer — still open in the archived REST evaluation, not closed by submodule tags.
 
 **Build Integration:**

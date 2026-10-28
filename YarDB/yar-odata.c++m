@@ -900,6 +900,15 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         return literal;
     };
 
+    // A quoted literal stays a string, so a calendar day can be ge/le. An unquoted
+    // literal is still a number: `age ge 25`.
+    const auto comparison_literal = [&](std::string_view op_name)
+    {
+        if(is_string)
+            return xson::object{*unescaped};
+        return require_numeric_literal(op_name);
+    };
+
     // Convert to selector format (supports nested paths: Customer/Country)
     if(op == "eq")
     {
@@ -916,13 +925,13 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
             set_nested_selector_leaf(selector, field, xson::object{{"$ne"s, parse_unquoted_literal(value)}});
     }
     else if(op == "gt")
-        set_nested_selector_leaf(selector, field, xson::object{{"$gt"s, require_numeric_literal("gt"sv)}});
+        set_nested_selector_leaf(selector, field, xson::object{{"$gt"s, comparison_literal("gt"sv)}});
     else if(op == "ge")
-        set_nested_selector_leaf(selector, field, xson::object{{"$gte"s, require_numeric_literal("ge"sv)}});
+        set_nested_selector_leaf(selector, field, xson::object{{"$gte"s, comparison_literal("ge"sv)}});
     else if(op == "lt")
-        set_nested_selector_leaf(selector, field, xson::object{{"$lt"s, require_numeric_literal("lt"sv)}});
+        set_nested_selector_leaf(selector, field, xson::object{{"$lt"s, comparison_literal("lt"sv)}});
     else if(op == "le")
-        set_nested_selector_leaf(selector, field, xson::object{{"$lte"s, require_numeric_literal("le"sv)}});
+        set_nested_selector_leaf(selector, field, xson::object{{"$lte"s, comparison_literal("le"sv)}});
     
     return std::make_pair(selector, string_filters);
 }

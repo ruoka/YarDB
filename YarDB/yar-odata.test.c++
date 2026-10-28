@@ -300,6 +300,26 @@ auto register_odata_tests()
                 };
             };
 
+            when("Filter is 'field ge quoted day'") = []
+            {
+                then("Returns a string $gte") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("tradeDate ge '2026-10-26'"sv);
+                    require_true(filters.empty());
+                    require_eq(selector["tradeDate"s]["$gte"s].get<string>(), "2026-10-26"s);
+                };
+            };
+
+            when("Filter is 'field le quoted day'") = []
+            {
+                then("Returns a string $lte") = []
+                {
+                    const auto [selector, filters] = parse_and_filter("tradeDate le '2026-10-26'"sv);
+                    require_true(filters.empty());
+                    require_eq(selector["tradeDate"s]["$lte"s].get<string>(), "2026-10-26"s);
+                };
+            };
+
             when("Filter is 'startswith(field, value)'") = []
             {
                 then("Returns string filter") = []

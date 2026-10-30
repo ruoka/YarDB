@@ -1656,6 +1656,39 @@ private:
             "application/json"sv,
             ::http::middleware::wrap(get_collection_handler, get_collection_middlewares));
 
+        // GET /_db/{collection_name} — the stored index, without rebuilding it.
+        auto get_index_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
+        {
+            const auto uri = ::http::uri{request};
+            const auto collection_name = validate_collection_name(uri.path[2]);
+            auto selector = xson::object{"collection"s, collection_name};
+            auto db_documents = xson::object{};
+            const auto found = m_engine.read("_db"s, selector, db_documents);
+            if(not found or db_documents.get<xson::object::array>().empty())
+            {
+                return ::http::make_error_response(
+                    status_not_found,
+                    "Not Found"sv,
+                    "No index configuration for "s + collection_name);
+            }
+
+            auto result_document = db_documents.get<xson::object::array>()[0];
+            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+            if(metadata_level != yar::http::odata::metadata_level::none)
+            {
+                const auto doc_id = static_cast<xson::integer_type>(result_document["_id"s]);
+                result_document = yar::http::odata::add_metadata(result_document, metadata_level, "_db"s, doc_id);
+            }
+
+            auto response_headers = ::http::headers{};
+            response_headers.set("location"s, "/_db/"s + collection_name);
+            return ::http::make_response(::http::status_ok, xson::json::stringify(result_document), std::make_optional(response_headers));
+        };
+
+        auto get_index_middlewares = build_middleware_chain(method_get, "GET_INDEX"sv, "GET_INDEX_ERROR"sv, true);
+        m_server.get("/_db/[a-z][a-z0-9]*"s).response(
+            "application/json"sv,
+            ::http::middleware::wrap(get_index_handler, get_index_middlewares));
 
         // PUT /_db/{collection_name} - Add/update secondary indexes for a collection - Refactored to use middleware pattern
         auto put_index_handler = [this](::http::request_view request, ::http::body_view body, ::http::headers& headers)
@@ -1921,9 +1954,16 @@ private:
                         "Unique field must also be an index key: "s + name);
                 }
             }
+
+            // Names already stored are not new work. index() and reindex() read the file.
+            auto pending_unique = std::vector<std::string>{};
+            const auto already_unique = m_engine.unique_keys(collection_name);
+            for(const auto& name : *unique_fields)
+                if(not std::ranges::contains(already_unique, name))
+                    pending_unique.push_back(name);
             
             // If no new keys or unique constraints to add, return existing document
-            if(new_keys.empty() and unique_fields->empty())
+            if(new_keys.empty() and pending_unique.empty())
             {
                 if(has_existing and not existing_docs.get<xson::object::array>().empty())
                 {
@@ -1953,7 +1993,7 @@ private:
             
             // index() populates new secondaries under the same lock; reindex()
             // still rebuilds/heals from storage.
-            const auto indexed = m_engine.index(collection_name, new_keys, *unique_fields);
+            const auto indexed = m_engine.index(collection_name, new_keys, pending_unique);
             if(not indexed)
                 return database_error_response(indexed.error(), collection_name);
             

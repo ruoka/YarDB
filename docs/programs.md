@@ -107,6 +107,7 @@ Once running, `yardb` provides the following REST endpoints:
 - `GET /$metadata` - OData 4.01 JSON CSDL service metadata
 - `POST /$batch` - Atomic multi-document writes (OData JSON batch; atomicity groups only)
 - `GET /_reindex` - Rebuild all collection indexes
+- `GET /_db/{collection}` - Read the stored secondary index (`404` when the collection has none). Does not rebuild it
 - `PUT /_db/{collection}` - Configure secondary index keys for a collection (`unique` marks keys that reject duplicate values)
 - `PATCH /_db/{collection}` - Add secondary index keys, and unique constraints, incrementally
 
@@ -175,9 +176,19 @@ Each successful create, replace, or update returns that document's ETag (the new
 
 The HTTP status of a well-formed batch is `200`. The body is `{"responses":[{"id","status","headers","body"}]}`. A failed group contributes the failing request's id, status (`404`, `409`, `412`, …), and error body. An I/O failure is `500` on that request; earlier groups in the POST stay committed.
 
+### Secondary indexes
+
+A secondary index is part of the database file. `PUT` or `PATCH /_db/{collection}` stores it as a document in the `_db` collection: the field names in `keys`, and any of those names that must be unique in `unique`. When `yardb` opens the file it builds the in-memory indexes from the stored documents and those `_db` rows. That happens once, in the database process.
+
+A client connects with HTTP. Opening a connection does not create, drop, or rebuild an index. `GET /_db/{collection}` returns the stored configuration (`404` when that collection has none) and does not walk the file.
+
+The first declaration of a collection is a `PUT` or `PATCH`. Adding a key or a unique name that is not stored yet is another `PATCH`. Those requests scan the live documents, because the new key has to be filled and a new unique constraint has to be checked. `GET /_reindex` is the explicit rebuild of every index.
+
+Sending the same `keys` and `unique` again returns the configuration already stored and leaves the file alone. A client that wants `UID` unique reads `GET /_db/{collection}` and sends `PATCH` only when `UID` is missing from `keys` or from `unique`. Repeating that declaration on every connect used to call `reindex()` and reread the whole file once per collection. That is what made a service slow to listen.
+
 ### Unique secondary indexes
 
-`PUT /_db/{collection}` and `PATCH /_db/{collection}` still take `keys`. `unique` is an optional array of those key names, for example `{"keys":["UID"],"unique":["UID"]}`. A name in `unique` that is not an index key (this request or an existing key) is `400`. Malformed `unique` — not an array of field names, or `_id` — is `400`. The constraint is stored on the `_db` document and restored on reopen, `reindex`, and `yarimport`. `PATCH` adds unique names the same way it adds keys. It does not remove them.
+`PUT /_db/{collection}` and `PATCH /_db/{collection}` take `keys`. `unique` is an optional array of those key names, for example `{"keys":["UID"],"unique":["UID"]}`. A name in `unique` that is not an index key (this request or an existing key) is `400`. Malformed `unique` — not an array of field names, or `_id` — is `400`. The constraint is stored on the `_db` document and restored on reopen, `reindex`, and `yarimport`. `PATCH` adds unique names the same way it adds keys. It does not remove them.
 
 A unique field may be missing or JSON `null`; those values do not collide. A present object or array is rejected. Two live documents cannot share the same primitive value (`1` and `"1"` stay distinct, as they do for ordinary secondary keys). `POST`, `PUT`, `PATCH`, and `$batch` check the constraint before appending. A duplicate answers `409 Conflict` with `Location: /{collection}/{id}` of a document that already holds the value, so the client can read it and decide replay versus conflict. The same document may keep or change its own value when the new value is free. `DELETE` releases the value.
 
@@ -392,6 +403,7 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 - `GET /` - List all collections
 - `GET /$metadata` - OData JSON CSDL metadata
 - `GET /_reindex` - Reindex all collections
+- `GET /_db/collection` - Read the stored secondary index (`404` when the collection has none)
 - `PUT /_db/collection` - Configure secondary indexes (JSON body: `{"keys":["field"],"unique":["field"]}`)
 - `PATCH /_db/collection` - Add secondary indexes, and unique constraints, incrementally
 

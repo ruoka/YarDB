@@ -2345,6 +2345,58 @@ auto test_set()
             require_true(keys_set.contains("age"s));
         };
 
+        section("GET /_db/{collection_name} reads the stored index") = [setup]
+        {
+            auto [missing_status, missing_reason, missing_headers, missing_body] = make_request(
+                setup->port(), "GET"s, "/_db/getindextest"s
+            );
+            require_eq(missing_status, "404"s);
+            (void)missing_reason;
+            (void)missing_headers;
+            (void)missing_body;
+
+            auto [put_status, put_reason, put_headers, put_body] = make_request(
+                setup->port(), "PUT"s, "/_db/getindextest"s, R"({"keys":["UID"],"unique":["UID"]})"s
+            );
+            require_eq(put_status, "200"s);
+            (void)put_reason;
+            (void)put_headers;
+            (void)put_body;
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/_db/getindextest"s
+            );
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            require_eq(get_headers["location"s], "/_db/getindextest"s);
+            auto config = json::parse(get_body);
+            require_eq(static_cast<string>(config["collection"s]), "getindextest"s);
+            require_eq(static_cast<string>(config["keys"s][0]), "UID"s);
+            require_eq(static_cast<string>(config["unique"s][0]), "UID"s);
+        };
+
+        section("PATCH /_db/{collection_name} with the unique names already stored returns the existing config") = [setup]
+        {
+            auto [put_status, put_reason, put_headers, put_body] = make_request(
+                setup->port(), "PUT"s, "/_db/sameunique"s, R"({"keys":["UID"],"unique":["UID"]})"s
+            );
+            require_eq(put_status, "200"s);
+            (void)put_reason;
+            (void)put_headers;
+            auto original = json::parse(put_body);
+
+            auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
+                setup->port(), "PATCH"s, "/_db/sameunique"s, R"({"keys":["UID"],"unique":["UID"]})"s
+            );
+            require_eq(patch_status, "200"s);
+            (void)patch_reason;
+            (void)patch_headers;
+            auto config = json::parse(patch_body);
+            require_eq(static_cast<string>(config["collection"s]), static_cast<string>(original["collection"s]));
+            require_eq(static_cast<string>(config["unique"s][0]), "UID"s);
+            require_eq(config["keys"s].get<object::array>().size(), original["keys"s].get<object::array>().size());
+        };
+
         section("PATCH /_db/{collection_name} with all duplicate keys returns existing config") = [setup]
         {
             // Add indexes with PUT

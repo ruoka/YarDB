@@ -1972,6 +1972,111 @@ auto test_set()
             require_eq(totals["pending"s], 7);
         };
 
+        section("GET groupby((type)) returns each distinct string once") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/tasks"s,
+                    R"({"type":"sss.match"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/tasks"s,
+                    R"({"type":"sss.match"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/tasks"s,
+                    R"({"type":"sss.settle"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/tasks?$apply=groupby((type))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            const auto& arr = rows.get<object::array>();
+            require_eq(arr.size(), 2u);
+
+            auto types = std::map<string, integer_type>{};
+            for(const auto& row : arr)
+            {
+                require_eq(row.size(), 1u);
+                require_true(row.has("type"s));
+                require_false(row.has("_id"s));
+                types[row["type"s].get<string>()] += 1;
+            }
+            require_eq(types["sss.match"s], 1);
+            require_eq(types["sss.settle"s], 1);
+        };
+
+        section("GET groupby((type)) returns null for a missing field") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/taskgaps"s,
+                    R"({"name":"bare"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/taskgaps"s,
+                    R"({"name":"also-bare"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/taskgaps?$apply=groupby((type))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            const auto& arr = rows.get<object::array>();
+            require_eq(arr.size(), 1u);
+            require_eq(arr[0].size(), 1u);
+            require_true(arr[0].has("type"s));
+            require_true(arr[0]["type"s].is_null());
+        };
+
+        section("GET groupby((type)) on an empty collection returns an empty array") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/taskempty?$apply=groupby((type))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 0u);
+        };
+
+        section("GET groupby((field)) with $top is rejected") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/tasks?$apply=groupby((type))&$top=1"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().contains("$top"s));
+        };
+
         section("GET $apply with $top is rejected") = [setup]
         {
             auto [status, reason, headers, body] = make_request(

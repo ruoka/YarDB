@@ -2790,12 +2790,15 @@ export inline void omit_rows_through_keyset(
 // --- $apply / $compute -------------------------------------------------------
 // $apply pipeline (slash-separated outside quotes/parens):
 //   filter(<$filter-expr>)/groupby((field),aggregate(...))
+//   filter(<$filter-expr>)/groupby((field))
 //   compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)
 //   groupby((status),aggregate(amount with sum as Total))
+//   groupby((type))   // distinct values; each row contains only that field
 //   aggregate(amount with sum as Total)
 // Standalone query option: $compute=Price mul Qty as LineTotal[, ...]
 // Methods: sum, average, min, max. Arithmetic: add, sub, mul, div.
-// Top-level fields only.
+// Top-level fields only. The aggregate after groupby is optional
+// (OData Data Aggregation 4.0 §3.2.3 / §7.1): one row per distinct value.
 
 export enum class aggregate_method
 {
@@ -3074,21 +3077,27 @@ inline apply_query parse_apply_aggregate_segment(std::string_view apply_expr)
     constexpr auto gb = "groupby("sv;
     if(not text.starts_with(gb))
         throw std::invalid_argument{
-            "$apply supports filter(...)/compute(...)/groupby((field),aggregate(...)) or aggregate(...)"};
+            "$apply supports filter(...)/compute(...)/groupby((field)), "
+            "groupby((field),aggregate(...)), or aggregate(...)"};
 
-    auto inner = extract_apply_function_args(text, gb);
+    auto inner = utils::trim(extract_apply_function_args(text, gb));
     if(not inner.starts_with('('))
-        throw std::invalid_argument{"$apply groupby requires ((field),aggregate(...))"};
+        throw std::invalid_argument{
+            "$apply groupby requires ((field)) or ((field),aggregate(...))"};
     const auto field_end = inner.find(')');
     if(field_end == std::string_view::npos or field_end < 2)
         throw std::invalid_argument{"$apply groupby missing closing ')' for group field"};
     auto field = utils::trim(inner.substr(1, field_end - 1));
     validate_apply_identifier(field, "$apply groupby field");
+    query.group_fields.push_back(std::string{field});
+    // groupbyTrafo's second parameter is optional. Omitted, the transform is
+    // the distinct values of the grouping property (Aggregation 4.0 §7.1).
     auto after_keys = utils::trim(inner.substr(field_end + 1));
+    if(after_keys.empty())
+        return query;
     if(not after_keys.starts_with(','))
         throw std::invalid_argument{"$apply groupby requires aggregate after group keys"};
     auto agg_text = utils::trim(after_keys.substr(1));
-    query.group_fields.push_back(std::string{field});
     query.aggregates.push_back(parse_aggregate_clause(agg_text));
     return query;
 }
@@ -3424,7 +3433,9 @@ inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method 
 // Aggregate an array of documents according to a parsed $apply query.
 export inline xson::object apply_aggregation(const xson::object& documents, const apply_query& query)
 {
-    if(query.aggregates.empty())
+    // groupby((field)) groups and emits no aggregate alias. A whole-set
+    // transform still needs an aggregate.
+    if(query.aggregates.empty() and query.group_fields.empty())
         throw std::invalid_argument{"$apply requires at least one aggregate"};
     if(not documents.is_array())
         return xson::object{xson::object::array{}};

@@ -105,7 +105,7 @@ Once running, `yardb` provides the following REST endpoints:
 - `HEAD /{collection}` - Get collection headers (same as GET but no body)
 - `HEAD /{collection}/{id}` - Get document headers (same as GET but no body)
 - `GET /$metadata` - OData 4.01 JSON CSDL service metadata
-- `POST /$batch` - Atomic multi-document writes (OData JSON batch; atomicity groups only)
+- `POST /$batch` - OData JSON batch: atomicity groups, independent writes, and GET reads outside a group
 - `GET /_reindex` - Rebuild all collection indexes
 - `GET /_db/{collection}` - Read the stored secondary index (`404` when the collection has none). Does not rebuild it
 - `PUT /_db/{collection}` - Configure secondary index keys for a collection (`unique` marks keys that reject duplicate values)
@@ -160,10 +160,18 @@ YarDB supports conditional HTTP requests for efficient caching and optimistic lo
 
 ### Atomic batch (`POST /$batch`)
 
-`POST /$batch` accepts an OData 4.01 JSON batch body. Requests that share an `atomicityGroup` commit together. A request with no group commits on its own, so one failure does not roll back its neighbors. `dependsOn` is an array of earlier request ids; each must already appear in `requests`, and the dependent request runs only after those requests succeed (`424` otherwise, and nothing in its atomicity group is written). A nested `/$batch` or a `/_*` URL is rejected with `422` before any write. The 1 MiB body limit applies to the whole batch (`413`). Authentication is the data PAT used for a single document write; when an admin PAT is configured it is not accepted here.
+`POST /$batch` accepts an OData 4.01 JSON batch body. The method of each request is `delete`, `get`, `patch`, `post`, or `put`, compared case-insensitively. Requests that share an `atomicityGroup` commit together. A request with no group commits on its own, so one failure does not roll back its neighbors. `dependsOn` is an array of earlier request ids; each must already appear in `requests`, and the dependent request runs only after those requests succeed (`424` otherwise, and nothing in its atomicity group is written). A nested `/$batch`, a fragment, or a `/_*` URL is rejected with `422` before anything is applied. The 1 MiB body limit applies to the whole batch (`413`). Authentication is the data PAT used for a single document write; when an admin PAT is configured it is not accepted here.
 
 ```json
 {"requests":[{"id":"1","method":"POST","url":"orders","headers":{"If-Match":"\"12\""},"body":{"name":"Ada"},"atomicityGroup":"g1"}]}
+```
+
+`GET` is an individual request and stays outside any `atomicityGroup`. A `GET` that carries `atomicityGroup`, or any body other than JSON `null`, is `422` and the batch applies nothing. The URL is a document (`/transactions/42`) or a collection read with the same query options as a standalone `GET` (`$filter`, `$select`, `$top`, `$skip`, `$orderby`, `$count`, `$expand`, `$compute`, `$apply`). The read uses that standalone path, so the individual status, headers, and body match it. The outer HTTP status stays `200`. `dependsOn` applies to a `GET` as well: when a dependency failed, the `GET` is not executed and its response is `424`. A `GET` does not take the group's write lock and does not append a log record. A later write group in the same batch still sees the store as those reads left it.
+
+Several known rows are several short reads, not one `UID in (...)` list. The 8192-character `$filter` guard is unchanged. One batch can read two documents by equality:
+
+```json
+{"requests":[{"id":"tx1","method":"get","url":"/transactions?$filter=UID eq 'TX-1'"},{"id":"tx2","method":"get","url":"/transactions?$filter=UID eq 'TX-2'"}]}
 ```
 
 Requests in one group must be adjacent in `requests`. Each group is committed on its own, in order. A later group that fails does not roll back an earlier group in the same POST. Inside a group the allowed methods are `POST`, `PUT`, `PATCH`, and `DELETE` on collection documents (`/collection` or `/collection/id`).

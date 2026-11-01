@@ -5065,6 +5065,389 @@ auto test_set()
         };
     };
 
+    test_case("POST /$batch accepts GET requests, [yardb]") = []
+    {
+        const auto test_file = "./httpd_batch_get_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto batch_body = [](object requests)
+        {
+            auto envelope = object{};
+            envelope["requests"s] = std::move(requests);
+            return json::stringify(envelope);
+        };
+
+        section("two GETs match standalone document reads") = [setup, batch_body]
+        {
+            auto [first_status, first_reason, first_headers, first_body] = make_request(
+                setup->port(), "POST"s, "/getdocs"s, R"({"name":"ada","UID":"TX-1"})"s);
+            require_eq(first_status, "201"s);
+            (void)first_reason;
+            (void)first_body;
+            auto [second_status, second_reason, second_headers, second_body] = make_request(
+                setup->port(), "POST"s, "/getdocs"s, R"({"name":"grace","UID":"TX-2"})"s);
+            require_eq(second_status, "201"s);
+            (void)second_reason;
+            (void)second_body;
+
+            auto [left_status, left_reason, left_headers, left_body] = make_request(
+                setup->port(), "GET"s, "/getdocs/1"s);
+            require_eq(left_status, "200"s);
+            (void)left_reason;
+            auto [right_status, right_reason, right_headers, right_body] = make_request(
+                setup->port(), "GET"s, "/getdocs/2"s);
+            require_eq(right_status, "200"s);
+            (void)right_reason;
+
+            auto requests = object{object::array{}};
+            auto left = object{};
+            left["id"s] = "left"s;
+            left["method"s] = "Get"s;
+            left["url"s] = "/getdocs/1"s;
+            requests += std::move(left);
+            auto right = object{};
+            right["id"s] = "right"s;
+            right["method"s] = "GET"s;
+            right["url"s] = "getdocs/2"s;
+            requests += std::move(right);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 2u);
+            require_eq(static_cast<string>(responses[0]["id"s]), "left"s);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 200);
+            require_eq(static_cast<string>(responses[0]["body"s]["name"s]), "ada"s);
+            require_eq(static_cast<string>(responses[0]["headers"s]["etag"s]), left_headers["etag"s]);
+            require_eq(static_cast<string>(responses[0]["headers"s]["last-modified"s]), left_headers["last-modified"s]);
+            require_eq(static_cast<string>(responses[1]["id"s]), "right"s);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 200);
+            require_eq(static_cast<string>(responses[1]["body"s]["UID"s]), "TX-2"s);
+            require_eq(static_cast<string>(responses[1]["headers"s]["etag"s]), right_headers["etag"s]);
+
+            auto [again_status, again_reason, again_headers, again_body] = make_request(
+                setup->port(), "GET"s, "/getdocs/1"s);
+            require_eq(again_status, "200"s);
+            (void)again_reason;
+            (void)again_body;
+            require_eq(again_headers["etag"s], left_headers["etag"s]);
+        };
+
+        section("two GETs read documents by UID filter") = [setup, batch_body]
+        {
+            const auto tx1 = "/uidreads?$filter=UID%20eq%20'TX-1'&$select=UID"s;
+            const auto tx2 = "/uidreads?$filter=UID%20eq%20'TX-2'&$select=UID"s;
+            auto [first_status, first_reason, first_headers, first_body] = make_request(
+                setup->port(), "POST"s, "/uidreads"s, R"({"UID":"TX-1","name":"ada"})"s);
+            require_eq(first_status, "201"s);
+            (void)first_reason;
+            (void)first_headers;
+            (void)first_body;
+            auto [second_status, second_reason, second_headers, second_body] = make_request(
+                setup->port(), "POST"s, "/uidreads"s, R"({"UID":"TX-2","name":"grace"})"s);
+            require_eq(second_status, "201"s);
+            (void)second_reason;
+            (void)second_headers;
+            (void)second_body;
+
+            auto [left_status, left_reason, left_headers, left_body] = make_request(
+                setup->port(), "GET"s, tx1);
+            require_eq(left_status, "200"s);
+            (void)left_reason;
+            (void)left_headers;
+            auto [right_status, right_reason, right_headers, right_body] = make_request(
+                setup->port(), "GET"s, tx2);
+            require_eq(right_status, "200"s);
+            (void)right_reason;
+            (void)right_headers;
+
+            auto requests = object{object::array{}};
+            auto left = object{};
+            left["id"s] = "tx1"s;
+            left["method"s] = "get"s;
+            left["url"s] = tx1;
+            requests += std::move(left);
+            auto right = object{};
+            right["id"s] = "tx2"s;
+            right["method"s] = "get"s;
+            right["url"s] = tx2;
+            requests += std::move(right);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 2u);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 200);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 200);
+            const auto& left_rows = responses[0]["body"s].get<object::array>();
+            const auto& right_rows = responses[1]["body"s].get<object::array>();
+            require_eq(left_rows.size(), 1u);
+            require_eq(right_rows.size(), 1u);
+            require_eq(static_cast<string>(left_rows[0]["UID"s]), "TX-1"s);
+            require_eq(static_cast<string>(right_rows[0]["UID"s]), "TX-2"s);
+            require_false(left_rows[0].has("name"s));
+            require_eq(json::stringify(responses[0]["body"s]), json::stringify(json::parse(left_body)));
+            require_eq(json::stringify(responses[1]["body"s]), json::stringify(json::parse(right_body)));
+        };
+
+        section("a GET with a body applies nothing") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"write","method":"POST","url":"getbody","body":{"name":"ada"}},{"id":"read","method":"get","url":"getbody","body":{"name":"nope"}}]})"s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            (void)response_body;
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/getbody"s);
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            require_eq(json::parse(get_body).get<object::array>().size(), 0u);
+        };
+
+        section("a GET inside an atomicity group applies nothing") = [setup]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"write","method":"POST","url":"getgroup","body":{"name":"ada"},"atomicityGroup":"g1"},{"id":"read","method":"GET","url":"/getgroup","atomicityGroup":"g1"}]})"s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            (void)response_body;
+
+            auto [nested_status, nested_reason, nested_headers, nested_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"read","method":"get","url":"/$batch"}]})"s);
+            require_eq(nested_status, "422"s);
+            (void)nested_reason;
+            (void)nested_headers;
+            (void)nested_body;
+            auto [admin_status, admin_reason, admin_headers, admin_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"read","method":"get","url":"/_db/getgroup"}]})"s);
+            require_eq(admin_status, "422"s);
+            (void)admin_reason;
+            (void)admin_headers;
+            (void)admin_body;
+            auto [fragment_status, fragment_reason, fragment_headers, fragment_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s,
+                R"({"requests":[{"id":"read","method":"get","url":"/getgroup#part"}]})"s);
+            require_eq(fragment_status, "422"s);
+            (void)fragment_reason;
+            (void)fragment_headers;
+            (void)fragment_body;
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/getgroup"s);
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            require_eq(json::parse(get_body).get<object::array>().size(), 0u);
+        };
+
+        section("a GET that depends on a failed request is not executed") = [setup, batch_body]
+        {
+            auto [created_status, created_reason, created_headers, created_body] = make_request(
+                setup->port(), "POST"s, "/getdepend"s, R"({"name":"ada"})"s);
+            require_eq(created_status, "201"s);
+            (void)created_reason;
+            (void)created_headers;
+            (void)created_body;
+
+            auto requests = object{object::array{}};
+            auto missing = object{};
+            missing["id"s] = "miss"s;
+            missing["method"s] = "PATCH"s;
+            missing["url"s] = "getdepend/99"s;
+            missing["body"s] = object{{"name"s, "nope"s}};
+            requests += std::move(missing);
+            auto read = object{};
+            read["id"s] = "read"s;
+            read["method"s] = "get"s;
+            read["url"s] = "/getdepend/1"s;
+            read["dependsOn"s] = object{object::array{object{"miss"s}}};
+            requests += std::move(read);
+            auto absent = object{};
+            absent["id"s] = "absent"s;
+            absent["method"s] = "get"s;
+            absent["url"s] = "/getdepend/99"s;
+            requests += std::move(absent);
+            auto blocked = object{};
+            blocked["id"s] = "blocked"s;
+            blocked["method"s] = "POST"s;
+            blocked["url"s] = "getdepend"s;
+            blocked["body"s] = object{{"name"s, "grace"s}};
+            blocked["dependsOn"s] = object{object::array{object{"absent"s}}};
+            requests += std::move(blocked);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 4u);
+            require_eq(static_cast<string>(responses[0]["id"s]), "miss"s);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 404);
+            require_eq(static_cast<string>(responses[1]["id"s]), "read"s);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 424);
+            require_eq(static_cast<xson::integer_type>(responses[2]["status"s]), 404);
+            require_eq(static_cast<string>(responses[3]["id"s]), "blocked"s);
+            require_eq(static_cast<xson::integer_type>(responses[3]["status"s]), 424);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/getdepend"s);
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "ada"s);
+        };
+
+        section("a later write group still rolls back as one") = [setup, batch_body]
+        {
+            auto [created_status, created_reason, created_headers, created_body] = make_request(
+                setup->port(), "POST"s, "/getroll"s, R"({"name":"ada"})"s);
+            require_eq(created_status, "201"s);
+            (void)created_reason;
+            (void)created_headers;
+            (void)created_body;
+            auto [before_status, before_reason, before_headers, before_body] = make_request(
+                setup->port(), "GET"s, "/getroll/1"s);
+            require_eq(before_status, "200"s);
+            (void)before_reason;
+            (void)before_body;
+            const auto etag = before_headers["etag"s];
+
+            auto requests = object{object::array{}};
+            auto read = object{};
+            read["id"s] = "read"s;
+            read["method"s] = "get"s;
+            read["url"s] = "/getroll/1"s;
+            requests += std::move(read);
+            auto created = object{};
+            created["id"s] = "new"s;
+            created["method"s] = "POST"s;
+            created["url"s] = "getroll"s;
+            created["atomicityGroup"s] = "g1"s;
+            created["body"s] = object{{"name"s, "bob"s}};
+            requests += std::move(created);
+            auto patched = object{};
+            patched["id"s] = "patch"s;
+            patched["method"s] = "PATCH"s;
+            patched["url"s] = "getroll/1"s;
+            patched["atomicityGroup"s] = "g1"s;
+            patched["body"s] = object{{"name"s, "nope"s}};
+            auto match = object{};
+            match["If-Match"s] = "\"999999\""s;
+            patched["headers"s] = std::move(match);
+            requests += std::move(patched);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 2u);
+            require_eq(static_cast<string>(responses[0]["id"s]), "read"s);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 200);
+            require_eq(static_cast<string>(responses[0]["body"s]["name"s]), "ada"s);
+            require_eq(static_cast<string>(responses[0]["headers"s]["etag"s]), etag);
+            require_eq(static_cast<string>(responses[1]["id"s]), "patch"s);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 412);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/getroll"s);
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_headers;
+            auto documents = json::parse(get_body);
+            require_eq(documents.get<object::array>().size(), 1u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "ada"s);
+        };
+
+        section("a later write group still commits as one") = [setup, batch_body]
+        {
+            auto [created_status, created_reason, created_headers, created_body] = make_request(
+                setup->port(), "POST"s, "/getcommit"s, R"({"name":"ada"})"s);
+            require_eq(created_status, "201"s);
+            (void)created_reason;
+            (void)created_headers;
+            (void)created_body;
+            auto [before_status, before_reason, before_headers, before_body] = make_request(
+                setup->port(), "GET"s, "/getcommit/1"s);
+            require_eq(before_status, "200"s);
+            (void)before_reason;
+            (void)before_body;
+            const auto etag = before_headers["etag"s];
+
+            auto requests = object{object::array{}};
+            auto read = object{};
+            read["id"s] = "read"s;
+            read["method"s] = "get"s;
+            read["url"s] = "/getcommit?$filter=name%20eq%20'ada'"s;
+            requests += std::move(read);
+            auto first = object{};
+            first["id"s] = "1"s;
+            first["method"s] = "POST"s;
+            first["url"s] = "getcommit"s;
+            first["atomicityGroup"s] = "g1"s;
+            first["body"s] = object{{"name"s, "grace"s}};
+            requests += std::move(first);
+            auto second = object{};
+            second["id"s] = "2"s;
+            second["method"s] = "POST"s;
+            second["url"s] = "getcommit"s;
+            second["atomicityGroup"s] = "g1"s;
+            second["body"s] = object{{"name"s, "lin"s}};
+            requests += std::move(second);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/$batch"s, batch_body(std::move(requests)));
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto envelope = json::parse(response_body);
+            const auto& responses = envelope["responses"s].get<object::array>();
+            require_eq(responses.size(), 3u);
+            require_eq(static_cast<xson::integer_type>(responses[0]["status"s]), 200);
+            require_eq(responses[0]["body"s].get<object::array>().size(), 1u);
+            require_eq(static_cast<string>(responses[0]["body"s][0]["name"s]), "ada"s);
+            require_eq(static_cast<xson::integer_type>(responses[1]["status"s]), 201);
+            require_eq(static_cast<xson::integer_type>(responses[2]["status"s]), 201);
+
+            auto [get_status, get_reason, get_headers, get_body] = make_request(
+                setup->port(), "GET"s, "/getcommit/1"s);
+            require_eq(get_status, "200"s);
+            (void)get_reason;
+            (void)get_body;
+            require_eq(get_headers["etag"s], etag);
+            auto [list_status, list_reason, list_headers, list_body] = make_request(
+                setup->port(), "GET"s, "/getcommit"s);
+            require_eq(list_status, "200"s);
+            (void)list_reason;
+            (void)list_headers;
+            require_eq(json::parse(list_body).get<object::array>().size(), 3u);
+        };
+    };
+
     test_case("POST /$batch requires the data PAT, [yardb]") = []
     {
         const auto test_file = "./httpd_batch_auth_test.db";

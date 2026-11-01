@@ -6,6 +6,14 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ---
 
+## November 2026
+
+### HTTP
+
+| Item | Summary |
+|------|---------|
+| **`$batch` GET** | `POST /$batch` accepts `get`, compared case-insensitively, as an individual request outside an `atomicityGroup`. A body or an `atomicityGroup` on that GET is `422` and nothing is applied. The URL is a document or a collection read with the same query options as a standalone GET, including `$filter`. The individual status, headers, and body match that GET; the batch stays `200`. `dependsOn` is `424` and the GET is not executed when a dependency failed. A GET does not take the write lock or append a log record. The 8192-character `$filter` guard is unchanged. See [programs.md](programs.md#atomic-batch-post-batch) |
+
 ## October 2026
 
 ### Storage & tooling

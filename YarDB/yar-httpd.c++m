@@ -965,8 +965,10 @@ private:
             ::http::middleware::wrap(metadata_handler, metadata_middlewares));
 
         // POST /$batch — OData JSON batch. Requests that share an atomicityGroup
-        // commit together. A request with no group commits on its own. dependsOn
-        // names earlier requests that must have succeeded first.
+        // commit together. A request with no group commits on its own. GET is an
+        // individual read outside any group and uses the same handlers as a
+        // standalone GET. dependsOn names earlier requests that must have
+        // succeeded first.
         auto batch_handler = [this](::http::request_view, ::http::body_view body, ::http::headers&)
         {
             const auto unprocessable = [](std::string_view message)
@@ -995,6 +997,10 @@ private:
                 std::string group;
                 yar::db::batch_request request;
                 std::vector<std::string> depends_on;
+                bool is_get = false;
+                bool get_document = false;
+                std::string get_target;
+                ::http::headers get_headers;
             };
 
             auto parsed = std::vector<parsed_request>{};
@@ -1061,17 +1067,109 @@ private:
                 else
                     previous_group.clear();
 
+                for(auto& character : method)
+                {
+                    if(character >= 'A' and character <= 'Z')
+                        character = static_cast<char>(character - 'A' + 'a');
+                }
+
+                // OData JSON Format 19.1: method is case-insensitive. GET has no
+                // body and is not part of an atomicity group (Example 47).
+                if(method == "get"s)
+                {
+                    if(not group.empty())
+                        return unprocessable("GET must not belong to an atomicityGroup"sv);
+                    // JSON null is the same as omitting body. Any other body is
+                    // malformed, and the batch applies nothing.
+                    if(entry.has("body"s) and not entry["body"s].is_null())
+                        return unprocessable("GET must not have a body"sv);
+                    if(url.find('#') != std::string::npos)
+                        return unprocessable("Batch urls must not contain a fragment"sv);
+
+                    auto path = url;
+                    if(path.starts_with('/'))
+                        path.erase(0, 1);
+                    auto query = std::string{};
+                    if(const auto query_at = path.find('?'); query_at != std::string::npos)
+                    {
+                        query = path.substr(query_at);
+                        path.erase(query_at);
+                    }
+                    // '$' in the path is a nested $batch or other system resource.
+                    // '$' in the query is a query option ($filter, $select, …).
+                    if(path.empty() or path.starts_with('_') or path.find('$') != std::string::npos)
+                        return unprocessable("Batch urls must be collection documents, not admin or nested batch routes"sv);
+
+                    auto segments = std::vector<std::string>{};
+                    auto segment = std::string{};
+                    for(const auto character : path)
+                    {
+                        if(character == '/')
+                        {
+                            if(segment.empty())
+                                return unprocessable("Batch url is not a collection document"sv);
+                            segments.push_back(std::move(segment));
+                            segment.clear();
+                        }
+                        else
+                            segment.push_back(character);
+                    }
+                    if(segment.empty())
+                        return unprocessable("Batch url is not a collection document"sv);
+                    segments.push_back(std::move(segment));
+
+                    auto document = false;
+                    if(segments.size() == 2)
+                    {
+                        const auto& id_text = segments[1];
+                        if(not std::ranges::all_of(id_text, [](char character)
+                            {
+                                return character >= '0' and character <= '9';
+                            }))
+                            return unprocessable("Document id must be an integer"sv);
+                        document = true;
+                    }
+                    else if(segments.size() != 1)
+                        return unprocessable("GET url must be a collection or a collection/id"sv);
+
+                    validate_collection_name(segments[0]);
+
+                    auto get_headers = ::http::headers{};
+                    if(entry.has("headers"s))
+                    {
+                        if(not entry["headers"s].is_object())
+                            return unprocessable("Batch request headers must be an object"sv);
+                        for(const auto& [name, value] : entry["headers"s].get<xson::object::map>())
+                        {
+                            if(not value.is_string())
+                                return unprocessable("Batch request header values must be strings"sv);
+                            get_headers.set(name, static_cast<std::string>(value));
+                        }
+                    }
+
+                    parsed.push_back({
+                        std::move(id),
+                        std::move(group),
+                        {},
+                        std::move(depends_on),
+                        true,
+                        document,
+                        "/"s + path + query,
+                        std::move(get_headers)});
+                    continue;
+                }
+
                 auto engine_request = yar::db::batch_request{};
-                if(method == "POST"s)
+                if(method == "post"s)
                     engine_request.method = yar::db::batch_method::create;
-                else if(method == "PUT"s)
+                else if(method == "put"s)
                     engine_request.method = yar::db::batch_method::replace;
-                else if(method == "PATCH"s)
+                else if(method == "patch"s)
                     engine_request.method = yar::db::batch_method::update;
-                else if(method == "DELETE"s)
+                else if(method == "delete"s)
                     engine_request.method = yar::db::batch_method::destroy;
                 else
-                    return unprocessable("Batch requests support POST, PUT, PATCH, and DELETE"sv);
+                    return unprocessable("Batch requests support DELETE, GET, PATCH, POST, and PUT"sv);
 
                 if(url.starts_with('/'))
                     url.erase(0, 1);
@@ -1148,7 +1246,11 @@ private:
                     std::move(id),
                     std::move(group),
                     std::move(engine_request),
-                    std::move(depends_on)});
+                    std::move(depends_on),
+                    false,
+                    false,
+                    std::string{},
+                    ::http::headers{}});
             }
 
             auto responses = xson::object{xson::object::array{}};
@@ -1217,8 +1319,86 @@ private:
                 return false;
             };
 
+            const auto http_status_code = [](std::string_view status)
+            {
+                return utils::stoll(status.substr(0, status.find(' ')));
+            };
+
+            // Same status, headers, and body as the standalone GET handlers.
+            // Exceptions match error_handling_middleware so one bad read is an
+            // individual status, not a failed batch. A GET does not call
+            // apply_group, so it takes no write lock and appends no log record.
+            const auto push_get = [&](parsed_request& source)
+            {
+                auto headers = source.get_headers;
+                auto result = ::http::make_response(
+                    status_internal_server_error, ""s, std::optional<::http::headers>{});
+                try
+                {
+                    if(source.get_document)
+                        result = m_get_document_handler(source.get_target, {}, headers);
+                    else
+                        result = m_get_collection_handler(source.get_target, {}, headers);
+                }
+                catch(const std::invalid_argument& error)
+                {
+                    result = ::http::make_error_response(
+                        status_bad_request, "Bad Request"sv, error.what());
+                }
+                catch(const std::out_of_range& error)
+                {
+                    result = ::http::make_error_response(
+                        status_bad_request, "Bad Request"sv, error.what());
+                }
+                catch(const std::runtime_error& error)
+                {
+                    result = ::http::make_error_response(
+                        status_bad_request, "Bad Request"sv, error.what());
+                }
+                catch(const std::exception&)
+                {
+                    result = ::http::make_error_response(
+                        status_internal_server_error,
+                        "Internal Server Error"sv,
+                        "An unexpected error occurred"sv);
+                }
+
+                auto [status, content, response_headers] = std::move(result);
+                const auto code = http_status_code(status);
+                auto response = xson::object{};
+                response["id"s] = source.id;
+                response["status"s] = xson::integer_type{code};
+                if(response_headers.has_value())
+                {
+                    auto copied = xson::object{};
+                    auto header_count = 0;
+                    for(const auto& [name, value] : *response_headers)
+                    {
+                        copied[name] = value;
+                        ++header_count;
+                    }
+                    if(header_count > 0)
+                        response["headers"s] = std::move(copied);
+                }
+                if(not content.empty())
+                    response["body"s] = xson::json::parse(content);
+                responses += std::move(response);
+                if(code >= 200 and code < 300)
+                    succeeded.push_back(source.id);
+            };
+
             for(std::size_t offset = 0; offset < parsed.size();)
             {
+                if(parsed[offset].is_get)
+                {
+                    if(dependency_blocked(parsed[offset]))
+                        push_dependency_failure(parsed[offset]);
+                    else
+                        push_get(parsed[offset]);
+                    ++offset;
+                    continue;
+                }
+
                 auto end = offset + 1;
                 if(not parsed[offset].group.empty())
                 {
@@ -1302,9 +1482,6 @@ private:
         };
 
         auto batch_middlewares = build_middleware_chain(method_post, "POST_BATCH"sv, "POST_BATCH_ERROR"sv, true);
-        m_server.post("/\\$batch"s).response(
-            "application/json"sv,
-            ::http::middleware::wrap(batch_handler, batch_middlewares));
 
         // Read _id - Refactored to use middleware pattern and helper functions
         // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
@@ -1377,6 +1554,7 @@ private:
             
             return ::http::make_response(::http::status_ok, xson::json::stringify(document), std::make_optional(response_headers));
         };
+        m_get_document_handler = get_document_handler;
 
         auto get_document_middlewares = build_middleware_chain(method_get, "GET_DOCUMENT"sv, "GET_DOCUMENT_ERROR"sv, true);
         m_server.get(collection_route_with_id).response(
@@ -1650,6 +1828,11 @@ private:
             
             return ::http::make_response(::http::status_ok, xson::json::stringify(document), std::optional<::http::headers>{});
         };
+        m_get_collection_handler = get_collection_handler;
+
+        m_server.post("/\\$batch"s).response(
+            "application/json"sv,
+            ::http::middleware::wrap(batch_handler, batch_middlewares));
 
         auto get_collection_middlewares = build_middleware_chain(method_get, "GET_COLLECTION"sv, "GET_COLLECTION_ERROR"sv, false);
         m_server.get(collection_route_with_query).response(
@@ -2327,6 +2510,13 @@ private:
             return;
         m_bound_port_promise.set_exception(std::move(error));
     }
+
+    // Same callbacks registered on GET /collection and GET /collection/id.
+    // $batch invokes these so a read inside a batch matches a standalone GET.
+    // Assigned from setup_routes before listen, and again on rebuild_routes
+    // while the previous callbacks are still valid.
+    ::http::callback m_get_document_handler;
+    ::http::callback m_get_collection_handler;
 
     std::string m_file;
     std::string m_bind_host;

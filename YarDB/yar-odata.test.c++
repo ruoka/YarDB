@@ -2147,6 +2147,150 @@ auto register_odata_tests()
         };
     };
 
+    scenario("parse_orderby accepts several fields, [yardb]") = []
+    {
+        given("A comma-separated $orderby value") = []
+        {
+            when("Parsing settlement keys and a mixed direction") = []
+            {
+                then("Each field keeps its own direction") = []
+                {
+                    const auto settlement = parse_orderby(
+                        "settlementDate,tradeDate,creationDateTime,UID"sv);
+                    require_eq(settlement.size(), 4u);
+                    check_eq(settlement[0].field, "settlementDate"s);
+                    check_eq(settlement[3].field, "UID"s);
+                    require_false(settlement[0].descending);
+                    require_false(settlement[3].descending);
+
+                    const auto mixed = parse_orderby("country, age desc"sv);
+                    require_eq(mixed.size(), 2u);
+                    check_eq(mixed[0].field, "country"s);
+                    require_false(mixed[0].descending);
+                    check_eq(mixed[1].field, "age"s);
+                    require_true(mixed[1].descending);
+
+                    const auto flipped = parse_orderby("age desc,country"sv);
+                    require_eq(flipped.size(), 2u);
+                    require_true(flipped[0].descending);
+                    require_false(flipped[1].descending);
+                };
+            };
+
+            when("The value is empty, has a trailing comma, or a ninth field") = []
+            {
+                then("Parsing is rejected") = []
+                {
+                    require_throws_as<std::invalid_argument>([] {
+                        std::ignore = parse_orderby(""sv);
+                    });
+                    require_throws_as<std::invalid_argument>([] {
+                        std::ignore = parse_orderby("age desc,"sv);
+                    });
+                    require_throws_as<std::invalid_argument>([] {
+                        std::ignore = parse_orderby("a,b,c,d,e,f,g,h,i"sv);
+                    });
+                    require_throws_as<std::invalid_argument>([] {
+                        std::ignore = parse_orderby("country/name"sv);
+                    });
+                    require_throws_as<std::invalid_argument>([] {
+                        std::ignore = parse_orderby("age sideways"sv);
+                    });
+                };
+            };
+
+            when("Documents tie on the first key") = []
+            {
+                then("The next field, then _id, decides the order") = []
+                {
+                    auto documents = xson::object{xson::object::array{
+                        xson::object{{"_id"s, 3ll}, {"country"s, "fi"s}, {"age"s, 40ll}},
+                        xson::object{{"_id"s, 1ll}, {"country"s, "fi"s}, {"age"s, 20ll}},
+                        xson::object{{"_id"s, 2ll}, {"country"s, "fi"s}, {"age"s, 20ll}},
+                        xson::object{{"_id"s, 4ll}, {"country"s, "se"s}, {"age"s, 10ll}}
+                    }};
+
+                    const auto keys = parse_orderby("country,age desc"sv);
+                    yar::db::apply_orderby(documents, keys);
+                    const auto& rows = documents.get<xson::object::array>();
+                    require_eq(rows.size(), 4u);
+                    check_eq(static_cast<xson::integer_type>(rows[0]["_id"s]), 3);
+                    check_eq(static_cast<xson::integer_type>(rows[1]["_id"s]), 1);
+                    check_eq(static_cast<xson::integer_type>(rows[2]["_id"s]), 2);
+                    check_eq(static_cast<xson::integer_type>(rows[3]["_id"s]), 4);
+                };
+            };
+
+            when("Every named field is equal") = []
+            {
+                then("The tie breaks on _id ascending") = []
+                {
+                    auto documents = xson::object{xson::object::array{
+                        xson::object{{"_id"s, 3ll}, {"UID"s, "A"s}},
+                        xson::object{{"_id"s, 1ll}, {"UID"s, "A"s}},
+                        xson::object{{"_id"s, 2ll}, {"UID"s, "A"s}}
+                    }};
+                    yar::db::apply_orderby(documents, parse_orderby("UID"sv));
+                    const auto& rows = documents.get<xson::object::array>();
+                    check_eq(static_cast<xson::integer_type>(rows[0]["_id"s]), 1);
+                    check_eq(static_cast<xson::integer_type>(rows[1]["_id"s]), 2);
+                    check_eq(static_cast<xson::integer_type>(rows[2]["_id"s]), 3);
+                };
+            };
+
+            when("A value is missing or null") = []
+            {
+                then("It sorts after a present value in both directions") = []
+                {
+                    auto documents = xson::object{xson::object::array{
+                        xson::object{{"_id"s, 1ll}, {"value"s, 1ll}},
+                        xson::object{{"_id"s, 2ll}},
+                        xson::object{{"_id"s, 3ll}},
+                        xson::object{{"_id"s, 4ll}, {"value"s, 0ll}}
+                    }};
+                    documents[2]["value"s] = nullptr;
+
+                    yar::db::apply_orderby(documents, parse_orderby("value"sv));
+                    const auto& asc = documents.get<xson::object::array>();
+                    check_eq(static_cast<xson::integer_type>(asc[0]["_id"s]), 4);
+                    check_eq(static_cast<xson::integer_type>(asc[1]["_id"s]), 1);
+                    check_eq(static_cast<xson::integer_type>(asc[2]["_id"s]), 2);
+                    check_eq(static_cast<xson::integer_type>(asc[3]["_id"s]), 3);
+
+                    yar::db::apply_orderby(documents, parse_orderby("value desc"sv));
+                    const auto& desc = documents.get<xson::object::array>();
+                    check_eq(static_cast<xson::integer_type>(desc[0]["_id"s]), 1);
+                    check_eq(static_cast<xson::integer_type>(desc[1]["_id"s]), 4);
+                    check_eq(static_cast<xson::integer_type>(desc[2]["_id"s]), 2);
+                    check_eq(static_cast<xson::integer_type>(desc[3]["_id"s]), 3);
+                };
+            };
+
+            when("Four settlement keys are all ascending") = []
+            {
+                then("Later keys break ties in listed order") = []
+                {
+                    auto documents = xson::object{xson::object::array{
+                        xson::object{{"_id"s, 1ll}, {"settlementDate"s, "2024-01-02"s}, {"tradeDate"s, "2024-01-01"s}, {"creationDateTime"s, "T1"s}, {"UID"s, "B"s}},
+                        xson::object{{"_id"s, 2ll}, {"settlementDate"s, "2024-01-01"s}, {"tradeDate"s, "2024-01-02"s}, {"creationDateTime"s, "T1"s}, {"UID"s, "A"s}},
+                        xson::object{{"_id"s, 3ll}, {"settlementDate"s, "2024-01-01"s}, {"tradeDate"s, "2024-01-01"s}, {"creationDateTime"s, "T2"s}, {"UID"s, "A"s}},
+                        xson::object{{"_id"s, 4ll}, {"settlementDate"s, "2024-01-01"s}, {"tradeDate"s, "2024-01-01"s}, {"creationDateTime"s, "T1"s}, {"UID"s, "B"s}},
+                        xson::object{{"_id"s, 5ll}, {"settlementDate"s, "2024-01-01"s}, {"tradeDate"s, "2024-01-01"s}, {"creationDateTime"s, "T1"s}, {"UID"s, "A"s}}
+                    }};
+                    yar::db::apply_orderby(
+                        documents,
+                        parse_orderby("settlementDate,tradeDate,creationDateTime,UID"sv));
+                    const auto& rows = documents.get<xson::object::array>();
+                    check_eq(static_cast<xson::integer_type>(rows[0]["_id"s]), 5);
+                    check_eq(static_cast<xson::integer_type>(rows[1]["_id"s]), 4);
+                    check_eq(static_cast<xson::integer_type>(rows[2]["_id"s]), 3);
+                    check_eq(static_cast<xson::integer_type>(rows[3]["_id"s]), 2);
+                    check_eq(static_cast<xson::integer_type>(rows[4]["_id"s]), 1);
+                };
+            };
+        };
+    };
+
     scenario("parse_orderby and apply_orderby sort by field name, [yardb]") = []
     {
         given("Orderby expressions and an out-of-id document array") = []
@@ -2156,16 +2300,19 @@ auto register_odata_tests()
                 then("Field name and descending flag are extracted") = []
                 {
                     const auto desc = parse_orderby("value desc"sv);
-                    check_eq(desc.field_name, "value"s);
-                    require_true(desc.descending);
+                    require_eq(desc.size(), 1u);
+                    check_eq(desc[0].field, "value"s);
+                    require_true(desc[0].descending);
 
                     const auto asc = parse_orderby("value asc"sv);
-                    check_eq(asc.field_name, "value"s);
-                    require_false(asc.descending);
+                    require_eq(asc.size(), 1u);
+                    check_eq(asc[0].field, "value"s);
+                    require_false(asc[0].descending);
 
                     const auto bare = parse_orderby("age"sv);
-                    check_eq(bare.field_name, "age"s);
-                    require_false(bare.descending);
+                    require_eq(bare.size(), 1u);
+                    check_eq(bare[0].field, "age"s);
+                    require_false(bare[0].descending);
                 };
             };
 
@@ -2223,6 +2370,41 @@ auto register_odata_tests()
                     require_eq(items.size(), 2u);
                     check_eq(static_cast<xson::integer_type>(items[0]["value"s]), 30);
                     check_eq(static_cast<xson::integer_type>(items[1]["value"s]), 20);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("OR merge applies every orderby key before skip and top") = []
+            {
+                const auto test_file = "./odata_orderby_multi_or_test.db"s;
+
+                then("The page is taken from the fully sorted merge") = [test_file]
+                {
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+
+                    auto engine = yar::db::engine{test_file};
+                    auto first = xson::object{{"status"s, "a"s}, {"country"s, "fi"s}, {"age"s, 20ll}};
+                    auto second = xson::object{{"status"s, "b"s}, {"country"s, "fi"s}, {"age"s, 40ll}};
+                    auto third = xson::object{{"status"s, "a"s}, {"country"s, "se"s}, {"age"s, 5ll}};
+                    auto fourth = xson::object{{"status"s, "b"s}, {"country"s, "fi"s}, {"age"s, 20ll}};
+                    require_true(engine.create("items"s, first).has_value());
+                    require_true(engine.create("items"s, second).has_value());
+                    require_true(engine.create("items"s, third).has_value());
+                    require_true(engine.create("items"s, fourth).has_value());
+
+                    auto selector = xson::object{{"$skip"s, 1ll}, {"$top"s, 1ll}};
+                    set_orderby_selector(selector, parse_orderby("country,age desc"sv));
+                    const auto docs = read_with_parsed_filter(
+                        engine,
+                        "items"s,
+                        selector,
+                        parse_filter("status eq 'a' or status eq 'b'"sv));
+                    const auto& items = docs.get<xson::object::array>();
+                    require_eq(items.size(), 1u);
+                    check_eq(static_cast<xson::integer_type>(items[0]["_id"s]), 1);
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());

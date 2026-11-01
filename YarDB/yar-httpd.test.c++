@@ -682,6 +682,70 @@ auto test_set()
             require_eq(static_cast<xson::integer_type>(items[1]["value"s]), 40);
         };
 
+        section("GET with multi-field $orderby sorts each key") = [setup]
+        {
+            const auto rows = std::array{
+                R"({"settlementDate":"2024-01-02","tradeDate":"2024-01-01","creationDateTime":"T1","UID":"B"})"s,
+                R"({"settlementDate":"2024-01-01","tradeDate":"2024-01-02","creationDateTime":"T1","UID":"A"})"s,
+                R"({"settlementDate":"2024-01-01","tradeDate":"2024-01-01","creationDateTime":"T2","UID":"A"})"s,
+                R"({"settlementDate":"2024-01-01","tradeDate":"2024-01-01","creationDateTime":"T1","UID":"B"})"s,
+                R"({"settlementDate":"2024-01-01","tradeDate":"2024-01-01","creationDateTime":"T1","UID":"A"})"s
+            };
+            for(const auto& body : rows)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/trades"s, body);
+                require_eq(post_status, "201"s);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/trades?$orderby=settlementDate,tradeDate,creationDateTime,UID"s,
+                ""s);
+
+            require_eq(status, "200"s);
+            auto documents = json::parse(response_body);
+            const auto& items = documents.get<object::array>();
+            require_eq(items.size(), 5u);
+            require_eq(static_cast<std::string>(items[0]["UID"s]), "A"s);
+            require_eq(static_cast<std::string>(items[0]["creationDateTime"s]), "T1"s);
+            require_eq(static_cast<std::string>(items[1]["UID"s]), "B"s);
+            require_eq(static_cast<std::string>(items[1]["creationDateTime"s]), "T1"s);
+            require_eq(static_cast<std::string>(items[2]["creationDateTime"s]), "T2"s);
+            require_eq(static_cast<std::string>(items[3]["tradeDate"s]), "2024-01-02"s);
+            require_eq(static_cast<std::string>(items[4]["settlementDate"s]), "2024-01-02"s);
+        };
+
+        section("GET with mixed $orderby directions pages after the full sort") = [setup]
+        {
+            const auto rows = std::array{
+                R"({"country":"fi","age":20})"s,
+                R"({"country":"se","age":30})"s,
+                R"({"country":"fi","age":40})"s,
+                R"({"country":"se","age":10})"s
+            };
+            for(const auto& body : rows)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/people"s, body);
+                require_eq(post_status, "201"s);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/people?$orderby=country,age%20desc&$skip=1&$top=1"s,
+                ""s);
+
+            require_eq(status, "200"s);
+            auto documents = json::parse(response_body);
+            const auto& items = documents.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(static_cast<std::string>(items[0]["country"s]), "fi"s);
+            require_eq(static_cast<xson::integer_type>(items[0]["age"s]), 20);
+        };
+
         section("GET with $skip query parameter skips first N results") = [setup]
         {
             // Create multiple documents
@@ -3799,6 +3863,33 @@ auto test_set()
             require_true(error.has("error"s));
             require_eq(error["error"s].get<string>(), "Unprocessable Entity"s);
             require_true(error.has("message"s));
+            require_true(error["message"s].get<string>().find("$orderby") != string::npos);
+        };
+
+        section("GET with a trailing $orderby comma returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/unprocessabletest?$orderby=age%20desc,"s, ""s
+            );
+
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().find("$orderby") != string::npos);
+        };
+
+        section("GET with a ninth $orderby field returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/unprocessabletest?$orderby=a,b,c,d,e,f,g,h,i"s,
+                ""s
+            );
+
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            auto error = json::parse(body);
             require_true(error["message"s].get<string>().find("$orderby") != string::npos);
         };
 

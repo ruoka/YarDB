@@ -31,5 +31,6 @@ inline constexpr int max_collection_name_length = 256;  // Maximum length for co
 
 // Field name limits
 inline constexpr int max_field_name_length = 256;  // Maximum length for field names (e.g., in $orderby)
+inline constexpr std::size_t max_orderby_fields = 8;    // Maximum items in one $orderby list
 
 } // namespace yar::db

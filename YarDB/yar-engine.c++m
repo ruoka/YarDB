@@ -81,9 +81,23 @@ struct batch_item
     document_revision revision{};
 };
 
-// Sort a document array by a field (OData $orderby). Missing/non-primitive
-// values sort after present ones; ties break on _id ascending. When descending,
-// field order is reversed; missing values stay last.
+// One $orderby key. descending applies only to this field.
+struct orderby_key
+{
+    std::string field;
+    bool descending = false;
+};
+
+// Keys named by a selector. A string $orderby is one field; $desc on that
+// selector marks that field descending. An array of {field, descending}
+// objects is the multi-field form and does not use $desc.
+std::vector<orderby_key> orderby_keys(const object& selector);
+
+// Sort a document array by $orderby keys, in listed order. For each key a
+// present primitive sorts before a missing or null value, in both directions.
+// Two present primitives use primitive_less, reversed when that key is
+// descending. After every named key ties, _id ascending breaks the tie.
+void apply_orderby(object& documents, std::span<const orderby_key> keys);
 void apply_orderby(object& documents, std::string_view field, bool descending);
 
 // Database engine providing CRUD operations and indexing capabilities.

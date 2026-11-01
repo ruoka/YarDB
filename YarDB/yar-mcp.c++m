@@ -174,9 +174,7 @@ inline ::http::mcp::tool_result call_tool(
             if(params.contains("$orderby"s))
             {
                 const auto orderby = yar::http::odata::parse_orderby(params.at("$orderby"s));
-                selector["$orderby"s] = orderby.field_name;
-                if(orderby.descending)
-                    selector["$desc"s] = true;
+                yar::http::odata::set_orderby_selector(selector, orderby);
             }
 
             auto documents = xson::object{};

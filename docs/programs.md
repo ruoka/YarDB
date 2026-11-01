@@ -212,8 +212,8 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$skip=n`** - Skip number of results (pagination)
   - Example: `GET /users?$skip=20`
 
-- **`$orderby=field [asc|desc]`** - Sort by that field (single field; default ascending). Applied after `$filter`, before `$skip`/`$top`.
-  - Example: `GET /users?$orderby=age desc`
+- **`$orderby=field [asc|desc], ...`** - Sort by up to 8 top-level fields. Each field has its own direction; a missing direction is ascending. Applied after `$filter`, before `$skip`/`$top`. A missing or null value sorts after a present one, then `_id` ascending breaks a remaining tie.
+  - Examples: `GET /users?$orderby=country,age desc`, `GET /trades?$orderby=settlementDate,tradeDate,creationDateTime,UID`
 
 - **`$filter=expression`** - Filter documents
   - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`

@@ -1369,8 +1369,7 @@ export struct query_paging
 {
     xson::integer_type top = std::numeric_limits<xson::integer_type>::max();
     xson::integer_type skip = 0;
-    std::string orderby_field;
-    bool descending = false;
+    std::vector<yar::db::orderby_key> orderby;
 };
 
 export inline query_paging extract_and_strip_paging(xson::object& selector)
@@ -1392,14 +1391,10 @@ export inline query_paging extract_and_strip_paging(xson::object& selector)
         paging.skip = selector["$skip"s];
         keys.erase("$skip"s);
     }
-    if(selector.has("$orderby"s))
+    if(selector.has("$orderby"s) or selector.has("$desc"s))
     {
-        paging.orderby_field = static_cast<std::string>(selector["$orderby"s]);
+        paging.orderby = yar::db::orderby_keys(selector);
         keys.erase("$orderby"s);
-    }
-    if(selector.has("$desc"s))
-    {
-        paging.descending = true;
         keys.erase("$desc"s);
     }
 
@@ -1518,8 +1513,8 @@ export inline auto read_with_parsed_filter(
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
 
-        if(not paging.orderby_field.empty())
-            yar::db::apply_orderby(merged, paging.orderby_field, paging.descending);
+        if(not paging.orderby.empty())
+            yar::db::apply_orderby(merged, paging.orderby);
 
         return apply_top_skip(merged, paging.skip, paging.top);
     }
@@ -1540,8 +1535,8 @@ export inline auto read_with_parsed_filter(
         engine.read(collection, query_selector, documents);
         documents = apply_negated_and_string_filters(
             documents, filter.and_negated_selectors, string_filters);
-        if(not paging.orderby_field.empty())
-            yar::db::apply_orderby(documents, paging.orderby_field, paging.descending);
+        if(not paging.orderby.empty())
+            yar::db::apply_orderby(documents, paging.orderby);
         return apply_top_skip(documents, paging.skip, paging.top);
     }
 
@@ -1709,47 +1704,93 @@ inline auto parse_skip(std::string_view skip_value)
     return value;
 }
 
-// Result structure for $orderby parsing
-export struct orderby_result
-{
-    std::string field_name;
-    bool descending;
-};
-
-// Parse and validate $orderby parameter
-// Throws std::invalid_argument if value is invalid (empty field name or too long)
+// Parse and validate $orderby. Commas separate items. Each item is one
+// top-level field and an optional asc or desc. A missing direction is
+// ascending. Throws std::invalid_argument for an empty value, an empty item,
+// a trailing comma, a direction other than asc or desc, a nested path, a
+// field longer than max_field_name_length, or more than max_orderby_fields.
 export inline auto parse_orderby(std::string_view orderby_value)
 {
-    // Check for suffix on original value (before trimming) to handle cases like " desc" or " asc"
-    auto field_name = std::string_view{};
-    if(orderby_value.ends_with(" desc"sv))
+    const auto text = utils::trim(orderby_value);
+    if(text.empty())
+        throw std::invalid_argument{"$orderby value cannot be empty"};
+
+    auto items = std::vector<std::string_view>{};
+    auto start = std::size_t{0};
+    for(auto index = std::size_t{0}; index <= text.size(); ++index)
     {
-        field_name = utils::trim(orderby_value.substr(0, orderby_value.size() - 5));
-    }
-    else if(orderby_value.ends_with(" asc"sv))
-    {
-        field_name = utils::trim(orderby_value.substr(0, orderby_value.size() - 4));
-    }
-    else
-    {
-        // No suffix, field_name is the whole trimmed value
-        field_name = utils::trim(orderby_value);
+        if(index != text.size() and text[index] != ',')
+            continue;
+        items.push_back(utils::trim(text.substr(start, index - start)));
+        start = index + 1;
     }
 
-    // Validate field name (must not be empty after trimming)
-    if(field_name.empty())
-        throw std::invalid_argument{"$orderby field name cannot be empty"};
+    auto keys = std::vector<yar::db::orderby_key>{};
+    keys.reserve(items.size());
+    for(const auto item : items)
+    {
+        if(item.empty())
+            throw std::invalid_argument{"$orderby field name cannot be empty"};
+        if(keys.size() >= yar::db::max_orderby_fields)
+            throw std::invalid_argument{"$orderby supports at most "s
+                + std::to_string(yar::db::max_orderby_fields) + " fields"};
 
-    // Use trimmed value for further processing
-    auto orderby = utils::trim(orderby_value);
-    
-    if(field_name.size() > yar::db::max_field_name_length)
-        throw std::invalid_argument{"$orderby field name too long (max "s + std::to_string(yar::db::max_field_name_length) + " chars)"};
-    
-    // Check if it ends with " desc" or is just "desc"
-    const auto descending = orderby.ends_with(" desc"sv) or orderby == "desc"sv;
-    
-    return orderby_result{std::string{field_name}, descending};
+        auto tokens = std::vector<std::string_view>{};
+        auto rest = item;
+        while(not rest.empty())
+        {
+            const auto word = rest.find_first_not_of(" \t"sv);
+            if(word == std::string_view::npos)
+                break;
+            rest.remove_prefix(word);
+            const auto end = rest.find_first_of(" \t"sv);
+            tokens.push_back(rest.substr(0, end));
+            if(end == std::string_view::npos)
+                break;
+            rest.remove_prefix(end);
+        }
+
+        if(tokens.size() != 1 and tokens.size() != 2)
+            throw std::invalid_argument{"$orderby direction must be asc or desc"};
+
+        auto field = tokens[0];
+        auto descending = false;
+        if(tokens.size() == 2)
+        {
+            if(tokens[1] == "desc"sv)
+                descending = true;
+            else if(tokens[1] != "asc"sv)
+                throw std::invalid_argument{"$orderby direction must be asc or desc"};
+        }
+        else if(field == "asc"sv or field == "desc"sv)
+            throw std::invalid_argument{"$orderby field name cannot be empty"};
+
+        if(field.find('/') != std::string_view::npos)
+            throw std::invalid_argument{"$orderby field must be top-level"};
+        if(field.size() > yar::db::max_field_name_length)
+            throw std::invalid_argument{"$orderby field name too long (max "s
+                + std::to_string(yar::db::max_field_name_length) + " chars)"};
+
+        keys.push_back(yar::db::orderby_key{std::string{field}, descending});
+    }
+
+    return keys;
+}
+
+// Store the parsed list on a selector. Each item keeps its own direction.
+export inline void set_orderby_selector(
+    xson::object& selector,
+    std::span<const yar::db::orderby_key> keys)
+{
+    auto list = xson::object{xson::object::array{}};
+    for(const auto& key : keys)
+    {
+        auto item = xson::object{};
+        item["field"s] = key.field;
+        item["descending"s] = key.descending;
+        list += std::move(item);
+    }
+    selector["$orderby"s] = std::move(list);
 }
 
 // --- $apply / $compute -------------------------------------------------------

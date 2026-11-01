@@ -894,15 +894,45 @@ std::size_t yar::db::engine::count(std::string_view collection, const yar::db::o
     return index->count(reader, selector);
 }
 
-void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, bool descending)
+std::vector<yar::db::orderby_key> yar::db::orderby_keys(const yar::db::object& selector)
 {
-    if(not documents.is_array())
+    if(not selector.has("$orderby"s))
+        return {};
+
+    const auto& value = selector["$orderby"s];
+    if(value.is_string())
+    {
+        return {yar::db::orderby_key{
+            static_cast<std::string>(value),
+            selector.has("$desc"s)}};
+    }
+
+    if(not value.is_array())
+        return {};
+
+    auto keys = std::vector<yar::db::orderby_key>{};
+    for(const auto& item : value.get<yar::db::object::array>())
+    {
+        if(not item.is_object() or not item.has("field"s) or not item["field"s].is_string())
+            continue;
+        auto key = yar::db::orderby_key{};
+        key.field = static_cast<std::string>(item["field"s]);
+        key.descending = item.has("descending"s)
+            and item["descending"s].is_boolean()
+            and static_cast<bool>(item["descending"s]);
+        keys.push_back(std::move(key));
+    }
+    return keys;
+}
+
+void yar::db::apply_orderby(yar::db::object& documents, std::span<const yar::db::orderby_key> keys)
+{
+    if(not documents.is_array() or keys.empty())
         return;
 
     auto& items = documents.get<yar::db::object::array>();
-    const auto field_name = std::string{field};
 
-    const auto sortable = [&](const yar::db::object& doc)
+    const auto sortable = [](const yar::db::object& doc, const std::string& field_name)
     {
         if(not doc.has(field_name))
             return false;
@@ -919,24 +949,33 @@ void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, 
 
     std::ranges::sort(items, [&](const yar::db::object& lhs, const yar::db::object& rhs)
     {
-        const auto lhs_present = sortable(lhs);
-        const auto rhs_present = sortable(rhs);
-        if(lhs_present != rhs_present)
-            return lhs_present and not rhs_present;
-
-        if(lhs_present)
+        for(const auto& key : keys)
         {
-            const auto& left = lhs[field_name].get<xson::primitive>();
-            const auto& right = rhs[field_name].get<xson::primitive>();
-            if(not xson::primitive_equal(left, right))
-            {
-                const auto less = xson::primitive_less(left, right);
-                return descending ? not less : less;
-            }
+            const auto lhs_present = sortable(lhs, key.field);
+            const auto rhs_present = sortable(rhs, key.field);
+            if(lhs_present != rhs_present)
+                return lhs_present and not rhs_present;
+
+            if(not lhs_present)
+                continue;
+
+            const auto& left = lhs[key.field].get<xson::primitive>();
+            const auto& right = rhs[key.field].get<xson::primitive>();
+            if(xson::primitive_equal(left, right))
+                continue;
+
+            const auto less = xson::primitive_less(left, right);
+            return key.descending ? not less : less;
         }
 
         return id_of(lhs) < id_of(rhs);
     });
+}
+
+void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, bool descending)
+{
+    const auto key = yar::db::orderby_key{std::string{field}, descending};
+    apply_orderby(documents, std::span{&key, 1});
 }
 
 bool yar::db::engine::read(
@@ -972,8 +1011,8 @@ bool yar::db::engine::read(
     if(selector.has("$skip"s))
         skip = selector["$skip"s];
 
-    const auto orderby = selector.has("$orderby"s);
-    const auto descending = selector.has("$desc"s);
+    const auto keys = orderby_keys(selector);
+    const auto orderby = not keys.empty();
 
     auto success = false;
     auto reader = open_reader();
@@ -1019,7 +1058,7 @@ bool yar::db::engine::read(
 
     if(orderby and success)
     {
-        apply_orderby(documents, static_cast<std::string>(selector["$orderby"s]), descending);
+        apply_orderby(documents, keys);
 
         auto& items = documents.get<yar::db::object::array>();
         if(skip > 0)

@@ -1708,17 +1708,13 @@ private:
                 }
             }
             
-            // Handle $orderby (OData: $orderby=field desc or $orderby=field asc)
+            // Handle $orderby (OData: field [asc|desc], comma-separated)
             if(params.contains("$orderby"s))
             {
                 try
                 {
-                    const auto orderby_result = yar::http::odata::parse_orderby(params["$orderby"s]);
-                    selector["$orderby"s] = orderby_result.field_name;
-                    if(orderby_result.descending)
-                    {
-                        selector["$desc"s] = true;
-                    }
+                    const auto orderby = yar::http::odata::parse_orderby(params["$orderby"s]);
+                    yar::http::odata::set_orderby_selector(selector, orderby);
                 }
                 catch(const std::invalid_argument& e)
                 {
@@ -1780,13 +1776,8 @@ private:
                     }
                     if(compute_paging)
                     {
-                        if(not compute_paging->orderby_field.empty())
-                        {
-                            yar::db::apply_orderby(
-                                document,
-                                compute_paging->orderby_field,
-                                compute_paging->descending);
-                        }
+                        if(not compute_paging->orderby.empty())
+                            yar::db::apply_orderby(document, compute_paging->orderby);
                         document = yar::http::odata::apply_top_skip(
                             document, compute_paging->skip, compute_paging->top);
                     }

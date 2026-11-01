@@ -1911,6 +1911,12 @@ export inline std::size_t count_with_parsed_filter(
     return engine.count(collection, query_selector);
 }
 
+// Defined with the $skiptoken helpers. Drops rows that sort at or before the keyset.
+export inline void omit_rows_through_keyset(
+    xson::object& documents,
+    std::span<const yar::db::orderby_key> keys,
+    const xson::object& values);
+
 // Execute $filter via engine.read — one read per OR branch, merged by _id
 export inline auto read_with_parsed_filter(
     yar::db::engine& engine,
@@ -1922,7 +1928,11 @@ export inline auto read_with_parsed_filter(
 
     if(filter.has_or())
     {
+        const auto primary_desc = query_selector.has("$desc"s)
+            and yar::db::orderby_keys(query_selector).empty();
         const auto paging = extract_and_strip_paging(query_selector);
+        if(primary_desc)
+            query_selector["$desc"s] = true;
 
         auto merged = xson::object{xson::object::array{}};
         auto seen_ids = std::unordered_set<xson::integer_type>{};
@@ -1930,6 +1940,12 @@ export inline auto read_with_parsed_filter(
         for(auto branch : filter.or_branches)
         {
             lower_startswith_filters(indexed_keys, branch.selector, branch.string_filters);
+            if(paging.orderby.empty() and query_selector.has("$after_id"s))
+            {
+                branch.selector["$after_id"s] = query_selector["$after_id"s];
+                if(query_selector.has("$desc"s))
+                    branch.selector["$desc"s] = true;
+            }
             auto branch_docs = xson::object{};
             engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_negated_and_string_filters(
@@ -1940,6 +1956,8 @@ export inline auto read_with_parsed_filter(
 
         if(not paging.orderby.empty())
             yar::db::apply_orderby(merged, paging.orderby);
+        if(not paging.orderby.empty() and query_selector.has("$after"s))
+            omit_rows_through_keyset(merged, paging.orderby, query_selector["$after"s]);
 
         return apply_top_skip(merged, paging.skip, paging.top);
     }
@@ -1957,7 +1975,11 @@ export inline auto read_with_parsed_filter(
         or not filter.and_negated_selectors.empty()
         or not filter.and_any_filters.empty())
     {
+        const auto primary_desc = query_selector.has("$desc"s)
+            and yar::db::orderby_keys(query_selector).empty();
         const auto paging = extract_and_strip_paging(query_selector);
+        if(primary_desc)
+            query_selector["$desc"s] = true;
         auto documents = xson::object{};
         engine.read(collection, query_selector, documents);
         documents = apply_negated_and_string_filters(
@@ -1965,6 +1987,8 @@ export inline auto read_with_parsed_filter(
         documents = apply_any_filters(documents, filter.and_any_filters);
         if(not paging.orderby.empty())
             yar::db::apply_orderby(documents, paging.orderby);
+        if(not paging.orderby.empty() and query_selector.has("$after"s))
+            omit_rows_through_keyset(documents, paging.orderby, query_selector["$after"s]);
         return apply_top_skip(documents, paging.skip, paging.top);
     }
 
@@ -2193,7 +2217,7 @@ export inline auto parse_orderby(std::string_view orderby_value)
         else if(field == "asc"sv or field == "desc"sv)
             throw std::invalid_argument{"$orderby field name cannot be empty"};
 
-        if(field.find('/') != std::string_view::npos)
+        if(field.contains('/'))
             throw std::invalid_argument{"$orderby field must be top-level"};
         if(field.size() > yar::db::max_field_name_length)
             throw std::invalid_argument{"$orderby field name too long (max "s
@@ -2219,6 +2243,283 @@ export inline void set_orderby_selector(
         list += std::move(item);
     }
     selector["$orderby"s] = std::move(list);
+}
+
+// $skiptoken is a keyset, not an offset. The payload is JSON, then base64url
+// with no padding, so the value can sit in a query string unchanged.
+export struct skiptoken
+{
+    bool descending = false;
+    std::vector<yar::db::orderby_key> orderby;
+    std::vector<xson::object> values;
+};
+
+inline auto query_escape(std::string_view value)
+{
+    auto out = std::string{};
+    constexpr auto hex = "0123456789ABCDEF"sv;
+    for(const auto byte : value)
+    {
+        const auto c = static_cast<unsigned char>(byte);
+        if(std::isalnum(c) or c == '-' or c == '_' or c == '.' or c == '~')
+            out.push_back(static_cast<char>(c));
+        else
+        {
+            out.push_back('%');
+            out.push_back(hex[c >> 4]);
+            out.push_back(hex[c & 0x0F]);
+        }
+    }
+    return out;
+}
+
+inline auto base64url_encode(std::string_view input)
+{
+    constexpr auto table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"sv;
+    auto out = std::string{};
+    auto i = std::size_t{0};
+    while(i + 3 <= input.size())
+    {
+        const auto b0 = static_cast<unsigned char>(input[i]);
+        const auto b1 = static_cast<unsigned char>(input[i + 1]);
+        const auto b2 = static_cast<unsigned char>(input[i + 2]);
+        out.push_back(table[b0 >> 2]);
+        out.push_back(table[((b0 & 3) << 4) | (b1 >> 4)]);
+        out.push_back(table[((b1 & 15) << 2) | (b2 >> 6)]);
+        out.push_back(table[b2 & 63]);
+        i += 3;
+    }
+    if(i < input.size())
+    {
+        const auto b0 = static_cast<unsigned char>(input[i]);
+        out.push_back(table[b0 >> 2]);
+        if(i + 1 == input.size())
+            out.push_back(table[(b0 & 3) << 4]);
+        else
+        {
+            const auto b1 = static_cast<unsigned char>(input[i + 1]);
+            out.push_back(table[((b0 & 3) << 4) | (b1 >> 4)]);
+            out.push_back(table[(b1 & 15) << 2]);
+        }
+    }
+    return out;
+}
+
+inline std::optional<std::string> base64url_decode(std::string_view text)
+{
+    if(text.empty())
+        return std::nullopt;
+
+    const auto value_of = [](char c)
+    {
+        if(c >= 'A' and c <= 'Z')
+            return c - 'A';
+        if(c >= 'a' and c <= 'z')
+            return c - 'a' + 26;
+        if(c >= '0' and c <= '9')
+            return c - '0' + 52;
+        if(c == '-')
+            return 62;
+        if(c == '_')
+            return 63;
+        return -1;
+    };
+
+    auto out = std::string{};
+    auto i = std::size_t{0};
+    while(i < text.size())
+    {
+        const auto remain = text.size() - i;
+        if(remain == 1)
+            return std::nullopt;
+        const auto n = remain >= 4 ? std::size_t{4} : remain;
+        auto v = std::array<int, 4>{};
+        for(auto j = std::size_t{0}; j < n; ++j)
+        {
+            v[j] = value_of(text[i + j]);
+            if(v[j] < 0)
+                return std::nullopt;
+        }
+        out.push_back(static_cast<char>((v[0] << 2) | (v[1] >> 4)));
+        if(n >= 3)
+            out.push_back(static_cast<char>(((v[1] & 15) << 4) | (v[2] >> 2)));
+        if(n == 4)
+            out.push_back(static_cast<char>(((v[2] & 3) << 6) | v[3]));
+        i += n;
+    }
+    return out;
+}
+
+inline auto null_value()
+{
+    auto value = xson::object{};
+    value = nullptr;
+    return value;
+}
+
+inline auto sort_value_of(const xson::object& document, const std::string& field)
+{
+    if(not document.has(field))
+        return null_value();
+    const auto& value = document[field];
+    if(not value.has_value() or value.is_null())
+        return null_value();
+    return value;
+}
+
+export inline std::optional<std::string> encode_skiptoken(
+    std::span<const yar::db::orderby_key> keys,
+    bool primary_descending,
+    const xson::object& document)
+{
+    if(not document.has("_id"s) or not document["_id"s].is_integer())
+        return std::nullopt;
+
+    auto orderby = xson::object{xson::object::array{}};
+    auto values = xson::object{xson::object::array{}};
+    for(const auto& key : keys)
+    {
+        auto item = xson::object{};
+        item["field"s] = key.field;
+        item["descending"s] = key.descending;
+        orderby += std::move(item);
+        values += sort_value_of(document, key.field);
+    }
+    values += document["_id"s];
+
+    auto payload = xson::object{};
+    payload["desc"s] = keys.empty() and primary_descending;
+    payload["orderby"s] = std::move(orderby);
+    payload["values"s] = std::move(values);
+    return base64url_encode(xson::json::stringify(payload, 0));
+}
+
+export inline skiptoken decode_skiptoken(std::string_view text)
+{
+    const auto json = base64url_decode(text);
+    if(not json)
+        throw std::invalid_argument{"$skiptoken is malformed"};
+
+    auto payload = xson::object{};
+    try
+    {
+        payload = xson::json::parse(*json);
+    }
+    catch(const std::exception&)
+    {
+        throw std::invalid_argument{"$skiptoken is malformed"};
+    }
+
+    if(not payload.has_objects()
+        or not payload.has("desc"s) or not payload["desc"s].is_boolean()
+        or not payload.has("orderby"s) or not payload["orderby"s].is_array()
+        or not payload.has("values"s) or not payload["values"s].is_array())
+        throw std::invalid_argument{"$skiptoken is malformed"};
+
+    auto token = skiptoken{};
+    token.descending = static_cast<bool>(payload["desc"s]);
+    for(const auto& item : payload["orderby"s].get<xson::object::array>())
+    {
+        if(not item.has_objects()
+            or not item.has("field"s) or not item["field"s].is_string()
+            or not item.has("descending"s) or not item["descending"s].is_boolean())
+            throw std::invalid_argument{"$skiptoken is malformed"};
+        auto key = yar::db::orderby_key{};
+        key.field = static_cast<std::string>(item["field"s]);
+        key.descending = static_cast<bool>(item["descending"s]);
+        if(key.field.empty())
+            throw std::invalid_argument{"$skiptoken is malformed"};
+        token.orderby.push_back(std::move(key));
+    }
+    for(const auto& item : payload["values"s].get<xson::object::array>())
+    {
+        if(not item.has_value())
+            throw std::invalid_argument{"$skiptoken is malformed"};
+        token.values.push_back(item);
+    }
+    if(token.values.size() != token.orderby.size() + 1 or not token.values.back().is_integer())
+        throw std::invalid_argument{"$skiptoken is malformed"};
+    if(not token.orderby.empty() and token.descending)
+        throw std::invalid_argument{"$skiptoken is malformed"};
+    return token;
+}
+
+export inline bool skiptoken_matches(
+    const skiptoken& token,
+    std::span<const yar::db::orderby_key> keys,
+    bool primary_descending)
+{
+    if(token.orderby.size() != keys.size())
+        return false;
+    for(auto i = std::size_t{0}; i < keys.size(); ++i)
+    {
+        if(token.orderby[i].field != keys[i].field
+            or token.orderby[i].descending != keys[i].descending)
+            return false;
+    }
+    return keys.empty() ? token.descending == primary_descending : not token.descending;
+}
+
+// Primary resume uses $after_id. An $orderby resume uses $after, the same
+// value array the token carries. Engine::read consumes both before match().
+export inline void bind_skiptoken(
+    xson::object& selector,
+    const skiptoken& token,
+    std::span<const yar::db::orderby_key> keys)
+{
+    if(keys.empty())
+    {
+        selector["$after_id"s] = token.values.back();
+        return;
+    }
+
+    auto values = xson::object{xson::object::array{}};
+    for(const auto& value : token.values)
+        values += value;
+    selector["$after"s] = std::move(values);
+}
+
+export inline std::string skiptoken_next_header(
+    std::string_view collection,
+    const std::map<std::string, std::string>& params,
+    std::string_view token)
+{
+    auto query = std::string{};
+    const auto append = [&](std::string_view key)
+    {
+        const auto name = std::string{key};
+        if(not params.contains(name))
+            return;
+        if(not query.empty())
+            query.push_back('&');
+        query += name;
+        query.push_back('=');
+        query += query_escape(params.at(name));
+    };
+    append("$filter"sv);
+    append("$orderby"sv);
+    append("$desc"sv);
+    append("$top"sv);
+    append("$select"sv);
+    if(not query.empty())
+        query.push_back('&');
+    query += "$skiptoken="s + std::string{token};
+    return "</"s + std::string{collection} + "?"s + query + ">; rel=\"next\""s;
+}
+
+export inline void omit_rows_through_keyset(
+    xson::object& documents,
+    std::span<const yar::db::orderby_key> keys,
+    const xson::object& values)
+{
+    if(keys.empty() or not documents.is_array() or not values.is_array())
+        return;
+
+    auto& items = documents.get<xson::object::array>();
+    std::erase_if(items, [&](const xson::object& document)
+    {
+        return not yar::db::after_orderby_keyset(document, keys, values);
+    });
 }
 
 // --- $apply / $compute -------------------------------------------------------

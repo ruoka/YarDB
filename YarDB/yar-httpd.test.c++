@@ -5879,6 +5879,197 @@ auto test_set()
         };
     };
 
+    test_case("OData skiptoken resumes the next page, [yardb]") = []
+    {
+        auto setup = std::make_shared<fixture>("./httpd_skiptoken_test.db");
+
+        const auto link_path = [](const string& link)
+        {
+            const auto open = link.find('<');
+            const auto close = link.find('>');
+            require_true(open != string::npos and close != string::npos and close > open);
+            return link.substr(open + 1, close - open - 1);
+        };
+
+        section("GET $top sets a next link and the following page starts after it") = [setup, link_path]
+        {
+            for(const auto& name : {"a"s, "b"s, "c"s})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/pages"s, "{\"name\":\""s + name + "\"}"s);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/pages?$top=1&$select=name"s, ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("link"s));
+            const auto link = headers["link"s];
+            require_true(link.contains("rel=\"next\""sv));
+            require_true(link.contains("$select=name"sv));
+            require_false(link.contains("$skip="sv));
+            const auto first = json::parse(response_body);
+            const auto& first_items = first.get<object::array>();
+            require_eq(first_items.size(), 1u);
+            const auto first_id = static_cast<xson::integer_type>(first_items[0]["_id"s]);
+
+            auto [next_status, next_reason, next_headers, next_body] = make_request(
+                setup->port(), "GET"s, link_path(link), ""s);
+            require_eq(next_status, "200"s);
+            (void)next_reason;
+            require_true(next_headers.contains("link"s));
+            const auto second = json::parse(next_body);
+            const auto& second_items = second.get<object::array>();
+            require_eq(second_items.size(), 1u);
+            require_true(static_cast<xson::integer_type>(second_items[0]["_id"s]) > first_id);
+
+            auto [last_status, last_reason, last_headers, last_body] = make_request(
+                setup->port(), "GET"s, link_path(next_headers["link"s]), ""s);
+            require_eq(last_status, "200"s);
+            (void)last_reason;
+            require_false(last_headers.contains("link"s));
+            const auto last = json::parse(last_body);
+            const auto& last_items = last.get<object::array>();
+            require_eq(last_items.size(), 1u);
+            require_true(static_cast<xson::integer_type>(last_items[0]["_id"s])
+                > static_cast<xson::integer_type>(second_items[0]["_id"s]));
+        };
+
+        section("GET $orderby page does not return a row that sorts before the token") = [setup, link_path]
+        {
+            for(const auto value : {30, 10, 20})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(),
+                    "POST"s,
+                    "/ranked"s,
+                    "{\"value\":"s + std::to_string(value) + "}"s);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/ranked?$orderby=value&$top=1"s, ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            require_true(headers.contains("link"s));
+            const auto first = json::parse(response_body);
+            require_eq(static_cast<xson::integer_type>(first.get<object::array>()[0]["value"s]), 10);
+
+            auto [next_status, next_reason, next_headers, next_body] = make_request(
+                setup->port(), "GET"s, link_path(headers["link"s]), ""s);
+            require_eq(next_status, "200"s);
+            (void)next_reason;
+            (void)next_headers;
+            const auto second = json::parse(next_body);
+            const auto& items = second.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(items[0]["value"s]), 20);
+        };
+
+        section("GET without another row has no Link") = [setup]
+        {
+            auto [post_status, post_reason, post_headers, post_body] = make_request(
+                setup->port(), "POST"s, "/shortp"s, R"({"name":"only"})"s);
+            require_eq(post_status, "201"s);
+            (void)post_reason;
+            (void)post_headers;
+            (void)post_body;
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/shortp?$top=5"s, ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            require_false(headers.contains("link"s));
+            const auto parsed = json::parse(response_body);
+            require_eq(parsed.get<object::array>().size(), 1u);
+        };
+
+        section("GET without $top has no Link and returns every row") = [setup]
+        {
+            for(const auto& name : {"a"s, "b"s})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/allrows"s, "{\"name\":\""s + name + "\"}"s);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/allrows"s, ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            require_false(headers.contains("link"s));
+            const auto parsed = json::parse(response_body);
+            require_eq(parsed.get<object::array>().size(), 2u);
+        };
+
+        section("GET $skip with $skiptoken returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/pages?$top=1&$skip=1&$skiptoken=****"s, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("$skip") != string::npos);
+        };
+
+        section("GET a token from a different $orderby returns 422") = [setup, link_path]
+        {
+            for(const auto value : {2, 1})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(),
+                    "POST"s,
+                    "/ranks"s,
+                    "{\"value\":"s + std::to_string(value) + ",\"name\":\"n\"}"s);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/ranks?$orderby=value&$top=1"s, ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)response_body;
+            require_true(headers.contains("link"s));
+            const auto path = link_path(headers["link"s]);
+            const auto token_at = path.find("$skiptoken=");
+            require_true(token_at != string::npos);
+            const auto token = path.substr(token_at + std::string{"$skiptoken="}.size());
+
+            auto [bad_status, bad_reason, bad_headers, bad_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/ranks?$orderby=name&$top=1&$skiptoken="s + token,
+                ""s);
+            require_eq(bad_status, "422"s);
+            require_eq(bad_reason, "Unprocessable Entity"s);
+            (void)bad_headers;
+            require_true(json::parse(bad_body)["message"s].get<string>().find("$orderby") != string::npos);
+        };
+
+        section("GET a malformed $skiptoken returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/pages?$top=1&$skiptoken=****"s, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("$skiptoken") != string::npos);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

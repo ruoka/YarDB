@@ -1569,6 +1569,8 @@ private:
             const auto uri = ::http::uri{request};
             auto document = xson::object{};
             auto selector = xson::object{};
+            auto page_limit = std::optional<xson::integer_type>{};
+            auto next_header = std::optional<std::string>{};
             
             // Parse OData query parameters
             auto params = parse_query_params(uri);
@@ -1678,7 +1680,9 @@ private:
                 try
                 {
                     const auto top_value = yar::http::odata::parse_top(params["$top"s]);
-                    selector["$top"s] = top_value;
+                    page_limit = top_value;
+                    // One extra row tells whether a next page exists. It is not returned.
+                    selector["$top"s] = top_value > 0 ? top_value + 1 : top_value;
                 }
                 catch(const std::invalid_argument& e)
                 {
@@ -1727,6 +1731,46 @@ private:
             }
             const auto collection_name = validate_collection_name(uri.path[1]);
 
+            if(params.contains("$desc"s) and params["$desc"s] == "true"s)
+                selector["$desc"s] = true;
+
+            if(params.contains("$skiptoken"s))
+            {
+                if(params.contains("$skip"s))
+                {
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        "$skip cannot be combined with $skiptoken"sv);
+                }
+                try
+                {
+                    const auto token = yar::http::odata::decode_skiptoken(params["$skiptoken"s]);
+                    const auto keys = yar::db::orderby_keys(selector);
+                    const auto primary_descending = keys.empty() and selector.has("$desc"s);
+                    if(not yar::http::odata::skiptoken_matches(token, keys, primary_descending))
+                    {
+                        return ::http::make_error_response(
+                            status_unprocessable_entity,
+                            "Unprocessable Entity"sv,
+                            "$skiptoken sort does not match $orderby"sv);
+                    }
+                    yar::http::odata::bind_skiptoken(selector, token, keys);
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        e.what());
+                }
+            }
+
+            // Captured before $compute strips paging keys. The token's sort is the
+            // request's $orderby, not the selector left after that strip.
+            const auto page_orderby = yar::db::orderby_keys(selector);
+            const auto page_descending = page_orderby.empty() and selector.has("$desc"s);
+
             // $compute must run before $filter/$orderby/$top/$skip (OData evaluation
             // order). Strip paging from the engine selector and defer $filter when
             // compute is present so aliases like LineTotal are visible to $filter.
@@ -1734,7 +1778,11 @@ private:
             auto deferred_filter = std::optional<yar::http::odata::parsed_filter>{};
             if(params.contains("$compute"s))
             {
+                const auto primary_desc = selector.has("$desc"s)
+                    and yar::db::orderby_keys(selector).empty();
                 compute_paging = yar::http::odata::extract_and_strip_paging(selector);
+                if(primary_desc)
+                    selector["$desc"s] = true;
             }
 
             if(params.contains("$filter"s))
@@ -1793,6 +1841,9 @@ private:
                     {
                         if(not compute_paging->orderby.empty())
                             yar::db::apply_orderby(document, compute_paging->orderby);
+                        if(not compute_paging->orderby.empty() and selector.has("$after"s))
+                            yar::http::odata::omit_rows_through_keyset(
+                                document, compute_paging->orderby, selector["$after"s]);
                         document = yar::http::odata::apply_top_skip(
                             document, compute_paging->skip, compute_paging->top);
                     }
@@ -1803,6 +1854,23 @@ private:
                         status_unprocessable_entity,
                         "Unprocessable Entity"sv,
                         e.what());
+                }
+            }
+
+            if(page_limit and *page_limit > 0 and document.is_array())
+            {
+                auto& items = document.get<xson::object::array>();
+                if(static_cast<xson::integer_type>(items.size()) > *page_limit)
+                {
+                    items.resize(static_cast<std::size_t>(*page_limit));
+                    if(const auto token = yar::http::odata::encode_skiptoken(
+                        page_orderby,
+                        page_descending,
+                        items.back()))
+                    {
+                        next_header = yar::http::odata::skiptoken_next_header(
+                            collection_name, params, *token);
+                    }
                 }
             }
 
@@ -1832,6 +1900,15 @@ private:
                 }
             }
             
+            if(next_header)
+            {
+                auto response_headers = ::http::headers{};
+                response_headers.set("link"s, *next_header);
+                return ::http::make_response(
+                    ::http::status_ok,
+                    xson::json::stringify(document),
+                    std::make_optional(response_headers));
+            }
             return ::http::make_response(::http::status_ok, xson::json::stringify(document), std::optional<::http::headers>{});
         };
         m_get_collection_handler = get_collection_handler;

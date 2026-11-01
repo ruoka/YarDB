@@ -894,6 +894,167 @@ std::size_t yar::db::engine::count(std::string_view collection, const yar::db::o
     return index->count(reader, selector);
 }
 
+namespace {
+
+struct sort_value
+{
+    bool present = false;
+    xson::primitive value{};
+};
+
+auto sort_value_of(const yar::db::object& value)
+{
+    if(not value.has_value() or value.is_null())
+        return sort_value{};
+    return sort_value{true, value.get<xson::primitive>()};
+}
+
+auto sort_field(const yar::db::object& document, const std::string& field)
+{
+    if(not document.has(field))
+        return sort_value{};
+    return sort_value_of(document[field]);
+}
+
+auto id_of(const yar::db::object& document)
+{
+    if(document.has("_id"s) and document["_id"s].is_integer())
+        return static_cast<std::int64_t>(document["_id"s]);
+    return std::int64_t{0};
+}
+
+// nullopt when this key does not order the two sides.
+std::optional<bool> field_before(const sort_value& left, const sort_value& right, bool descending)
+{
+    if(left.present != right.present)
+        return left.present and not right.present;
+    if(not left.present)
+        return std::nullopt;
+    if(xson::primitive_equal(left.value, right.value))
+        return std::nullopt;
+    const auto less = xson::primitive_less(left.value, right.value);
+    return descending ? not less : less;
+}
+
+bool document_before(
+    const yar::db::object& lhs,
+    const yar::db::object& rhs,
+    std::span<const yar::db::orderby_key> keys)
+{
+    for(const auto& key : keys)
+    {
+        if(const auto cmp = field_before(
+            sort_field(lhs, key.field),
+            sort_field(rhs, key.field),
+            key.descending))
+            return *cmp;
+    }
+    return id_of(lhs) < id_of(rhs);
+}
+
+void erase_selector_key(yar::db::object& selector, const std::string& key)
+{
+    if(selector.has_objects())
+        selector.get<yar::db::object::map>().erase(key);
+}
+
+// Primary-key resume. The next walk starts after cursor, so that row and every
+// row on the already-returned side are not read. $desc reverses the walk, and
+// the bound has to sit on the _id selector because that is what index::view
+// reverses.
+void resume_primary_key(yar::db::object& query, xson::integer_type cursor)
+{
+    const auto descending = query.has("$desc"s);
+    const auto excluded = [&](xson::integer_type id)
+    {
+        return descending ? id >= cursor : id <= cursor;
+    };
+    const auto reject = [&]
+    {
+        auto bound = yar::db::object{};
+        bound["$gt"s] = xson::integer_type{0};
+        bound["$lt"s] = xson::integer_type{0};
+        query["_id"s] = std::move(bound);
+    };
+
+    if(not query.has("_id"s))
+    {
+        auto bound = yar::db::object{};
+        if(descending)
+        {
+            bound["$lt"s] = cursor;
+            bound["$desc"s] = true;
+        }
+        else
+            bound["$gt"s] = cursor;
+        query["_id"s] = std::move(bound);
+        return;
+    }
+
+    auto id_sel = query["_id"s];
+    if(id_sel.has_value())
+    {
+        if(not id_sel.is_integer() or excluded(static_cast<xson::integer_type>(id_sel)))
+            reject();
+        return;
+    }
+    if(not id_sel.has_objects())
+    {
+        reject();
+        return;
+    }
+    if(id_sel.has("$eq"s))
+    {
+        const auto& exact = id_sel["$eq"s];
+        if(not exact.is_integer() or excluded(static_cast<xson::integer_type>(exact)))
+            reject();
+        return;
+    }
+
+    if(descending)
+    {
+        if(id_sel.has("$lt"s))
+        {
+            if(id_sel["$lt"s].is_integer()
+                and static_cast<xson::integer_type>(id_sel["$lt"s]) > cursor)
+                id_sel["$lt"s] = cursor;
+        }
+        else if(id_sel.has("$lte"s))
+        {
+            if(id_sel["$lte"s].is_integer()
+                and static_cast<xson::integer_type>(id_sel["$lte"s]) >= cursor)
+            {
+                id_sel.get<yar::db::object::map>().erase("$lte"s);
+                id_sel["$lt"s] = cursor;
+            }
+        }
+        else
+            id_sel["$lt"s] = cursor;
+        id_sel["$desc"s] = true;
+    }
+    else if(id_sel.has("$gt"s))
+    {
+        if(id_sel["$gt"s].is_integer()
+            and static_cast<xson::integer_type>(id_sel["$gt"s]) < cursor)
+            id_sel["$gt"s] = cursor;
+    }
+    else if(id_sel.has("$gte"s))
+    {
+        if(id_sel["$gte"s].is_integer()
+            and static_cast<xson::integer_type>(id_sel["$gte"s]) <= cursor)
+        {
+            id_sel.get<yar::db::object::map>().erase("$gte"s);
+            id_sel["$gt"s] = cursor;
+        }
+    }
+    else
+        id_sel["$gt"s] = cursor;
+
+    query["_id"s] = std::move(id_sel);
+}
+
+} // namespace
+
 std::vector<yar::db::orderby_key> yar::db::orderby_keys(const yar::db::object& selector)
 {
     if(not selector.has("$orderby"s))
@@ -931,45 +1092,34 @@ void yar::db::apply_orderby(yar::db::object& documents, std::span<const yar::db:
         return;
 
     auto& items = documents.get<yar::db::object::array>();
-
-    const auto sortable = [](const yar::db::object& doc, const std::string& field_name)
-    {
-        if(not doc.has(field_name))
-            return false;
-        const auto& value = doc[field_name];
-        return value.has_value() and not value.is_null();
-    };
-
-    const auto id_of = [](const yar::db::object& doc)
-    {
-        if(doc.has("_id"s) and doc["_id"s].is_integer())
-            return static_cast<std::int64_t>(doc["_id"s]);
-        return std::int64_t{0};
-    };
-
     std::ranges::sort(items, [&](const yar::db::object& lhs, const yar::db::object& rhs)
     {
-        for(const auto& key : keys)
-        {
-            const auto lhs_present = sortable(lhs, key.field);
-            const auto rhs_present = sortable(rhs, key.field);
-            if(lhs_present != rhs_present)
-                return lhs_present and not rhs_present;
-
-            if(not lhs_present)
-                continue;
-
-            const auto& left = lhs[key.field].get<xson::primitive>();
-            const auto& right = rhs[key.field].get<xson::primitive>();
-            if(xson::primitive_equal(left, right))
-                continue;
-
-            const auto less = xson::primitive_less(left, right);
-            return key.descending ? not less : less;
-        }
-
-        return id_of(lhs) < id_of(rhs);
+        return document_before(lhs, rhs, keys);
     });
+}
+
+bool yar::db::after_orderby_keyset(
+    const yar::db::object& document,
+    std::span<const yar::db::orderby_key> keys,
+    const yar::db::object& values)
+{
+    if(keys.empty() or not values.is_array())
+        return false;
+
+    const auto& entries = values.get<yar::db::object::array>();
+    if(entries.size() != keys.size() + 1 or not entries.back().is_integer())
+        return false;
+
+    const auto left_id = static_cast<std::int64_t>(entries.back());
+    for(auto i = std::size_t{0}; i < keys.size(); ++i)
+    {
+        if(const auto cmp = field_before(
+            sort_value_of(entries[i]),
+            sort_field(document, keys[i].field),
+            keys[i].descending))
+            return *cmp;
+    }
+    return left_id < id_of(document);
 }
 
 void yar::db::apply_orderby(yar::db::object& documents, std::string_view field, bool descending)
@@ -1011,20 +1161,41 @@ bool yar::db::engine::read(
     if(selector.has("$skip"s))
         skip = selector["$skip"s];
 
-    const auto keys = orderby_keys(selector);
+    // $after_id resumes a primary-key walk after that _id. $after resumes an
+    // $orderby walk after that tuple. Both are removed before match(); $after
+    // rows may still be read, and they are not copied into the result.
+    auto query = selector;
+    auto after_values = std::optional<yar::db::object>{};
+    if(query.has("$after"s))
+    {
+        if(query["$after"s].is_array())
+            after_values = query["$after"s];
+        erase_selector_key(query, "$after"s);
+    }
+    auto after_id = std::optional<xson::integer_type>{};
+    if(query.has("$after_id"s))
+    {
+        if(query["$after_id"s].is_integer())
+            after_id = static_cast<xson::integer_type>(query["$after_id"s]);
+        erase_selector_key(query, "$after_id"s);
+    }
+
+    const auto keys = orderby_keys(query);
     const auto orderby = not keys.empty();
+    if(not orderby and after_id)
+        resume_primary_key(query, *after_id);
 
     auto success = false;
     auto reader = open_reader();
 
-    for(const auto position : index->view(selector))
+    for(const auto position : index->view(query))
     {
         auto metadata = yar::db::metadata{};
         auto document = yar::db::object{};
         reader.clear();
         reader.seekg(position, reader.beg);
         reader >> metadata >> document;
-        if(document.match(selector))
+        if(document.match(query))
         {
             if(not orderby)
             {
@@ -1050,6 +1221,9 @@ bool yar::db::engine::read(
                 --top;
                 continue;
             }
+
+            if(after_values and not after_orderby_keyset(document, keys, *after_values))
+                continue;
 
             documents += std::move(document);
             success = true;

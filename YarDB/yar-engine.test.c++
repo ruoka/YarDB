@@ -1815,6 +1815,83 @@ auto test_set()
         };
     };
 
+    test_case("skiptoken resumes after the last row, [yardb]") = []
+    {
+        const auto test_file = "./engine_skiptoken_test.db";
+        const auto setup = fixture{test_file};
+
+        section("Primary key resume omits the token row") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto first = object{{"name"s, "a"s}},
+                second = object{{"name"s, "b"s}},
+                third = object{{"name"s, "c"s}},
+                documents = object{};
+            require_true(engine.create("SkipTokenId"s, first).has_value());
+            require_true(engine.create("SkipTokenId"s, second).has_value());
+            require_true(engine.create("SkipTokenId"s, third).has_value());
+
+            auto first_page = object{{"$top"s, 1ll}};
+            require_true(engine.read("SkipTokenId"s, first_page, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), static_cast<xson::integer_type>(first["_id"s]));
+
+            auto resumed = object{{"$after_id"s, first["_id"s]}};
+            documents = object{};
+            require_true(engine.read("SkipTokenId"s, resumed, documents));
+            require_eq(documents.size(), 2u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), static_cast<xson::integer_type>(second["_id"s]));
+            require_eq(static_cast<xson::integer_type>(documents[1]["_id"s]), static_cast<xson::integer_type>(third["_id"s]));
+        };
+
+        section("Descending primary resume walks toward smaller ids") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto first = object{{"name"s, "a"s}},
+                second = object{{"name"s, "b"s}},
+                third = object{{"name"s, "c"s}},
+                documents = object{};
+            require_true(engine.create("SkipTokenDesc"s, first).has_value());
+            require_true(engine.create("SkipTokenDesc"s, second).has_value());
+            require_true(engine.create("SkipTokenDesc"s, third).has_value());
+
+            auto resumed = object{{"$desc"s, true}, {"$after_id"s, third["_id"s]}, {"$top"s, 1ll}};
+            require_true(engine.read("SkipTokenDesc"s, resumed, documents));
+            require_eq(documents.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), static_cast<xson::integer_type>(second["_id"s]));
+        };
+
+        section("Ordered resume omits rows that sort before the token") = [test_file]
+        {
+            auto engine = yar::db::engine{test_file};
+            auto high = object{{"value"s, 30ll}},
+                low = object{{"value"s, 10ll}},
+                mid = object{{"value"s, 20ll}},
+                earlier = object{{"value"s, 5ll}},
+                tied = object{{"value"s, 10ll}},
+                documents = object{};
+            require_true(engine.create("SkipTokenOrder"s, high).has_value());
+            require_true(engine.create("SkipTokenOrder"s, low).has_value());
+            require_true(engine.create("SkipTokenOrder"s, mid).has_value());
+            require_true(engine.create("SkipTokenOrder"s, earlier).has_value());
+            require_true(engine.create("SkipTokenOrder"s, tied).has_value());
+
+            auto values = object{object::array{}};
+            auto cursor_value = object{};
+            cursor_value = 10ll;
+            values += std::move(cursor_value);
+            auto cursor_id = object{};
+            cursor_id = low["_id"s];
+            values += std::move(cursor_id);
+            auto selector = object{{"$orderby"s, "value"s}, {"$after"s, std::move(values)}};
+            require_true(engine.read("SkipTokenOrder"s, selector, documents));
+            require_eq(documents.size(), 3u);
+            require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), static_cast<xson::integer_type>(tied["_id"s]));
+            require_eq(static_cast<xson::integer_type>(documents[1]["_id"s]), static_cast<xson::integer_type>(mid["_id"s]));
+            require_eq(static_cast<xson::integer_type>(documents[2]["_id"s]), static_cast<xson::integer_type>(high["_id"s]));
+        };
+    };
+
     return true;
 }
 

@@ -8,7 +8,8 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 
 | Option | Notes |
 |--------|--------|
-| `$top` / `$skip` | Client-driven paging |
+| `$top` / `$skip` | Client-driven paging. `$skip` still walks the rows it passes. A request that uses only `$skip` is unchanged |
+| `$skiptoken` | Server-driven paging. The body stays a JSON array; there is no `@odata.nextLink` in the body. When `$top` is set and another row exists, the response carries `Link: </collection?$skiptoken=...>; rel="next"`. The link keeps `$filter`, `$orderby`, `$top`, and `$select`, replaces a previous `$skiptoken`, and drops `$skip`. `$desc=true` is kept when the request sent it. The token is an opaque base64url keyset of the last row returned, not an offset. With no `$orderby` it is that row's `_id` and the next read starts at the following primary key (`$desc` reverses the walk and does not read the token row or the rows already passed). With `$orderby` it is that row's sort values, in listed order, plus `_id`; the next page is the rows strictly after that tuple. `$skip` with `$skiptoken` is 422. A malformed token, or a token whose sort is not this request's `$orderby` and direction, is 422. Omitting `$top` returns every match and no link |
 | `$orderby` | Comma-separated list, up to 8 top-level fields. Each field has its own `asc` or `desc`; a missing direction is ascending. Examples: `$orderby=settlementDate,tradeDate,creationDateTime,UID` and `$orderby=country,age desc`. A missing or null value sorts after a present one. Sort runs after `$filter` and before `$skip`/`$top` |
 | `$filter` | See below |
 | `$select` | Projection; `_id` always included |
@@ -55,7 +56,6 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 |---------|---------|
 | Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs |
 | `$search` | `$search=wireless` |
-| `$skiptoken` / `@odata.nextLink` | Server-driven paging |
 | `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
 | Richer string/date functions | `indexof`, `tolower`, `year(...)` |
 | Delta queries | `$deltaToken` |

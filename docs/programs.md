@@ -209,8 +209,11 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$top=n`** - Limit number of results (pagination)
   - Example: `GET /users?$top=10`
 
-- **`$skip=n`** - Skip number of results (pagination)
+- **`$skip=n`** - Skip number of results (pagination). A deep page still walks every row it skips. A request that uses only `$skip` is unchanged
   - Example: `GET /users?$skip=20`
+
+- **`$skiptoken`** - Resume a later `$top` page after the last row already returned. The body stays a JSON array. When another row exists, the response has `Link: </collection?$skiptoken=...>; rel="next"`. The client follows that URL as-is. The link keeps `$filter`, `$orderby`, `$top`, and `$select`, and drops `$skip`. The token is opaque base64url and is a keyset, not a count of rows. With no `$orderby` the key is the last row's `_id` and the next read starts at the next primary key (`$desc=true` walks that order backward). With `$orderby` the key is the last row's sort values plus `_id`, and the next page is the rows strictly after that tuple. `$skip` together with `$skiptoken` is 422. A malformed token, or a token from a different sort, is 422. Omitting `$top` returns every match and no next link
+  - Example: `GET /users?$top=10`, then `GET` the `Link` header URL
 
 - **`$orderby=field [asc|desc], ...`** - Sort by up to 8 top-level fields. Each field has its own direction; a missing direction is ascending. Applied after `$filter`, before `$skip`/`$top`. A missing or null value sorts after a present one, then `_id` ascending breaks a remaining tie.
   - Examples: `GET /users?$orderby=country,age desc`, `GET /trades?$orderby=settlementDate,tradeDate,creationDateTime,UID`

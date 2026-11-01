@@ -100,6 +100,13 @@ std::vector<orderby_key> orderby_keys(const object& selector);
 void apply_orderby(object& documents, std::span<const orderby_key> keys);
 void apply_orderby(object& documents, std::string_view field, bool descending);
 
+// True when document sorts strictly after the keyset. values is one entry per
+// key, in listed order, then _id. The comparison matches apply_orderby.
+bool after_orderby_keyset(
+    const object& document,
+    std::span<const orderby_key> keys,
+    const object& values);
+
 // Database engine providing CRUD operations and indexing capabilities.
 // Read operations use shared locking; writes use exclusive locking.
 class engine

@@ -28,8 +28,9 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `in` | Strings or numbers |
 | Nested paths | `Customer/Country eq 'USA'` walks objects. A repeated group needs `any` |
 | `any` | Post-filter, after the index read and before `$orderby`/`$skip`/`$top`. `Items/any(d:d/Quantity gt 100)` and `options/any(o: o/securitiesMovements/any(m: m/instrument eq 'FI0009000681'))`. `any()` is true only for a non-empty array. A missing path, an empty array, or a non-array is not a match. More than 8 nested lambdas is rejected. `all` is not supported |
-| `startswith` | Index-backed on top-level secondary keys (not when negated) |
-| `contains` / `endswith` | Post-filter only; `not contains` / `not endswith` supported |
+| `startswith` | Index-backed on top-level secondary keys (not when negated, and not when the field is wrapped in `tolower` / `toupper`) |
+| `contains` / `endswith` | Post-filter only; comparison stays case-sensitive. `not contains` / `not endswith` supported |
+| `tolower` / `toupper` | ASCII `A-Z` / `a-z` only. Case-insensitive matching is `contains(tolower(field), tolower('text'))` (also `startswith`, `endswith`, and `eq` / `ne` / `gt` / `ge` / `lt` / `le`). A folded field is a post-filter. A folded string literal is a constant, so `startswith(name, tolower('AB'))` can still use the prefix index |
 
 ### Metadata & format
 
@@ -57,7 +58,7 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 | Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs |
 | `$search` | `$search=wireless` |
 | `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
-| Richer string/date functions | `indexof`, `tolower`, `year(...)` |
+| Richer string/date functions | `indexof`, `year(...)` |
 | Delta queries | `$deltaToken` |
 | Bound actions / functions | `POST /users(1)/Default.ResetPassword` |
 | XML CSDL `$metadata` | Beyond JSON CSDL |

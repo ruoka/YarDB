@@ -1794,7 +1794,10 @@ private:
                 }
                 catch(const std::invalid_argument& e)
                 {
-                    if(std::string_view{e.what()}.starts_with("any "sv))
+                    const auto message = std::string_view{e.what()};
+                    if(message.starts_with("any "sv)
+                        or message.starts_with("tolower "sv)
+                        or message.starts_with("toupper "sv))
                     {
                         return ::http::make_error_response(
                             status_unprocessable_entity,

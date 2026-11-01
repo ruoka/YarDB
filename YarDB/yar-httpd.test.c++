@@ -6070,6 +6070,123 @@ auto test_set()
         };
     };
 
+    test_case("OData tolower and toupper fold ASCII case, [yardb]") = []
+    {
+        auto setup = std::make_shared<fixture>("./httpd_casefold_test.db");
+
+        const auto names_in = [](const string& body)
+        {
+            auto names = std::vector<string>{};
+            const auto parsed = json::parse(body);
+            for(const auto& row : parsed.get<object::array>())
+                names.push_back(row["name"s].get<string>());
+            std::ranges::sort(names);
+            return names;
+        };
+
+        section("GET contains(tolower) matches mixed case and a bare contains does not") = [setup, names_in]
+        {
+            for(const auto& body : {
+                R"({"name":"NorDEA"})"s,
+                R"({"name":"acme"})"s,
+                R"({"name":"Acme"})"s,
+                R"({"name":"Abacus"})"s,
+                R"({"name":"abacus"})"s,
+                R"({"name":"Zebra","party":{"name":"NorDEA"}})"s})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/cased"s, body);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [index_status, index_reason, index_headers, index_body] = make_request(
+                setup->port(), "PUT"s, "/_db/cased"s, R"({"keys":["name"]})"s);
+            require_eq(index_status, "200"s);
+            (void)index_reason;
+            (void)index_headers;
+            (void)index_body;
+
+            auto [folded_status, folded_reason, folded_headers, folded_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/cased?$filter=contains(tolower(name),'nordea')"s,
+                ""s);
+            require_eq(folded_status, "200"s);
+            (void)folded_reason;
+            (void)folded_headers;
+            require_eq(names_in(folded_body), std::vector<string>{"NorDEA"s});
+
+            auto [literal_status, literal_reason, literal_headers, literal_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/cased?$filter=contains(tolower(name),tolower('NorDEA'))"s,
+                ""s);
+            require_eq(literal_status, "200"s);
+            (void)literal_reason;
+            (void)literal_headers;
+            require_eq(names_in(literal_body), std::vector<string>{"NorDEA"s});
+
+            auto [bare_status, bare_reason, bare_headers, bare_body] = make_request(
+                setup->port(), "GET"s, "/cased?$filter=contains(name,'Acme')"s, ""s);
+            require_eq(bare_status, "200"s);
+            (void)bare_reason;
+            (void)bare_headers;
+            require_eq(names_in(bare_body), std::vector<string>{"Acme"s});
+
+            auto [not_status, not_reason, not_headers, not_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/cased?$filter=not%20contains(tolower(name),'nordea')"s,
+                ""s);
+            require_eq(not_status, "200"s);
+            (void)not_reason;
+            (void)not_headers;
+            require_eq(
+                names_in(not_body),
+                std::vector<string>{"Abacus"s, "Acme"s, "Zebra"s, "abacus"s, "acme"s});
+
+            auto [nested_status, nested_reason, nested_headers, nested_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/cased?$filter=contains(tolower(party/name),'nordea')"s,
+                ""s);
+            require_eq(nested_status, "200"s);
+            (void)nested_reason;
+            (void)nested_headers;
+            require_eq(names_in(nested_body), std::vector<string>{"Zebra"s});
+
+            auto [prefix_status, prefix_reason, prefix_headers, prefix_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/cased?$filter=startswith(tolower(name),'ab')"s,
+                ""s);
+            require_eq(prefix_status, "200"s);
+            (void)prefix_reason;
+            (void)prefix_headers;
+            require_eq(names_in(prefix_body), std::vector<string>{"Abacus"s, "abacus"s});
+
+            auto [exact_status, exact_reason, exact_headers, exact_body] = make_request(
+                setup->port(), "GET"s, "/cased?$filter=startswith(name,'ab')"s, ""s);
+            require_eq(exact_status, "200"s);
+            (void)exact_reason;
+            (void)exact_headers;
+            require_eq(names_in(exact_body), std::vector<string>{"abacus"s});
+        };
+
+        section("GET tolower() returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/cased?$filter=tolower()"s, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("tolower") != string::npos);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

@@ -3415,6 +3415,150 @@ auto register_odata_tests()
         };
     };
 
+    scenario("tolower and toupper fold ASCII case, [yardb]") = []
+    {
+        given("Names whose case changes in the middle") = []
+        {
+            const auto docs = object{object::array{
+                object{{"name"s, "NorDEA"s}},
+                object{{"name"s, "NORDEA"s}},
+                object{{"name"s, "nordea"s}},
+                object{{"name"s, "acme"s}},
+                object{{"name"s, "Acme"s}},
+                object{{"name"s, "Nor-DEA"s}, {"party"s, object{{"name"s, "NorDEA"s}}}},
+                object{{"name"s, 1}}
+            }};
+
+            when("contains folds the field and the literal") = [docs]
+            {
+                then("NorDEA matches nordea and a bare contains stays case-sensitive") = [docs]
+                {
+                    const auto folded = filter_documents_by_parsed(
+                        docs, parse_filter("contains(tolower(name), 'nordea')"sv));
+                    require_eq(folded.get<object::array>().size(), 3u);
+
+                    const auto both = filter_documents_by_parsed(
+                        docs, parse_filter("contains(tolower(name), tolower('NorDEA'))"sv));
+                    require_eq(both.get<object::array>().size(), 3u);
+
+                    const auto upper = filter_documents_by_parsed(
+                        docs, parse_filter("contains(toupper(name), 'NORDEA')"sv));
+                    require_eq(upper.get<object::array>().size(), 3u);
+
+                    const auto bare = filter_documents_by_parsed(
+                        docs, parse_filter("contains(name, 'Acme')"sv));
+                    require_eq(bare.get<object::array>().size(), 1u);
+                    require_eq(bare.get<object::array>()[0]["name"s].get<string>(), "Acme"s);
+
+                    const auto hyphen = filter_documents_by_parsed(
+                        docs, parse_filter("contains(tolower(name), 'nor-dea')"sv));
+                    require_eq(hyphen.get<object::array>().size(), 1u);
+                    require_eq(hyphen.get<object::array>()[0]["name"s].get<string>(), "Nor-DEA"s);
+                };
+            };
+
+            when("The contains is negated or the field is missing or not a string") = [docs]
+            {
+                then("The negation is the complement and a non-string does not match") = [docs]
+                {
+                    const auto negated = filter_documents_by_parsed(
+                        docs, parse_filter("not contains(tolower(name), 'nordea')"sv));
+                    const auto& rows = negated.get<object::array>();
+                    require_eq(rows.size(), 4u);
+                    for(const auto& row : rows)
+                    {
+                        if(row["name"s].is_string())
+                        {
+                            const auto name = row["name"s].get<string>();
+                            require_true(name != "NorDEA"s and name != "NORDEA"s and name != "nordea"s);
+                        }
+                    }
+
+                    const auto missing = filter_documents_by_parsed(
+                        docs, parse_filter("contains(tolower(absent), 'nordea')"sv));
+                    require_eq(missing.get<object::array>().size(), 0u);
+                    const auto missing_not = filter_documents_by_parsed(
+                        docs, parse_filter("not contains(tolower(absent), 'nordea')"sv));
+                    require_eq(missing_not.get<object::array>().size(), docs.get<object::array>().size());
+                };
+            };
+
+            when("The path is nested or the comparison is eq") = [docs]
+            {
+                then("The nested name matches and eq uses the folded field") = [docs]
+                {
+                    const auto nested = filter_documents_by_parsed(
+                        docs, parse_filter("contains(tolower(party/name), 'nordea')"sv));
+                    require_eq(nested.get<object::array>().size(), 1u);
+                    require_eq(nested.get<object::array>()[0]["name"s].get<string>(), "Nor-DEA"s);
+
+                    const auto eq = filter_documents_by_parsed(
+                        docs, parse_filter("tolower(name) eq 'nordea'"sv));
+                    require_eq(eq.get<object::array>().size(), 3u);
+
+                    const auto [selector, filters] = parse_and_filter("name eq tolower('ACME')"sv);
+                    require_true(filters.empty());
+                    require_eq(selector["name"s].get<string>(), "acme"s);
+                    const auto literal = filter_documents_by_parsed(
+                        docs, parse_filter("name eq tolower('ACME')"sv));
+                    require_eq(literal.get<object::array>().size(), 1u);
+                    require_eq(literal.get<object::array>()[0]["name"s].get<string>(), "acme"s);
+                };
+            };
+        };
+
+        given("An indexed name") = []
+        {
+            when("startswith wraps the field in tolower") = []
+            {
+                then("The prefix range is not used") = []
+                {
+                    auto folded = parse_filter("startswith(tolower(name), 'ab')"sv).and_string_filters;
+                    auto selector = object{};
+                    lower_startswith_filters(std::vector<std::string>{"name"s}, selector, folded);
+                    require_eq(folded.size(), 1u);
+                    require_eq(folded[0].field_case, ascii_case::lower);
+                    require_true(selector.empty());
+
+                    auto plain = parse_filter("startswith(name, tolower('AB'))"sv).and_string_filters;
+                    require_eq(plain.size(), 1u);
+                    require_eq(plain[0].value, "ab"sv);
+                    require_eq(plain[0].field_case, ascii_case::identity);
+                    auto lowered = object{};
+                    lower_startswith_filters(std::vector<std::string>{"name"s}, lowered, plain);
+                    require_true(plain.empty());
+                    require_eq(lowered["name"s]["$gte"s].get<string>(), "ab"s);
+                };
+            };
+        };
+
+        given("A malformed tolower or toupper") = []
+        {
+            when("The call has no argument or wraps a non-string literal") = []
+            {
+                then("Parsing is rejected") = []
+                {
+                    const auto rejected = [](std::string_view expr, std::string_view prefix)
+                    {
+                        try
+                        {
+                            std::ignore = parse_filter(expr);
+                            require_true(false);
+                        }
+                        catch(const std::invalid_argument& e)
+                        {
+                            require_true(std::string_view{e.what()}.starts_with(prefix));
+                        }
+                    };
+                    rejected("tolower()"sv, "tolower "sv);
+                    rejected("toupper()"sv, "toupper "sv);
+                    rejected("contains(name, tolower(1))"sv, "tolower "sv);
+                    rejected("tolower(1) eq 'a'"sv, "tolower "sv);
+                };
+            };
+        };
+    };
+
     return true;
 }
 

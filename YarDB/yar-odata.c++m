@@ -163,28 +163,229 @@ inline std::string strip_quoted_literal(std::string_view value)
     return std::string{trimmed};
 }
 
-inline auto parse_string_function_args(std::string_view inner)
+// ASCII A-Z / a-z only. Other bytes, including non-ASCII letters, stay as they are.
+// An explicit range avoids std::tolower and the global locale.
+export enum class ascii_case
+{
+    identity,
+    lower,
+    upper
+};
+
+inline char fold_ascii_byte(unsigned char byte, ascii_case fold)
+{
+    if(fold == ascii_case::lower and byte >= 'A' and byte <= 'Z')
+        return static_cast<char>(byte - 'A' + 'a');
+    if(fold == ascii_case::upper and byte >= 'a' and byte <= 'z')
+        return static_cast<char>(byte - 'a' + 'A');
+    return static_cast<char>(byte);
+}
+
+inline std::string fold_ascii(std::string_view text, ascii_case fold)
+{
+    auto out = std::string{text};
+    if(fold == ascii_case::identity)
+        return out;
+    for(auto& c : out)
+        c = fold_ascii_byte(static_cast<unsigned char>(c), fold);
+    return out;
+}
+
+inline bool is_quoted_literal(std::string_view text)
+{
+    return text.size() >= 2
+        and ((text.front() == '\'' and text.back() == '\'')
+            or (text.front() == '"' and text.back() == '"'));
+}
+
+inline bool is_non_string_literal(std::string_view text)
+{
+    if(text == "true"sv or text == "false"sv or text == "null"sv)
+        return true;
+
+    try
+    {
+        std::ignore = utils::stoll(text);
+        return true;
+    }
+    catch(const std::invalid_argument&)
+    {
+    }
+    catch(const std::out_of_range&)
+    {
+        return true;
+    }
+
+    auto number = xson::number_type{};
+    const auto* begin = text.data();
+    const auto* end = begin + text.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, number);
+    return ec == std::errc{} and ptr == end;
+}
+
+struct case_call
+{
+    ascii_case fold = ascii_case::identity;
+    std::string_view name;
+    std::string_view argument;
+};
+
+inline bool starts_case_call(std::string_view text)
+{
+    text = utils::trim(text);
+    return text.starts_with("tolower("sv) or text.starts_with("toupper("sv);
+}
+
+// tolower/toupper take one argument. The message starts with the function name
+// so the collection handler can answer 422.
+inline case_call require_case_call(std::string_view text)
+{
+    text = utils::trim(text);
+    auto name = "tolower"sv;
+    auto fold = ascii_case::lower;
+    if(text.starts_with("toupper("sv))
+    {
+        name = "toupper"sv;
+        fold = ascii_case::upper;
+    }
+    else if(not text.starts_with("tolower("sv))
+        throw std::invalid_argument{"Invalid filter expression"};
+
+    if(not text.ends_with(')'))
+        throw std::invalid_argument{std::string{name} + " expression is malformed"};
+
+    const auto inner = utils::trim(text.substr(name.size() + 1, text.size() - name.size() - 2));
+    if(inner.empty() or find_outside_quotes(inner, ","sv))
+        throw std::invalid_argument{std::string{name} + " requires one argument"};
+
+    return {fold, name, inner};
+}
+
+inline std::string case_call_name(std::string_view left, std::string_view right)
+{
+    if(utils::trim(left).starts_with("toupper("sv) or utils::trim(right).starts_with("toupper("sv))
+        return "toupper"s;
+    return "tolower"s;
+}
+
+// First argument of contains/startswith/endswith: a field, or tolower/toupper of a field.
+inline std::pair<std::string, ascii_case> parse_function_field(std::string_view raw)
+{
+    const auto text = utils::trim(raw);
+    if(not starts_case_call(text))
+    {
+        if(text.empty())
+            throw std::invalid_argument{"Field name cannot be empty in function arguments"};
+        return {std::string{text}, ascii_case::identity};
+    }
+
+    const auto call = require_case_call(text);
+    const auto argument = utils::trim(call.argument);
+    if(is_quoted_literal(argument) or is_non_string_literal(argument) or starts_case_call(argument))
+        throw std::invalid_argument{std::string{call.name} + " requires a field"};
+    return {std::string{argument}, call.fold};
+}
+
+// Second argument, or a comparison literal. A wrapped literal is folded now.
+// A bare unquoted token stays as text, matching the previous contains() parser.
+inline std::string parse_function_literal(std::string_view raw)
+{
+    const auto text = utils::trim(raw);
+    if(not starts_case_call(text))
+        return strip_quoted_literal(text);
+
+    const auto call = require_case_call(text);
+    const auto argument = utils::trim(call.argument);
+    if(not is_quoted_literal(argument))
+        throw std::invalid_argument{std::string{call.name} + " requires a string literal"};
+    return fold_ascii(strip_quoted_literal(argument), call.fold);
+}
+
+struct parsed_string_args
+{
+    std::string field;
+    std::string value;
+    ascii_case field_case = ascii_case::identity;
+};
+
+inline parsed_string_args parse_string_function_args(std::string_view inner)
 {
     auto args = split_outside_quotes(inner, ","sv) | std::ranges::to<std::vector<std::string_view>>();
     if(args.size() != 2)
         throw std::invalid_argument{"Invalid function arguments: "s + std::string{inner}};
 
-    auto field = std::string{utils::trim(args[0])};
-    auto value = strip_quoted_literal(args[1]);
+    auto [field, field_case] = parse_function_field(args[0]);
+    auto value = parse_function_literal(args[1]);
+    return {std::move(field), std::move(value), field_case};
+}
 
-    if(field.empty())
-        throw std::invalid_argument{"Field name cannot be empty in function arguments: "s + std::string{inner}};
+struct comparison_side
+{
+    bool field = false;
+    bool string_literal = false;
+    std::string text;
+    ascii_case fold = ascii_case::identity;
+};
 
-    return std::make_pair(std::move(field), std::move(value));
+inline comparison_side parse_comparison_side(std::string_view raw)
+{
+    const auto text = utils::trim(raw);
+    if(starts_case_call(text))
+    {
+        const auto call = require_case_call(text);
+        const auto argument = utils::trim(call.argument);
+        if(starts_case_call(argument))
+            throw std::invalid_argument{std::string{call.name} + " requires a field or a string literal"};
+        if(is_quoted_literal(argument))
+            return {false, true, fold_ascii(strip_quoted_literal(argument), call.fold), ascii_case::identity};
+        if(is_non_string_literal(argument))
+            throw std::invalid_argument{std::string{call.name} + " requires a string literal"};
+        return {true, false, std::string{argument}, call.fold};
+    }
+
+    if(is_quoted_literal(text))
+        return {false, true, strip_quoted_literal(text), ascii_case::identity};
+    if(is_non_string_literal(text))
+        return {};
+    if(text.empty())
+        return {};
+    return {true, false, std::string{text}, ascii_case::identity};
+}
+
+struct case_comparison
+{
+    std::string field;
+    std::string literal;
+    ascii_case field_case = ascii_case::identity;
+};
+
+// One side is a field (optionally folded) and the other is a string literal
+// (already folded when it was wrapped).
+inline case_comparison resolve_case_comparison(std::string_view left_raw, std::string_view right_raw)
+{
+    const auto left = parse_comparison_side(left_raw);
+    const auto right = parse_comparison_side(right_raw);
+    const auto name = case_call_name(left_raw, right_raw);
+    if(not left.field and not right.field)
+        throw std::invalid_argument{name + " comparison requires a field and a string literal"};
+    if(left.field and right.field)
+        throw std::invalid_argument{name + " comparison requires a field and a string literal"};
+    if(not left.string_literal and not right.string_literal)
+        throw std::invalid_argument{name + " comparison requires a field and a string literal"};
+
+    if(left.field)
+        return {left.text, right.text, left.fold};
+    return {right.text, left.text, right.fold};
 }
 
 // String filter function type for post-processing
 export struct string_filter
 {
-    std::string_view function;  // "startswith", "contains", "endswith" (string literals)
+    std::string_view function;  // "startswith", "contains", "endswith", or a folded comparison
     std::string field;          // Field name (copied; may be nested path)
     std::string value;          // Filter value (owned so OData '' escapes can be unescaped)
     bool negated = false;       // true for `not contains(...)` / `not startswith(...)` / …
+    ascii_case field_case = ascii_case::identity;
 };
 
 export struct parsed_filter;
@@ -1005,8 +1206,13 @@ inline filter_clause parse_filter_leaf(
         if(expr.starts_with(prefix) and expr.back() == ')')
         {
             auto inner = expr.substr(prefix.size(), expr.size() - prefix.size() - 1);
-            auto [field, value] = parse_string_function_args(inner);
-            string_filters.push_back(string_filter{name, std::move(field), std::move(value)});
+            auto parsed = parse_string_function_args(inner);
+            string_filters.push_back(string_filter{
+                name,
+                std::move(parsed.field),
+                std::move(parsed.value),
+                false,
+                parsed.field_case});
             return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
         }
     }
@@ -1032,10 +1238,50 @@ inline filter_clause parse_filter_leaf(
     }
 
     if(not op_pos)
+    {
+        const auto trimmed = utils::trim(expr);
+        if(starts_case_call(trimmed))
+        {
+            const auto call = require_case_call(trimmed);
+            const auto argument = utils::trim(call.argument);
+            if(is_non_string_literal(argument))
+                throw std::invalid_argument{std::string{call.name} + " requires a string literal"};
+            if(is_quoted_literal(argument))
+                throw std::invalid_argument{std::string{call.name}
+                    + " comparison requires a field and a string literal"};
+        }
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
+    }
 
     const auto field = utils::trim_right(expr.substr(0, *op_pos));
     const auto value_view = utils::trim_left(expr.substr(*op_pos + op.size() + 1));
+
+    // A folded field is not the index key. A folded literal is a constant, so
+    // tolower('ACME') on the value side still uses the ordinary selector.
+    if(starts_case_call(field) or starts_case_call(value_view))
+    {
+        const auto compared = resolve_case_comparison(field, value_view);
+        if(compared.field_case == ascii_case::identity)
+        {
+            if(op == "eq")
+                set_nested_selector_leaf(selector, compared.field, xson::object{compared.literal});
+            else if(op == "ne")
+                set_nested_selector_leaf(selector, compared.field, xson::object{{"$ne"s, compared.literal}});
+            else if(op == "gt")
+                set_nested_selector_leaf(selector, compared.field, xson::object{{"$gt"s, compared.literal}});
+            else if(op == "ge")
+                set_nested_selector_leaf(selector, compared.field, xson::object{{"$gte"s, compared.literal}});
+            else if(op == "lt")
+                set_nested_selector_leaf(selector, compared.field, xson::object{{"$lt"s, compared.literal}});
+            else if(op == "le")
+                set_nested_selector_leaf(selector, compared.field, xson::object{{"$lte"s, compared.literal}});
+            return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
+        }
+
+        string_filters.push_back(string_filter{
+            op, compared.field, compared.literal, false, compared.field_case});
+        return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
+    }
 
     // Validate field name is not empty
     if(field.empty())
@@ -1427,6 +1673,7 @@ export inline void lower_startswith_filters(
         // Negated startswith cannot use a prefix range (would exclude the wrong set).
         if(filter.function != "startswith"sv
             or filter.negated
+            or filter.field_case != ascii_case::identity
             or filter.field.contains('/'))
         {
             remaining.push_back(filter);
@@ -1456,6 +1703,49 @@ export inline void lower_startswith_filters(
     string_filters = std::move(remaining);
 }
 
+inline bool known_string_predicate(std::string_view function)
+{
+    return function == "startswith"sv
+        or function == "contains"sv
+        or function == "endswith"sv
+        or function == "eq"sv
+        or function == "ne"sv
+        or function == "gt"sv
+        or function == "ge"sv
+        or function == "lt"sv
+        or function == "le"sv;
+}
+
+inline bool match_folded_string(std::string_view text, const string_filter& filter)
+{
+    const auto folded = filter.field_case == ascii_case::identity
+        ? std::string{}
+        : fold_ascii(text, filter.field_case);
+    const auto view = filter.field_case == ascii_case::identity
+        ? text
+        : std::string_view{folded};
+    const auto& value = filter.value;
+    if(filter.function == "startswith"sv)
+        return view.starts_with(value);
+    if(filter.function == "contains"sv)
+        return view.contains(value);
+    if(filter.function == "endswith"sv)
+        return view.ends_with(value);
+    if(filter.function == "eq"sv)
+        return view == value;
+    if(filter.function == "ne"sv)
+        return view != value;
+    if(filter.function == "gt"sv)
+        return view > value;
+    if(filter.function == "ge"sv)
+        return view >= value;
+    if(filter.function == "lt"sv)
+        return view < value;
+    if(filter.function == "le"sv)
+        return view <= value;
+    throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+}
+
 // True when a document satisfies every post-filter string function
 inline auto document_matches_string_filters(
     const xson::object& doc,
@@ -1463,25 +1753,13 @@ inline auto document_matches_string_filters(
 {
     return std::ranges::all_of(filters, [&](const string_filter& filter)
     {
+        if(not known_string_predicate(filter.function))
+            throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+
         const auto field = get_string_field_by_path(doc, filter.field);
         auto matches = false;
         if(field)
-        {
-            if(filter.function == "startswith"sv)
-                matches = field->starts_with(filter.value);
-            else if(filter.function == "contains"sv)
-                matches = field->contains(filter.value);
-            else if(filter.function == "endswith"sv)
-                matches = field->ends_with(filter.value);
-            else
-                throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
-        }
-        else if(filter.function != "startswith"sv
-            and filter.function != "contains"sv
-            and filter.function != "endswith"sv)
-        {
-            throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
-        }
+            matches = match_folded_string(*field, filter);
 
         // Missing field → false for positive string ops; not contains(...) → true.
         return filter.negated ? not matches : matches;
@@ -1589,26 +1867,13 @@ inline bool selector_matches(const eval_scope& scope, const xson::object& select
 
 inline bool string_filter_matches(const eval_scope& scope, const string_filter& filter)
 {
+    if(not known_string_predicate(filter.function))
+        throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+
     const auto located = locate_path(scope, filter.field);
     auto matches = false;
     if(located.value != nullptr and located.value->is_string())
-    {
-        const auto& text = located.value->get<std::string>();
-        if(filter.function == "startswith"sv)
-            matches = text.starts_with(filter.value);
-        else if(filter.function == "contains"sv)
-            matches = text.contains(filter.value);
-        else if(filter.function == "endswith"sv)
-            matches = text.ends_with(filter.value);
-        else
-            throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
-    }
-    else if(filter.function != "startswith"sv
-        and filter.function != "contains"sv
-        and filter.function != "endswith"sv)
-    {
-        throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
-    }
+        matches = match_folded_string(located.value->get<std::string>(), filter);
     return filter.negated ? not matches : matches;
 }
 

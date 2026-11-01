@@ -187,6 +187,26 @@ export struct string_filter
     bool negated = false;       // true for `not contains(...)` / `not startswith(...)` / …
 };
 
+export struct parsed_filter;
+
+// One any() / any(var: expr) post-filter. The predicate is parsed once and
+// shared across AND/OR copies. negated flips under `not` without cloning it.
+export struct any_filter
+{
+    std::string collection;
+    std::string variable;
+    bool bare = false;
+    bool negated = false;
+    std::shared_ptr<parsed_filter> predicate;
+
+    any_filter() = default;
+    any_filter(const any_filter&) = default;
+    any_filter(any_filter&&) noexcept = default;
+    any_filter& operator=(const any_filter&) = default;
+    any_filter& operator=(any_filter&&) noexcept = default;
+    ~any_filter();
+};
+
 // One branch of an OData OR expression (selector AND string filters within the branch).
 // `negated_selectors` are positive selectors that must fail `object::match` — used for
 // boolean `not` so type-mismatched / missing fields follow `!match(P)` rather than the
@@ -196,6 +216,7 @@ export struct filter_branch
     xson::object selector;
     std::vector<string_filter> string_filters;
     std::vector<xson::object> negated_selectors;
+    std::vector<any_filter> any_filters;
 };
 
 // Parsed $filter: either a single AND-group or multiple OR branches (OData: AND binds tighter than OR)
@@ -205,12 +226,15 @@ export struct parsed_filter
     std::vector<string_filter> and_string_filters;
     std::vector<xson::object> and_negated_selectors;
     std::vector<filter_branch> or_branches;
+    std::vector<any_filter> and_any_filters;
 
     [[nodiscard]] bool has_or() const noexcept
     {
         return not or_branches.empty();
     }
 };
+
+inline any_filter::~any_filter() = default;
 
 // Cap OR-branch fan-out from AND-over-OR distribution and from De Morgan
 // `not` of a DNF formula (which otherwise rebuilds a CNF cartesian product).
@@ -224,6 +248,11 @@ export inline constexpr std::size_t max_filter_or_branches = 64;
 // CPU — enough for a single GET /$filter to crash or pin the request thread.
 export inline constexpr std::size_t max_filter_not_depth = 64;
 export inline constexpr std::size_t max_filter_expression_length = 8192;
+
+// Nested any(var: expr) levels. Eight is accepted; the ninth is rejected.
+// any is not rewritten into per-element OR branches, so this cap is separate
+// from max_filter_or_branches.
+export inline constexpr std::size_t max_lambda_depth = 8;
 
 inline void ensure_filter_or_branch_budget(std::size_t branch_count)
 {
@@ -643,7 +672,7 @@ inline auto make_in_selector(std::string_view field, std::span<const xson::objec
     return selector;
 }
 
-using filter_clause = std::pair<xson::object, std::vector<string_filter>>;
+using filter_clause = std::tuple<xson::object, std::vector<string_filter>, std::vector<any_filter>>;
 
 // Walk a selector into path + leaf atoms (AND conjuncts).
 // Operator-constraint maps stay intact (including multi-op and impossible
@@ -682,7 +711,13 @@ inline void collect_selector_atoms(
 inline filter_branch negate_string_filter(string_filter filter)
 {
     filter.negated = not filter.negated;
-    return filter_branch{xson::object{}, {std::move(filter)}, {}};
+    return filter_branch{xson::object{}, {std::move(filter)}, {}, {}};
+}
+
+inline filter_branch negate_any_filter(any_filter filter)
+{
+    filter.negated = not filter.negated;
+    return filter_branch{xson::object{}, {}, {}, {std::move(filter)}};
 }
 
 // Keep the positive leaf and mark it negated. Operator rewrites ($eq→$ne,
@@ -693,11 +728,15 @@ inline filter_branch negate_selector_atom(std::string path, const xson::object& 
 {
     auto positive = xson::object{};
     set_nested_selector_leaf(positive, path, leaf);
-    return filter_branch{xson::object{}, {}, {std::move(positive)}};
+    return filter_branch{xson::object{}, {}, {std::move(positive)}, {}};
 }
 
 // Forward declaration — defined with parse_filter below.
 inline parsed_filter negate_parsed_filter(parsed_filter filter);
+inline parsed_filter parse_filter_impl(
+    std::string_view filter_expr,
+    std::size_t not_depth,
+    std::size_t lambda_depth);
 
 // Strip balanced outer parentheses that wrap an entire expression.
 // OData clients commonly group with (name eq 'Alice'); without this, the
@@ -763,8 +802,167 @@ inline std::string_view strip_outer_parens(std::string_view expr)
     return expr;
 }
 
+inline bool is_lambda_variable(std::string_view name)
+{
+    if(name.empty())
+        return false;
+
+    const auto letter = [](char c)
+    {
+        return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or c == '_';
+    };
+    if(not letter(name.front()))
+        return false;
+
+    return std::ranges::all_of(name.substr(1), [&](char c)
+    {
+        return letter(c) or (c >= '0' and c <= '9');
+    });
+}
+
+// Index of `/any(` at parenthesis depth 0, outside quotes. `/any()` is included.
+inline std::optional<std::size_t> find_any_operator(std::string_view expr)
+{
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+    auto depth = 0;
+
+    for(auto i = std::size_t{0}; i < expr.size(); ++i)
+    {
+        const auto c = expr[i];
+        if(in_quote)
+        {
+            if(c == quote_char and i + 1 < expr.size() and expr[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+            if(c == quote_char)
+                in_quote = false;
+            continue;
+        }
+        if(c == '\'' or c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+        if(c == '(')
+        {
+            ++depth;
+            continue;
+        }
+        if(c == ')')
+        {
+            if(depth == 0)
+                return std::nullopt;
+            --depth;
+            continue;
+        }
+        if(depth != 0)
+            continue;
+        if(expr.substr(i).starts_with("/any("sv))
+            return i;
+    }
+    return std::nullopt;
+}
+
+inline std::size_t matching_paren(std::string_view text, std::size_t open)
+{
+    auto in_quote = false;
+    auto quote_char = char{'\0'};
+    auto depth = 0;
+
+    for(auto i = open; i < text.size(); ++i)
+    {
+        const auto c = text[i];
+        if(in_quote)
+        {
+            if(c == quote_char and i + 1 < text.size() and text[i + 1] == quote_char)
+            {
+                ++i;
+                continue;
+            }
+            if(c == quote_char)
+                in_quote = false;
+            continue;
+        }
+        if(c == '\'' or c == '"')
+        {
+            in_quote = true;
+            quote_char = c;
+            continue;
+        }
+        if(c == '(')
+            ++depth;
+        else if(c == ')')
+        {
+            --depth;
+            if(depth == 0)
+                return i;
+        }
+    }
+    throw std::invalid_argument{"any expression is malformed"};
+}
+
+// nullopt when expr is not an any-call. Throws for a malformed any.
+inline std::optional<any_filter> try_parse_any_filter(
+    std::string_view expr,
+    std::size_t not_depth,
+    std::size_t lambda_depth)
+{
+    const auto bare_call = expr.starts_with("any("sv);
+    const auto slash = find_any_operator(expr);
+    if(not slash and not bare_call)
+        return std::nullopt;
+    if(not slash)
+        throw std::invalid_argument{"any requires a collection path"};
+
+    const auto path = utils::trim(expr.substr(0, *slash));
+    if(path.empty())
+        throw std::invalid_argument{"any requires a collection path"};
+    std::ignore = split_property_path(path);
+
+    const auto open = *slash + std::string_view{"/any"}.size();
+    const auto close = matching_paren(expr, open);
+    if(not utils::trim(expr.substr(close + 1)).empty())
+        throw std::invalid_argument{"any expression is malformed"};
+
+    auto filter = any_filter{};
+    filter.collection = std::string{path};
+    const auto inner = utils::trim(expr.substr(open + 1, close - open - 1));
+    if(inner.empty())
+    {
+        filter.bare = true;
+        return filter;
+    }
+
+    const auto colon = find_outside_quotes(inner, ":"sv);
+    if(not colon)
+        throw std::invalid_argument{
+            "any requires a colon between the lambda variable and the expression"};
+
+    const auto variable = utils::trim(inner.substr(0, *colon));
+    const auto predicate = utils::trim(inner.substr(*colon + 1));
+    if(variable.empty())
+        throw std::invalid_argument{"any lambda variable cannot be empty"};
+    if(not is_lambda_variable(variable) or predicate.empty())
+        throw std::invalid_argument{"any expression is malformed"};
+    if(lambda_depth >= max_lambda_depth)
+        throw std::invalid_argument{"any supports at most "s
+            + std::to_string(max_lambda_depth) + " nested lambdas"};
+
+    filter.variable = std::string{variable};
+    filter.predicate = std::make_shared<parsed_filter>(
+        parse_filter_impl(predicate, not_depth, lambda_depth + 1));
+    return filter;
+}
+
 // Parse a single leaf $filter expression (no top-level and/or)
-inline filter_clause parse_filter_leaf(std::string_view filter_expr)
+inline filter_clause parse_filter_leaf(
+    std::string_view filter_expr,
+    std::size_t not_depth,
+    std::size_t lambda_depth)
 {
     auto selector = xson::object{};
     auto string_filters = std::vector<string_filter>{};
@@ -772,6 +970,14 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
 
     if(expr.empty())
         throw std::invalid_argument{"Invalid filter expression: "s + std::string{filter_expr}};
+
+    if(const auto any = try_parse_any_filter(expr, not_depth, lambda_depth))
+    {
+        return std::make_tuple(
+            xson::object{},
+            std::vector<string_filter>{},
+            std::vector<any_filter>{*any});
+    }
 
     // Handle 'in' operator: field in ('a','b') or field in (1, 2, 3)
     // Quote-aware: plain find would hijack contains/eq leaves whose literals contain " in (".
@@ -788,7 +994,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
         const auto list_start = *in_pos + in_marker.size();
         const auto list_content = expr.substr(list_start, expr.size() - list_start - 1);
         const auto values = parse_in_value_list(list_content);
-        return std::make_pair(make_in_selector(field, values), string_filters);
+        return std::make_tuple(make_in_selector(field, values), string_filters, std::vector<any_filter>{});
     }
     
     // String functions: startswith / contains / endswith(field, 'value')
@@ -801,7 +1007,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
             auto inner = expr.substr(prefix.size(), expr.size() - prefix.size() - 1);
             auto [field, value] = parse_string_function_args(inner);
             string_filters.push_back(string_filter{name, std::move(field), std::move(value)});
-            return std::make_pair(selector, string_filters);
+            return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
         }
     }
     
@@ -933,7 +1139,7 @@ inline filter_clause parse_filter_leaf(std::string_view filter_expr)
     else if(op == "le")
         set_nested_selector_leaf(selector, field, xson::object{{"$lte"s, comparison_literal("le"sv)}});
     
-    return std::make_pair(selector, string_filters);
+    return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
 }
 
 // Normalize a parsed filter to OR-branch form (single AND becomes one branch).
@@ -946,7 +1152,8 @@ inline std::vector<filter_branch> as_or_branches(parsed_filter filter)
         filter_branch{
             std::move(filter.and_selector),
             std::move(filter.and_string_filters),
-            std::move(filter.and_negated_selectors)}};
+            std::move(filter.and_negated_selectors),
+            std::move(filter.and_any_filters)}};
 }
 
 inline parsed_filter parsed_from_branches(std::vector<filter_branch> branches)
@@ -960,10 +1167,11 @@ inline parsed_filter parsed_from_branches(std::vector<filter_branch> branches)
             std::move(branches[0].selector),
             std::move(branches[0].string_filters),
             std::move(branches[0].negated_selectors),
-            {}};
+            {},
+            std::move(branches[0].any_filters)};
     }
 
-    return parsed_filter{{}, {}, {}, std::move(branches)};
+    return parsed_filter{{}, {}, {}, std::move(branches), {}};
 }
 
 // AND two branches by merging selectors and concatenating post-filters.
@@ -978,10 +1186,14 @@ inline filter_branch and_filter_branches(const filter_branch& left, const filter
     auto negated_selectors = left.negated_selectors;
     negated_selectors.append_range(right.negated_selectors);
 
+    auto any_filters = left.any_filters;
+    any_filters.append_range(right.any_filters);
+
     return filter_branch{
         std::move(selector),
         std::move(string_filters),
-        std::move(negated_selectors)};
+        std::move(negated_selectors),
+        std::move(any_filters)};
 }
 
 // Distribute AND over OR: (A∨B) ∧ (C∨D) → AC∨AD∨BC∨BD.
@@ -1039,7 +1251,8 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
 
     const auto atom_count = atoms.size()
         + filter.and_string_filters.size()
-        + filter.and_negated_selectors.size();
+        + filter.and_negated_selectors.size()
+        + filter.and_any_filters.size();
     ensure_filter_or_branch_budget(atom_count);
 
     for(auto& [path, leaf] : atoms)
@@ -1048,9 +1261,12 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
     for(auto& string_filter : filter.and_string_filters)
         branches.push_back(negate_string_filter(std::move(string_filter)));
 
+    for(auto& any : filter.and_any_filters)
+        branches.push_back(negate_any_filter(std::move(any)));
+
     // not(not P): and_negated_selectors holds P → become positive selector branches.
     for(auto& positive : filter.and_negated_selectors)
-        branches.push_back(filter_branch{std::move(positive), {}, {}});
+        branches.push_back(filter_branch{std::move(positive), {}, {}, {}});
 
     if(branches.empty())
         throw std::invalid_argument{"Cannot negate empty filter expression"};
@@ -1062,7 +1278,10 @@ inline parsed_filter negate_parsed_filter(parsed_filter filter)
 // Supports: comparisons, in, string functions, not, and (AND), or (OR)
 // Precedence: not > and > or. Grouping parentheses are honored; top-level and/or
 // splits ignore nested groups, and `(A or B) and C` distributes to OR branches.
-inline parsed_filter parse_filter_impl(std::string_view filter_expr, std::size_t not_depth)
+inline parsed_filter parse_filter_impl(
+    std::string_view filter_expr,
+    std::size_t not_depth,
+    std::size_t lambda_depth)
 {
     auto expr = strip_outer_parens(filter_expr);
 
@@ -1073,8 +1292,8 @@ inline parsed_filter parse_filter_impl(std::string_view filter_expr, std::size_t
     {
         // Flatten nested OR branches from each part (join of parse → as_or_branches).
         auto branches = split_outside_quotes_and_parens(expr, " or "sv)
-            | std::views::transform([not_depth](std::string_view part) {
-                  return as_or_branches(parse_filter_impl(part, not_depth));
+            | std::views::transform([not_depth, lambda_depth](std::string_view part) {
+                  return as_or_branches(parse_filter_impl(part, not_depth, lambda_depth));
               })
             | std::views::join
             | std::ranges::to<std::vector<filter_branch>>();
@@ -1095,9 +1314,9 @@ inline parsed_filter parse_filter_impl(std::string_view filter_expr, std::size_t
         if(parts.empty())
             throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
 
-        auto merged = parse_filter_impl(parts.front(), not_depth);
+        auto merged = parse_filter_impl(parts.front(), not_depth, lambda_depth);
         for(const auto part : parts | std::views::drop(1))
-            merged = and_parsed_filters(std::move(merged), parse_filter_impl(part, not_depth));
+            merged = and_parsed_filters(std::move(merged), parse_filter_impl(part, not_depth, lambda_depth));
 
         return merged;
     }
@@ -1111,11 +1330,16 @@ inline parsed_filter parse_filter_impl(std::string_view filter_expr, std::size_t
             rest = utils::trim(rest);
         if(rest.empty())
             throw std::invalid_argument{"Invalid filter expression: "s + std::string{expr}};
-        return negate_parsed_filter(parse_filter_impl(rest, not_depth + 1));
+        return negate_parsed_filter(parse_filter_impl(rest, not_depth + 1, lambda_depth));
     }
 
-    auto [selector, string_filters] = parse_filter_leaf(expr);
-    return parsed_filter{std::move(selector), std::move(string_filters), {}, {}};
+    auto [selector, string_filters, any_filters] = parse_filter_leaf(expr, not_depth, lambda_depth);
+    return parsed_filter{
+        std::move(selector),
+        std::move(string_filters),
+        {},
+        {},
+        std::move(any_filters)};
 }
 
 export inline parsed_filter parse_filter(std::string_view filter_expr)
@@ -1126,7 +1350,7 @@ export inline parsed_filter parse_filter(std::string_view filter_expr)
             "Filter expression is too long (exceeds "
             + std::to_string(max_filter_expression_length) + " characters)"};
     }
-    return parse_filter_impl(filter_expr, 0);
+    return parse_filter_impl(filter_expr, 0, 0);
 }
 
 // Helper function to apply $select projection to documents
@@ -1281,6 +1505,198 @@ inline auto apply_string_filters(const xson::object& documents, const std::vecto
             | std::ranges::to<xson::object::array>()};
 }
 
+// A lambda scope. owner is the instance that owns the collection being tested.
+// bindings are in-scope lambda variables; the innermost one wins, and a
+// variable hides a property of the same name.
+struct eval_scope
+{
+    const xson::object* owner = nullptr;
+    std::vector<std::pair<std::string, const xson::object*>> bindings;
+};
+
+inline const xson::object* binding_for(const eval_scope& scope, std::string_view name)
+{
+    for(const auto& [variable, member] : scope.bindings | std::views::reverse)
+    {
+        if(variable == name)
+            return member;
+    }
+    return nullptr;
+}
+
+// Walk objects only. A missing segment or an array along the way is a miss.
+// The owner of the final value is the object that contains it.
+struct located_value
+{
+    const xson::object* value = nullptr;
+    const xson::object* owner = nullptr;
+};
+
+inline located_value locate_path(const eval_scope& scope, std::string_view path)
+{
+    if(scope.owner == nullptr)
+        return {};
+
+    const auto segments = split_property_path(path);
+    const xson::object* current = nullptr;
+    auto index = std::size_t{0};
+    auto owner = scope.owner;
+
+    if(const auto* bound = binding_for(scope, segments[0]))
+    {
+        if(segments.size() == 1)
+            return located_value{bound, scope.owner};
+        current = bound;
+        index = 1;
+    }
+    else
+        current = scope.owner;
+
+    for(; index < segments.size(); ++index)
+    {
+        if(current == nullptr or not current->has_objects() or not current->has(segments[index]))
+            return {};
+        owner = current;
+        current = &(*current)[segments[index]];
+    }
+    return located_value{current, owner};
+}
+
+inline bool value_matches_constraint(const xson::object& value, const xson::object& constraint)
+{
+    auto holder = xson::object{};
+    holder["v"s] = value;
+    auto selector = xson::object{};
+    selector["v"s] = constraint;
+    return holder.match(selector);
+}
+
+inline bool selector_matches(const eval_scope& scope, const xson::object& selector)
+{
+    if(not selector.has_objects() or selector.empty())
+        return true;
+
+    auto atoms = std::vector<std::pair<std::string, xson::object>>{};
+    collect_selector_atoms(selector, ""sv, atoms);
+    return std::ranges::all_of(atoms, [&](const auto& atom)
+    {
+        const auto located = locate_path(scope, atom.first);
+        if(located.value == nullptr)
+            return false;
+        return value_matches_constraint(*located.value, atom.second);
+    });
+}
+
+inline bool string_filter_matches(const eval_scope& scope, const string_filter& filter)
+{
+    const auto located = locate_path(scope, filter.field);
+    auto matches = false;
+    if(located.value != nullptr and located.value->is_string())
+    {
+        const auto& text = located.value->get<std::string>();
+        if(filter.function == "startswith"sv)
+            matches = text.starts_with(filter.value);
+        else if(filter.function == "contains"sv)
+            matches = text.contains(filter.value);
+        else if(filter.function == "endswith"sv)
+            matches = text.ends_with(filter.value);
+        else
+            throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+    }
+    else if(filter.function != "startswith"sv
+        and filter.function != "contains"sv
+        and filter.function != "endswith"sv)
+    {
+        throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
+    }
+    return filter.negated ? not matches : matches;
+}
+
+inline bool any_matches(const eval_scope& scope, const any_filter& filter);
+inline bool parsed_matches(const eval_scope& scope, const parsed_filter& filter);
+
+inline bool branch_matches_in_scope(const eval_scope& scope, const filter_branch& branch)
+{
+    if(not selector_matches(scope, branch.selector))
+        return false;
+    if(not std::ranges::all_of(branch.negated_selectors, [&](const xson::object& selector)
+    {
+        return not selector_matches(scope, selector);
+    }))
+        return false;
+    if(not std::ranges::all_of(branch.string_filters, [&](const string_filter& filter)
+    {
+        return string_filter_matches(scope, filter);
+    }))
+        return false;
+    return std::ranges::all_of(branch.any_filters, [&](const any_filter& filter)
+    {
+        return any_matches(scope, filter);
+    });
+}
+
+inline bool parsed_matches(const eval_scope& scope, const parsed_filter& filter)
+{
+    if(filter.has_or())
+    {
+        return std::ranges::any_of(filter.or_branches, [&](const filter_branch& branch)
+        {
+            return branch_matches_in_scope(scope, branch);
+        });
+    }
+
+    const auto branch = filter_branch{
+        filter.and_selector,
+        filter.and_string_filters,
+        filter.and_negated_selectors,
+        filter.and_any_filters};
+    return branch_matches_in_scope(scope, branch);
+}
+
+inline bool any_matches(const eval_scope& scope, const any_filter& filter)
+{
+    const auto located = locate_path(scope, filter.collection);
+    const auto* value = located.value;
+    auto matched = false;
+    if(value != nullptr and value->is_array())
+    {
+        const auto& items = value->get<xson::object::array>();
+        if(filter.bare)
+            matched = not items.empty();
+        else if(filter.predicate)
+        {
+            matched = std::ranges::any_of(items, [&](const xson::object& member)
+            {
+                auto inner = scope;
+                inner.owner = located.owner;
+                inner.bindings.push_back({filter.variable, &member});
+                return parsed_matches(inner, *filter.predicate);
+            });
+        }
+    }
+    return filter.negated ? not matched : matched;
+}
+
+inline auto apply_any_filters(
+    const xson::object& documents,
+    const std::vector<any_filter>& filters)
+{
+    if(filters.empty() or not documents.is_array())
+        return documents;
+
+    return xson::object{
+        documents.get<xson::object::array>()
+            | std::views::filter([&](const xson::object& doc)
+            {
+                const auto scope = eval_scope{&doc, {}};
+                return std::ranges::all_of(filters, [&](const any_filter& filter)
+                {
+                    return any_matches(scope, filter);
+                });
+            })
+            | std::ranges::to<xson::object::array>()};
+}
+
 // True when a document matches one OR branch: positive selector, every
 // negated selector fails match, and string filters hold.
 export inline auto document_matches_branch(const xson::object& doc, const filter_branch& branch)
@@ -1293,7 +1709,11 @@ export inline auto document_matches_branch(const xson::object& doc, const filter
            [&](const xson::object& selector) { return not doc.match(selector); }))
         return false;
 
-    return document_matches_string_filters(doc, branch.string_filters);
+    return document_matches_string_filters(doc, branch.string_filters)
+        and std::ranges::all_of(branch.any_filters, [&](const any_filter& filter)
+        {
+            return any_matches(eval_scope{&doc, {}}, filter);
+        });
 }
 
 // Post-filter after engine.read already applied branch.selector (over-scan safe).
@@ -1456,6 +1876,7 @@ export inline std::size_t count_with_parsed_filter(
             engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_negated_and_string_filters(
                 branch_docs, branch.negated_selectors, branch.string_filters);
+            filtered = apply_any_filters(filtered, branch.any_filters);
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
 
@@ -1470,7 +1891,9 @@ export inline std::size_t count_with_parsed_filter(
     auto string_filters = filter.and_string_filters;
     lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
-    if(not string_filters.empty() or not filter.and_negated_selectors.empty())
+    if(not string_filters.empty()
+        or not filter.and_negated_selectors.empty()
+        or not filter.and_any_filters.empty())
     {
         // Count must ignore $top/$skip — strip in case a caller left them in.
         std::ignore = extract_and_strip_paging(query_selector);
@@ -1478,6 +1901,7 @@ export inline std::size_t count_with_parsed_filter(
         engine.read(collection, query_selector, documents);
         documents = apply_negated_and_string_filters(
             documents, filter.and_negated_selectors, string_filters);
+        documents = apply_any_filters(documents, filter.and_any_filters);
         if(not documents.is_array())
             return 0;
 
@@ -1510,6 +1934,7 @@ export inline auto read_with_parsed_filter(
             engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_negated_and_string_filters(
                 branch_docs, branch.negated_selectors, branch.string_filters);
+            filtered = apply_any_filters(filtered, branch.any_filters);
             merge_or_branch_documents(merged, filtered, seen_ids);
         }
 
@@ -1524,17 +1949,20 @@ export inline auto read_with_parsed_filter(
     auto string_filters = filter.and_string_filters;
     lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
-    // Post-filter functions (contains/endswith/non-indexed startswith) and
-    // negated comparison atoms must run before $top/$skip/$orderby. Otherwise
-    // paging is applied to the unfiltered scan and matching rows outside the
-    // window are silently dropped.
-    if(not string_filters.empty() or not filter.and_negated_selectors.empty())
+    // Post-filter functions (contains/endswith/non-indexed startswith),
+    // negated comparison atoms, and any() run before $top/$skip/$orderby.
+    // Otherwise paging is applied to the unfiltered scan and matching rows
+    // outside the window are silently dropped.
+    if(not string_filters.empty()
+        or not filter.and_negated_selectors.empty()
+        or not filter.and_any_filters.empty())
     {
         const auto paging = extract_and_strip_paging(query_selector);
         auto documents = xson::object{};
         engine.read(collection, query_selector, documents);
         documents = apply_negated_and_string_filters(
             documents, filter.and_negated_selectors, string_filters);
+        documents = apply_any_filters(documents, filter.and_any_filters);
         if(not paging.orderby.empty())
             yar::db::apply_orderby(documents, paging.orderby);
         return apply_top_skip(documents, paging.skip, paging.top);
@@ -2510,7 +2938,8 @@ export inline xson::object filter_documents_by_parsed(
         filter_branch{
             filter.and_selector,
             filter.and_string_filters,
-            filter.and_negated_selectors}};
+            filter.and_negated_selectors,
+            filter.and_any_filters}};
     return filter_documents_by_or(documents, branches);
 }
 

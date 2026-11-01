@@ -36,7 +36,8 @@ inline auto filter_by_parsed(const object& docs, const parsed_filter& parsed)
         filter_branch{
             parsed.and_selector,
             parsed.and_string_filters,
-            parsed.and_negated_selectors}};
+            parsed.and_negated_selectors,
+            parsed.and_any_filters}};
     return filter_documents_by_or(docs, branches);
 }
 
@@ -3202,6 +3203,213 @@ auto register_odata_tests()
                         static_cast<int>(apply_step_kind::filter));
                     require_true(pipeline.steps[0].filter.has_or());
                     require_eq(pipeline.steps[0].filter.or_branches.size(), 2u);
+                };
+            };
+        };
+    };
+
+    scenario("any matches an element inside an array, [yardb]") = []
+    {
+        const auto event_filter =
+            "options/any(o: o/securitiesMovements/any(m: m/instrument eq 'FI0009000681'))"sv;
+
+        const auto with_movement = json::parse(
+            R"({"_id":1,"options":[{"securitiesMovements":[{"instrument":"OTHER"}]},{"securitiesMovements":[{"instrument":"FI0009000681"}]}]})"s);
+        const auto without_movement = json::parse(
+            R"({"_id":2,"options":[{"securitiesMovements":[{"instrument":"OTHER"}]}]})"s);
+        const auto empty_options = json::parse(R"({"_id":3,"options":[]})"s);
+        const auto missing_options = json::parse(R"({"_id":4,"underlying":"FI0009000681"})"s);
+        const auto options_object = json::parse(
+            R"({"_id":5,"options":{"securitiesMovements":[{"instrument":"FI0009000681"}]}})"s);
+
+        given("Events with options and securities movements") = [=]
+        {
+            when("The movement ISIN is on the second option") = [=]
+            {
+                then("Only that event matches") = [=]
+                {
+                    const auto docs = object{object::array{
+                        with_movement, without_movement, empty_options, missing_options, options_object}};
+                    const auto matched = filter_documents_by_parsed(docs, parse_filter(event_filter));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                };
+            };
+
+            when("The same path has no any") = [=]
+            {
+                then("The array is not walked") = [=]
+                {
+                    const auto docs = object{object::array{with_movement}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter("options/securitiesMovements/instrument eq 'FI0009000681'"sv));
+                    check_eq(matched.get<object::array>().size(), 0u);
+                };
+            };
+
+            when("any is negated or combined with or") = [=]
+            {
+                then("not any keeps events without that ISIN") = [=]
+                {
+                    const auto docs = object{object::array{with_movement, without_movement, empty_options}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter(("not "s + std::string{event_filter})));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 2);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 3);
+                };
+
+                then("or underlying eq keeps either side") = [=]
+                {
+                    auto kept = json::parse(R"({"_id":6,"underlying":"KEEP"})"s);
+                    const auto docs = object{object::array{without_movement, kept, with_movement}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter(("underlying eq 'KEEP' or "s + std::string{event_filter})));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 6);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 1);
+                };
+            };
+        };
+
+        given("any() and a primitive array") = []
+        {
+            when("The value is a non-empty array, empty, missing, or not an array") = []
+            {
+                then("any() is true only for a non-empty array") = []
+                {
+                    const auto docs = object{object::array{
+                        json::parse(R"({"_id":1,"tags":["red"]})"s),
+                        json::parse(R"({"_id":2,"tags":[]})"s),
+                        json::parse(R"({"_id":3})"s),
+                        json::parse(R"({"_id":4,"tags":"red"})"s)
+                    }};
+                    const auto matched = filter_documents_by_parsed(docs, parse_filter("tags/any()"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                };
+            };
+
+            when("The member itself is compared") = []
+            {
+                then("tags/any(t: t eq 'red') matches the string") = []
+                {
+                    const auto docs = object{object::array{
+                        json::parse(R"({"_id":1,"tags":["blue","red"]})"s),
+                        json::parse(R"({"_id":2,"tags":["blue"]})"s)
+                    }};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("tags/any(t: t eq 'red')"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                };
+
+                then("Items/any(d:d/Quantity gt 100) matches one element") = []
+                {
+                    const auto docs = object{object::array{
+                        json::parse(R"({"_id":1,"Items":[{"Quantity":50},{"Quantity":150}]})"s),
+                        json::parse(R"({"_id":2,"Items":[{"Quantity":50}]})"s)
+                    }};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("Items/any(d:d/Quantity gt 100)"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                };
+            };
+
+            when("The lambda variable hides a property of the same name") = []
+            {
+                then("m/instrument is the member, and an unprefixed name is the owner") = []
+                {
+                    const auto hidden = json::parse(
+                        R"({"_id":1,"m":"nope","rows":[{"instrument":"FI0009000681"}]})"s);
+                    const auto owned = json::parse(
+                        R"({"_id":2,"status":"open","options":[{"status":"closed"}]})"s);
+                    const auto docs = object{object::array{hidden, owned}};
+
+                    const auto by_member = filter_documents_by_parsed(
+                        docs, parse_filter("rows/any(m: m/instrument eq 'FI0009000681')"sv));
+                    require_eq(by_member.get<object::array>().size(), 1u);
+
+                    const auto by_owner = filter_documents_by_parsed(
+                        docs, parse_filter("options/any(o: status eq 'open')"sv));
+                    require_eq(by_owner.get<object::array>().size(), 1u);
+                    check_eq(static_cast<integer_type>(by_owner.get<object::array>()[0]["_id"s]), 2);
+
+                    const auto by_member_status = filter_documents_by_parsed(
+                        docs, parse_filter("options/any(o: o/status eq 'closed')"sv));
+                    require_eq(by_member_status.get<object::array>().size(), 1u);
+
+                    const auto not_owner = filter_documents_by_parsed(
+                        docs, parse_filter("options/any(o: status eq 'closed')"sv));
+                    check_eq(not_owner.get<object::array>().size(), 0u);
+                };
+            };
+        };
+
+        given("any is applied before $top on a stored collection") = []
+        {
+            const auto test_file = "./odata_any_top_test.db"s;
+
+            when("The match is not in the first unfiltered page") = [test_file]
+            {
+                then("$top keeps the match") = [test_file]
+                {
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                    auto engine = yar::db::engine{test_file};
+                    auto miss = json::parse(R"({"options":[]})"s);
+                    auto hit = json::parse(
+                        R"({"options":[{"securitiesMovements":[{"instrument":"OTHER"}]},{"securitiesMovements":[{"instrument":"FI0009000681"}]}]})"s);
+                    require_true(engine.create("events"s, miss).has_value());
+                    require_true(engine.create("events"s, hit).has_value());
+
+                    auto selector = object{{"$top"s, 1ll}};
+                    const auto docs = read_with_parsed_filter(
+                        engine,
+                        "events"s,
+                        selector,
+                        parse_filter("options/any(o: o/securitiesMovements/any(m: m/instrument eq 'FI0009000681'))"sv));
+                    const auto& rows = docs.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 2);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+
+        given("A malformed any") = []
+        {
+            when("The lambda is nested nine deep or the colon is missing") = []
+            {
+                then("Parsing is rejected") = []
+                {
+                    auto ninth = "v eq 1"s;
+                    for(auto level = 0; level < 9; ++level)
+                        ninth = "f/any(v: " + ninth + ")";
+                    require_throws_as<std::invalid_argument>([&]
+                    {
+                        std::ignore = parse_filter(ninth);
+                    });
+                    require_throws_as<std::invalid_argument>([]
+                    {
+                        std::ignore = parse_filter("options/any(o o/instrument eq 'x')"sv);
+                    });
+                    require_throws_as<std::invalid_argument>([]
+                    {
+                        std::ignore = parse_filter("any(d:d/Quantity gt 100)"sv);
+                    });
                 };
             };
         };

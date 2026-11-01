@@ -25,7 +25,8 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | Comparisons | `eq`, `ne`, `gt`, `ge`, `lt`, `le` |
 | Logic | `not`, `and`, `or` (precedence: `not` > `and` > `or`); `not` is `!match(P)` (not `$ne`/`$lte` rewrites); nested/double `not` restores positive comparison branches; expressions that expand to more than 64 OR branches, nest more than 64 `not` operators, or exceed 8192 characters are rejected |
 | `in` | Strings or numbers |
-| Nested paths | `Customer/Country eq 'USA'` |
+| Nested paths | `Customer/Country eq 'USA'` walks objects. A repeated group needs `any` |
+| `any` | Post-filter, after the index read and before `$orderby`/`$skip`/`$top`. `Items/any(d:d/Quantity gt 100)` and `options/any(o: o/securitiesMovements/any(m: m/instrument eq 'FI0009000681'))`. `any()` is true only for a non-empty array. A missing path, an empty array, or a non-array is not a match. More than 8 nested lambdas is rejected. `all` is not supported |
 | `startswith` | Index-backed on top-level secondary keys (not when negated) |
 | `contains` / `endswith` | Post-filter only; `not contains` / `not endswith` supported |
 
@@ -55,7 +56,7 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 | Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs |
 | `$search` | `$search=wireless` |
 | `$skiptoken` / `@odata.nextLink` | Server-driven paging |
-| Collection lambdas | `Lines/any(l:l/Qty gt 0)` |
+| `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
 | Richer string/date functions | `indexof`, `tolower`, `year(...)` |
 | Delta queries | `$deltaToken` |
 | Bound actions / functions | `POST /users(1)/Default.ResetPassword` |

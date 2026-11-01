@@ -1739,7 +1739,22 @@ private:
 
             if(params.contains("$filter"s))
             {
-                const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
+                yar::http::odata::parsed_filter parsed_filter;
+                try
+                {
+                    parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    if(std::string_view{e.what()}.starts_with("any "sv))
+                    {
+                        return ::http::make_error_response(
+                            status_unprocessable_entity,
+                            "Unprocessable Entity"sv,
+                            e.what());
+                    }
+                    throw;
+                }
                 if(params.contains("$compute"s))
                 {
                     deferred_filter = parsed_filter;

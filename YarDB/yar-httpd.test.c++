@@ -5776,6 +5776,109 @@ auto test_set()
         };
     };
 
+    test_case("OData any lambda filters an array, [yardb]") = []
+    {
+        auto setup = std::make_shared<fixture>("./httpd_any_test.db");
+        const auto event_query =
+            "/events?$filter=options/any(o:%20o/securitiesMovements/any(m:%20m/instrument%20eq%20'FI0009000681'))"s;
+
+        section("GET any returns the event whose second option carries the ISIN") = [setup, event_query]
+        {
+            const auto rows = std::array{
+                R"({"options":[{"securitiesMovements":[{"instrument":"OTHER"}]},{"securitiesMovements":[{"instrument":"FI0009000681"}]}]})"s,
+                R"({"options":[{"securitiesMovements":[{"instrument":"OTHER"}]}]})"s,
+                R"({"options":[]})"s
+            };
+            for(const auto& body : rows)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/events"s, body);
+                require_eq(post_status, "201"s);
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, event_query, ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            const auto parsed = json::parse(response_body);
+            const auto& items = parsed.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(
+                static_cast<std::string>(items[0]["options"s][1]["securitiesMovements"s][0]["instrument"s]),
+                "FI0009000681"s);
+        };
+
+        section("GET any with $top applies the filter before the page") = [setup]
+        {
+            auto [miss_status, miss_reason, miss_headers, miss_body] = make_request(
+                setup->port(), "POST"s, "/paged"s, R"({"tags":["blue"]})"s);
+            require_eq(miss_status, "201"s);
+            (void)miss_reason;
+            (void)miss_headers;
+            (void)miss_body;
+            auto [hit_status, hit_reason, hit_headers, hit_body] = make_request(
+                setup->port(), "POST"s, "/paged"s, R"({"tags":["red"]})"s);
+            require_eq(hit_status, "201"s);
+            (void)hit_reason;
+            (void)hit_headers;
+            (void)hit_body;
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/paged?$filter=tags/any(t:%20t%20eq%20'red')&$top=1"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            const auto parsed = json::parse(response_body);
+            const auto& items = parsed.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(static_cast<std::string>(items[0]["tags"s][0]), "red"s);
+        };
+
+        section("GET a bare path through an array matches nothing") = [setup, event_query]
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/events?$filter=options/securitiesMovements/instrument%20eq%20'FI0009000681'"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            (void)event_query;
+            require_eq(json::parse(response_body).get<object::array>().size(), 0u);
+        };
+
+        section("GET a ninth nested any returns 422") = [setup]
+        {
+            auto ninth = "v%20eq%201"s;
+            for(auto level = 0; level < 9; ++level)
+                ninth = "f/any(v:%20" + ninth + ")";
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/events?$filter="s + ninth, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("any") != string::npos);
+        };
+
+        section("GET any without a colon returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/events?$filter=options/any(o%20o/instrument%20eq%20'x')"s,
+                ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("any") != string::npos);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

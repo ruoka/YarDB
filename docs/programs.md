@@ -219,7 +219,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
   - Comparison operators: `eq`, `ne`, `gt`, `ge`, `lt`, `le`
   - Logical operators: `not`, `and`, `or` (OData precedence: `not` > `and` > `or`)
   - `in` operator: `status in ('active','pending')` or `id in (1, 2, 3)`
-  - Nested paths: `Customer/Country eq 'USA'`, `startswith(Customer/Name, 'Ac')` (nested objects only)
+  - Nested paths: `Customer/Country eq 'USA'`, `startswith(Customer/Name, 'Ac')` (nested objects only). A repeated group needs `any`: `Items/any(d:d/Quantity gt 100)`, `options/any(o: o/securitiesMovements/any(m: m/instrument eq 'FI0009000681'))`. A path through an array without `any` matches nothing. `any()` is true only when the array is not empty. More than 8 nested lambdas is rejected.
   - String functions:
     - `startswith(field, 'prefix')` — index-backed when `field` is a top-level secondary index key; otherwise post-filter
     - `contains(field, 'substring')`, `endswith(field, 'suffix')` — post-filter only

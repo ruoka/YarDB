@@ -239,6 +239,122 @@ bool index_only_field_selector(const yar::db::object& field_selector)
     return has_gt or has_gte or has_lt or has_lte;
 }
 
+// A key name "service+type+status" is the compound of those fields. It is not a
+// document field. The posting list is one entry per distinct tuple, so a count
+// of equality on exactly those fields is the vector's size.
+std::optional<std::vector<std::string>> compound_parts(std::string_view name)
+{
+    if(not name.contains('+'))
+        return std::nullopt;
+
+    auto parts = std::vector<std::string>{};
+    auto start = std::size_t{0};
+    while(start <= name.size())
+    {
+        const auto plus = name.find('+', start);
+        const auto end = plus == std::string_view::npos ? name.size() : plus;
+        if(end == start)
+            return std::nullopt;
+        parts.emplace_back(name.substr(start, end - start));
+        if(plus == std::string_view::npos)
+            break;
+        start = plus + 1;
+    }
+    if(parts.size() < 2)
+        return std::nullopt;
+    return parts;
+}
+
+// Integers and whole doubles share one encoding, matching primitive_equal on a
+// single-field key. Each piece is self-delimiting so the concatenation is one key.
+std::string encode_primitive(const xson::primitive& value)
+{
+    if(std::holds_alternative<std::monostate>(value))
+        return "n";
+    if(std::holds_alternative<xson::boolean_type>(value))
+        return std::get<xson::boolean_type>(value) ? "b1" : "b0";
+    if(std::holds_alternative<xson::string_type>(value))
+    {
+        const auto& text = std::get<xson::string_type>(value);
+        return std::format("s{}:{}", text.size(), text);
+    }
+    if(std::holds_alternative<xson::timestamp_type>(value))
+    {
+        const auto ticks = std::get<xson::timestamp_type>(value).time_since_epoch().count();
+        return std::format("t{}", ticks);
+    }
+    if(xson::is_numeric_primitive(value))
+    {
+        const auto number = xson::numeric_primitive_value(value);
+        const auto lowest = static_cast<xson::number_type>(std::numeric_limits<xson::integer_type>::min());
+        const auto highest = static_cast<xson::number_type>(std::numeric_limits<xson::integer_type>::max());
+        if(std::isfinite(number) and number >= lowest and number <= highest and number == std::trunc(number))
+            return std::format("i{}", static_cast<xson::integer_type>(number));
+        return std::format("f{:.17g}", number);
+    }
+    return "x";
+}
+
+std::optional<std::string> encode_compound(
+    const yar::db::object& document,
+    std::span<const std::string> parts)
+{
+    auto encoded = std::string{};
+    for(const auto& part : parts)
+    {
+        if(not document.has(part))
+            return std::nullopt;
+        const auto& value = document[part];
+        if(not value.has_value())
+            return std::nullopt;
+        encoded += encode_primitive(make_secondary_key(value));
+    }
+    return encoded;
+}
+
+// A bare value or a selector that is only {$eq: value}. A range is not equality.
+std::optional<xson::primitive> equality_primitive(const yar::db::object& field)
+{
+    if(field.has_value())
+        return make_secondary_key(field);
+    if(not field.has_objects())
+        return std::nullopt;
+    if(field.get<yar::db::object::map>().size() != 1 or not field.has("$eq"s))
+        return std::nullopt;
+    const auto& eq = field["$eq"s];
+    if(not eq.has_value())
+        return std::nullopt;
+    return make_secondary_key(eq);
+}
+
+std::optional<xson::primitive> indexed_value(const yar::db::object& document, const std::string& field_name)
+{
+    if(const auto parts = compound_parts(field_name))
+    {
+        const auto encoded = encode_compound(document, *parts);
+        if(not encoded)
+            return std::nullopt;
+        return xson::primitive{*encoded};
+    }
+
+    if(not document.has(field_name))
+        return std::nullopt;
+    const auto& value = document[field_name];
+    if(not value.has_value())
+        return std::nullopt;
+    return make_secondary_key(value);
+}
+
+std::size_t posting_span(
+    const yar::db::object& field_selector,
+    const yar::db::secondary_index_type& keys)
+{
+    const auto [begin, end] = analyze_key_bounds(field_selector, keys, make_secondary_key);
+    return std::ranges::fold_left(
+        begin, end, std::size_t{0},
+        [](std::size_t total, const auto& entry) { return total + entry.second.size(); });
+}
+
 std::optional<std::size_t> try_index_only_count(
     const yar::db::index& index,
     const yar::db::object& selector)
@@ -422,10 +538,63 @@ bool yar::db::index::secondary_key(const yar::db::object& selector) const
         [&](const std::string& field_name) { return selector.has(field_name); });
 }
 
+std::optional<std::size_t> yar::db::index::compound_equality_count(const yar::db::object& selector) const
+{
+    if(not selector.has_objects())
+        return std::nullopt;
+
+    auto wanted = std::vector<std::string>{};
+    for(const auto& [key, field] : selector.get<yar::db::object::map>())
+    {
+        if(is_pagination_key(key))
+            continue;
+        if(not equality_primitive(field))
+            return std::nullopt;
+        wanted.push_back(key);
+    }
+    if(wanted.size() < 2)
+        return std::nullopt;
+
+    auto sorted_wanted = wanted;
+    std::ranges::sort(sorted_wanted);
+
+    for(const auto& name : m_key_names)
+    {
+        const auto parts = compound_parts(name);
+        if(not parts)
+            continue;
+        auto sorted_parts = *parts;
+        std::ranges::sort(sorted_parts);
+        if(sorted_parts != sorted_wanted)
+            continue;
+
+        auto encoded = std::string{};
+        for(const auto& part : *parts)
+        {
+            const auto value = equality_primitive(selector[part]);
+            if(not value)
+                return std::nullopt;
+            encoded += encode_primitive(*value);
+        }
+
+        const auto secondary = m_secondary_keys.find(name);
+        if(secondary == m_secondary_keys.end())
+            return 0;
+        const auto found = secondary->second.find(encoded);
+        if(found == secondary->second.end())
+            return 0;
+        return found->second.size();
+    }
+    return std::nullopt;
+}
+
 std::size_t yar::db::index::count(std::istream& storage, const yar::db::object& selector) const
 {
     if(const auto fast = try_index_only_count(*this, selector))
         return *fast;
+
+    if(const auto exact = compound_equality_count(selector))
+        return *exact;
 
     return count_by_scan(storage, *this, selector);
 }
@@ -435,15 +604,38 @@ yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
     if(primary_key(selector))
         return query_analysis_primary(selector["_id"s], m_primary_keys, make_primary_key);
 
+    // Among exact secondary bounds, use the one with the fewest positions.
+    // $ne, $in, and any selector the bound analysis cannot represent, count as
+    // the whole collection, so a tighter key wins. An equal span keeps the
+    // alphabetically earlier key. A compound name is not a document field.
     if(secondary_key(selector))
+    {
+        const yar::db::secondary_index_type* best = nullptr;
+        const yar::db::object* best_field = nullptr;
+        auto best_span = std::optional<std::size_t>{};
         for(const auto& entry : m_secondary_keys)
-            if(selector.has(entry.first))
+        {
+            if(entry.first.contains('+'))
+                continue;
+            if(not selector.has(entry.first))
+                continue;
+            const auto& field_selector = selector[entry.first];
+            if(not secondary_field_selector_usable(field_selector))
+                continue;
+
+            const auto span = index_only_field_selector(field_selector)
+                ? posting_span(field_selector, entry.second)
+                : m_primary_keys.size();
+            if(not best_span or span < *best_span)
             {
-                const auto& field_selector = selector[entry.first];
-                if(secondary_field_selector_usable(field_selector))
-                    return query_analysis_secondary(field_selector, entry.second);
-                break;
+                best_span = span;
+                best = &entry.second;
+                best_field = &field_selector;
             }
+        }
+        if(best != nullptr)
+            return query_analysis_secondary(*best_field, *best);
+    }
 
     if(not selector.has("$desc"s))
         return {std::ranges::cbegin(m_primary_keys), std::ranges::cend(m_primary_keys), m_primary_keys.size()};
@@ -496,29 +688,25 @@ void yar::db::index::insert(yar::db::object& document, yar::db::position_type po
 
     for(const auto& field_name : m_key_names)
     {
-        if(not document.has(field_name))
+        // A compound name is built from its fields. Object and array values are
+        // skipped so create/reindex/restart cannot throw bad_variant_access.
+        const auto sk = indexed_value(document, field_name);
+        if(not sk)
             continue;
 
-        // Secondary keys are primitives only. Object/array fields are skipped so
-        // create/reindex/restart cannot throw bad_variant_access via make_secondary_key.
-        const auto& value = document[field_name];
-        if(not value.has_value())
-            continue;
-
-        const auto sk = make_secondary_key(value);
         auto& secondary = m_secondary_keys.at(field_name);
-        const auto secondary_it = secondary.find(sk);
+        const auto secondary_it = secondary.find(*sk);
         if(secondary_it == secondary.end())
         {
-            secondary.emplace(sk, yar::db::positions_type{position});
+            secondary.emplace(*sk, yar::db::positions_type{position});
             if(undo != nullptr)
-                undo->note_secondary_key(field_name, sk);
+                undo->note_secondary_key(field_name, *sk);
         }
         else if(std::ranges::find(secondary_it->second, position) == secondary_it->second.end())
         {
             secondary_it->second.push_back(position);
             if(undo != nullptr)
-                undo->note_secondary_pushed(field_name, sk);
+                undo->note_secondary_pushed(field_name, *sk);
         }
     }
 }
@@ -537,16 +725,12 @@ void yar::db::index::erase(const yar::db::object& document, yar::db::index_undo*
 
     for(const auto& field_name : m_key_names)
     {
-        if(not document.has(field_name))
+        const auto sk = indexed_value(document, field_name);
+        if(not sk)
             continue;
 
-        const auto& value = document[field_name];
-        if(not value.has_value())
-            continue;
-
-        const auto sk = make_secondary_key(value);
         auto& secondary = m_secondary_keys.at(field_name);
-        const auto secondary_it = secondary.find(sk);
+        const auto secondary_it = secondary.find(*sk);
         if(secondary_it == secondary.end())
             continue;
 
@@ -561,7 +745,7 @@ void yar::db::index::erase(const yar::db::object& document, yar::db::index_undo*
         if(erased_key)
             secondary.erase(secondary_it);
         if(undo != nullptr)
-            undo->note_secondary_removed(field_name, sk, at, position, erased_key);
+            undo->note_secondary_removed(field_name, *sk, at, position, erased_key);
     }
 }
 

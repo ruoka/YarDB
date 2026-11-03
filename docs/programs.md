@@ -192,6 +192,8 @@ A client connects with HTTP. Opening a connection does not create, drop, or rebu
 
 The first declaration of a collection is a `PUT` or `PATCH`. Adding a key or a unique name that is not stored yet is another `PATCH`. Those requests scan the live documents, because the new key has to be filled and a new unique constraint has to be checked. `GET /_reindex` is the explicit rebuild of every index.
 
+A key whose name joins field names with `+`, such as `service+type+status`, is the compound of those fields. It is not a field on the document. Insert and erase build the posting list from the named fields, including documents already stored. A count of equality on exactly those fields is the size of that list. A filter that names several indexed fields reads the exact bound with the fewest positions (`eq`, or one `gt`/`ge` with one `lt`/`le`). An equal span keeps the alphabetically earlier key. `$ne` and `in` stay a candidate scan.
+
 Sending the same `keys` and `unique` again returns the configuration already stored and leaves the file alone. A client that wants `UID` unique reads `GET /_db/{collection}` and sends `PATCH` only when `UID` is missing from `keys` or from `unique`. Repeating that declaration on every connect used to call `reindex()` and reread the whole file once per collection. That is what made a service slow to listen.
 
 ### Unique secondary indexes
@@ -236,7 +238,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$count=true`** - Return count of matching documents instead of items
   - Returns a JSON number in the response body (e.g. `42`)
   - Works with `$filter` (including `or`, `ne`, and string functions)
-  - Uses index-only counting when the filter is a single indexed constraint with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`; otherwise scans candidates and applies `document.match`
+  - Uses index-only counting when the filter is a single indexed constraint with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`, and when it is equality on exactly the fields of a compound key. Otherwise it reads the tightest exact secondary bound and applies `document.match`
   - Example: `GET /users?$count=true`, `GET /users?$count=true&$filter=age%20gt%2025`
 
 - **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.

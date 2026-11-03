@@ -290,6 +290,69 @@ auto test_set()
             };
             require_eq(fixture.count(nested_uk), 1u);
         };
+
+        section("CompoundEqualityCountDoesNotReadStorage") = []
+        {
+            index_fixture fixture{"./index_compound_count.db"s};
+            fixture.add_keys({"service"s, "type"s, "status"s, "service+type+status"s});
+            fixture.insert(object{{"service"s, "oms"s}, {"type"s, "oms.capture"s}, {"status"s, "DONE"s}});
+            fixture.insert(object{{"service"s, "oms"s}, {"type"s, "oms.capture"s}, {"status"s, "DONE"s}});
+            fixture.insert(object{{"service"s, "oms"s}, {"type"s, "oms.capture"s}, {"status"s, "PENDING"s}});
+            fixture.insert(object{{"service"s, "tms"s}, {"type"s, "tms.instruct"s}, {"status"s, "DONE"s}});
+
+            const auto done = object{
+                {"service"s, object{{"$eq"s, "oms"s}}},
+                {"type"s, object{{"$eq"s, "oms.capture"s}}},
+                {"status"s, object{{"$eq"s, "DONE"s}}}
+            };
+            // An empty stream fails a document scan. The compound count is the
+            // posting list's size and does not read it.
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, done), 2u);
+            require_eq(fixture.index().count(empty, object{
+                {"service"s, "oms"s},
+                {"type"s, "oms.place-order"s},
+                {"status"s, "DONE"s}
+            }), 0u);
+
+            auto doc = object{{"service"s, "oms"s}, {"type"s, "oms.capture"s}, {"status"s, "DONE"s}};
+            auto undo = yar::db::index_undo{};
+            fixture.index().update(doc, &undo);
+            fixture.index().insert(doc, 900001, &undo);
+            require_eq(fixture.index().count(empty, done), 3u);
+            undo.apply(fixture.index());
+            require_eq(fixture.index().count(empty, done), 2u);
+
+            fixture.index().update(doc);
+            fixture.index().insert(doc, 900002);
+            fixture.index().erase(doc);
+            doc["status"s] = "PENDING"s;
+            fixture.index().insert(doc, 900002);
+            require_eq(fixture.index().count(empty, done), 2u);
+            require_eq(fixture.index().count(empty, object{
+                {"service"s, "oms"s},
+                {"type"s, "oms.capture"s},
+                {"status"s, "PENDING"s}
+            }), 2u);
+        };
+
+        section("ViewUsesTightestExactSecondarySpan") = []
+        {
+            // service sorts ahead of updatedMs. The day's bound is the smaller span.
+            index_fixture fixture{"./index_tight_span.db"s};
+            fixture.add_keys({"service"s, "status"s, "updatedMs"s});
+            for(auto i = 0; i < 5; ++i)
+                fixture.insert(object{{"service"s, "oms"s}, {"status"s, "DONE"s}, {"updatedMs"s, 1ll}});
+            fixture.insert(object{{"service"s, "oms"s}, {"status"s, "DONE"s}, {"updatedMs"s, 100ll}});
+
+            const auto day = object{
+                {"service"s, "oms"s},
+                {"status"s, "DONE"s},
+                {"updatedMs"s, object{{"$gte"s, 100ll}, {"$lt"s, 101ll}}}
+            };
+            require_eq(fixture.view_count(day), 1u);
+            require_eq(fixture.count(day), 1u);
+        };
     };
 
     return true;

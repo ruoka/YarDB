@@ -523,9 +523,11 @@ public:
     // @return Index view providing iterator over matching document positions
     index_view view(const xson::object& selector) const;
 
-    // Count documents matching the selector
-    // Uses index-only counting when the selector is a single indexed constraint;
-    // otherwise scans candidate positions and applies document.match
+    // Count documents matching the selector.
+    // A single indexed bound, and equality on exactly the fields of a compound
+    // key (a key name of fields joined by '+'), is the size of that posting list.
+    // Any other selector reads the tightest exact secondary bound and applies
+    // document.match.
     // @param storage Database file stream for fallback scans
     // @param selector Query selector (ignores $top, $skip, $desc)
     // @return Number of matching documents
@@ -562,6 +564,10 @@ private:
     friend class index_undo;
 
     std::optional<primary_key_type> id_at(position_type position) const;
+
+    // Equality on exactly the fields named by a compound key, or nullopt when
+    // no compound covers the selector.
+    std::optional<std::size_t> compound_equality_count(const xson::object& selector) const;
 
     xson::integer_type m_sequence = 0;
 

@@ -1892,6 +1892,56 @@ auto test_set()
         };
     };
 
+    test_case("unique secondary inserts stay flat as the collection grows, [yardb]") = []
+    {
+        const auto test_file = "./engine_unique_insert_scale_test.db";
+        const auto setup = fixture{test_file};
+        constexpr auto collection = "scale"s;
+        constexpr auto total = 4000;
+
+        {
+            auto engine = yar::db::engine{test_file};
+            require_true(engine.index(collection, {"UID"s}, {"UID"s}).has_value());
+
+            auto block = std::chrono::steady_clock::now();
+            for(auto i = 0; i < total; ++i)
+            {
+                auto document = object{{"UID"s, std::to_string(i)}};
+                require_true(engine.create(collection, document).has_value());
+                if((i + 1) % 1000 != 0)
+                    continue;
+
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - block).count();
+                const auto line = std::format(
+                    "unique secondary inserts {} {} ms this thousand", i + 1, ms);
+                std::clog << line << '\n';
+                succeed(line);
+                require_eq(engine.count(collection, object{}), static_cast<std::size_t>(i + 1));
+                block = std::chrono::steady_clock::now();
+            }
+
+            auto documents = object{};
+            require_true(engine.read(collection, object{{"UID"s, "0"s}}, documents));
+            require_eq(documents.size(), 1u);
+            documents = object{};
+            require_true(engine.read(collection, object{{"UID"s, "3999"s}}, documents));
+            require_eq(documents.size(), 1u);
+
+            auto duplicate = object{{"UID"s, "2000"s}};
+            const auto rejected = engine.create(collection, duplicate);
+            require_false(rejected.has_value());
+            require_eq(rejected.error().code, yar::db::db_error_code::conflict);
+            require_eq(engine.count(collection, object{}), static_cast<std::size_t>(total));
+        }
+
+        auto reopened = yar::db::engine{test_file};
+        require_eq(reopened.count(collection, object{}), static_cast<std::size_t>(total));
+        auto documents = object{};
+        require_true(reopened.read(collection, object{{"UID"s, "3999"s}}, documents));
+        require_eq(documents.size(), 1u);
+    };
+
     return true;
 }
 

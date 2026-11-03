@@ -306,7 +306,7 @@ private:
 
     std::string m_db;
     storage_lock m_lock;
-    std::flat_map<std::string, yar::db::index> m_index;
+    std::map<std::string, yar::db::index> m_index;
     std::fstream m_storage;
     mutable std::shared_mutex m_rwlock;
     bool m_writable = true;

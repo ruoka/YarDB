@@ -347,7 +347,7 @@ Reader/writer granularity is implemented in the engine; see [changelog.md](chang
 - **Atomic conditional writes**: HTTP `If-Match` / `If-Unmodified-Since` map to `write_preconditions` checked under the same exclusive lock as the mutation.
 - **HTTP layer**: `rest_api_server` holds a plain `engine`; external `lockable<engine>` wrapper removed.
 
-The storage writer remains single-owner. A write lock covers file mutation and staged index publication; readers retain their shared lock until selected records are decoded.
+The storage writer remains single-owner. A write lock covers file mutation and in-place index publication, and a rolled-back write undoes those index edits; readers retain their shared lock until selected records are decoded.
 
 #### Developer Experience
 - **Configuration Files**: YAML/JSON configuration instead of CLI-only

@@ -394,7 +394,7 @@ void assign_revision(yar::db::document_revision* revision, const yar::db::metada
 }
 
 const yar::db::index* find_index(
-    const std::flat_map<std::string, yar::db::index>& indexes,
+    const std::map<std::string, yar::db::index>& indexes,
     std::string_view collection)
 {
     const auto it = indexes.find(std::string{collection});
@@ -404,7 +404,7 @@ const yar::db::index* find_index(
 }
 
 yar::db::index* find_index(
-    std::flat_map<std::string, yar::db::index>& indexes,
+    std::map<std::string, yar::db::index>& indexes,
     std::string_view collection)
 {
     const auto it = indexes.find(std::string{collection});
@@ -474,6 +474,81 @@ yar::db::db_error unique_error(
         error.conflict_id = static_cast<std::int64_t>(*clash.id);
     return error;
 }
+
+// Mutates the live index under the caller's exclusive lock. commit() keeps the
+// edits; otherwise the destructor puts the maps back. A collection this object
+// created is removed, which drops its edits without copying a map.
+class write_undo
+{
+public:
+
+    explicit write_undo(std::map<std::string, yar::db::index>& indexes) :
+        m_indexes{indexes}
+    {}
+
+    write_undo(const write_undo&) = delete;
+
+    write_undo& operator=(const write_undo&) = delete;
+
+    ~write_undo()
+    {
+        rollback();
+    }
+
+    yar::db::index& operator[](std::string_view collection)
+    {
+        auto name = std::string{collection};
+        auto it = m_indexes.find(name);
+        if(it == m_indexes.end())
+        {
+            it = m_indexes.emplace(name, yar::db::index{}).first;
+            m_created.push_back(it->first);
+        }
+        return it->second;
+    }
+
+    yar::db::index_undo* log(std::string_view collection)
+    {
+        auto it = m_edits.try_emplace(std::string{collection}).first;
+        return std::addressof(it->second);
+    }
+
+    void commit() noexcept
+    {
+        if(not m_active)
+            return;
+        m_active = false;
+        m_edits.clear();
+        m_created.clear();
+    }
+
+private:
+
+    void rollback()
+    {
+        if(not std::exchange(m_active, false))
+            return;
+
+        for(const auto& name : m_created)
+            m_edits.erase(name);
+
+        for(auto& [name, edits] : m_edits)
+        {
+            if(const auto it = m_indexes.find(name); it != m_indexes.end())
+                edits.apply(it->second);
+        }
+        m_edits.clear();
+
+        for(const auto& name : m_created)
+            m_indexes.erase(name);
+        m_created.clear();
+    }
+
+    std::map<std::string, yar::db::index>& m_indexes;
+    std::map<std::string, yar::db::index_undo> m_edits;
+    std::vector<std::string> m_created;
+    bool m_active = true;
+};
 
 } // namespace
 
@@ -693,21 +768,19 @@ yar::db::db_result<> yar::db::engine::index(
             db_operation::index,
             "Database writes are disabled after an unsuccessful rollback"s)};
 
-    auto original = m_index;
-    auto& current_index = m_index[std::string{collection}];
-    current_index.add(keys);
+    auto undo = write_undo{m_index};
+    auto& current_index = undo[collection];
+    auto* log = undo.log(collection);
+    current_index.add(keys, log);
     for(const auto& field : unique)
     {
         if(not std::ranges::contains(current_index.keys(), field))
-        {
-            m_index = std::move(original);
             return std::unexpected{db_error(
                 db_error_code::conflict,
                 db_operation::index,
                 "Unique field "s + field + " is not an index key"s)};
-        }
     }
-    current_index.add_unique(unique);
+    current_index.add_unique(unique, log);
 
     // Populate new secondaries from live primary rows before unlock. add()
     // creates empty maps; view() then treats the field as indexed and returns
@@ -727,26 +800,17 @@ yar::db::db_result<> yar::db::engine::index(
         reader.seekg(position, reader.beg);
         reader >> metadata >> document;
         if(reader.fail())
-        {
-            m_index = std::move(original);
             return std::unexpected{db_error(
                 db_error_code::corrupt_storage,
                 db_operation::index,
                 "Failed to read a live document while populating secondary indexes"s)};
-        }
         if(const auto clash = current_index.non_primitive_unique(document))
-        {
-            m_index = std::move(original);
             return std::unexpected{unique_error(db_operation::index, *clash, false)};
-        }
-        current_index.insert(document, position);
+        current_index.insert(document, position, log);
     }
 
     if(const auto clash = current_index.duplicate_unique())
-    {
-        m_index = std::move(original);
         return std::unexpected{unique_error(db_operation::index, *clash, true)};
-    }
 
     auto selector = yar::db::object{"collection"s, std::string{collection}};
     auto document = yar::db::object{selector, {"keys"s, current_index.keys()}};
@@ -760,13 +824,11 @@ yar::db::db_result<> yar::db::engine::index(
     auto documents = yar::db::object{};
     auto result = upsert_impl("_db"s, selector, document, documents);
     if(not result)
-    {
-        m_index = std::move(original);
         return std::unexpected{db_error(
             result.error().code,
             db_operation::index,
             result.error().message)};
-    }
+    undo.commit();
     return {};
 }
 
@@ -803,8 +865,9 @@ yar::db::db_result<> yar::db::engine::create_impl(
             db_operation::create,
             "Failed to determine database size: "s + file_size_error.message())};
 
-    auto staged = m_index;
-    auto& index = staged[std::string{collection}];
+    auto undo = write_undo{m_index};
+    auto& index = undo[collection];
+    auto* log = undo.log(collection);
 
     // Client-/import-supplied _id must not clobber an existing primary key.
     // index::insert overwrites m_primary_keys[id], which orphans the prior
@@ -831,7 +894,7 @@ yar::db::db_result<> yar::db::engine::create_impl(
     auto metadata = yar::db::metadata{std::string{collection}};
     m_storage.clear();
     m_storage.seekp(0, m_storage.end);
-    index.update(document);
+    index.update(document, log);
     m_storage << metadata << document;
     m_storage.flush();
     if(m_storage.fail())
@@ -841,16 +904,16 @@ yar::db::db_result<> yar::db::engine::create_impl(
             m_db,
             original_size,
             {});
-        // Durable complete append remains when truncate fails. Publish so the
-        // live index matches reopen. A torn append must not publish — reopen
+        // Durable complete append remains when truncate fails. Keep the index
+        // edits so the live map matches reopen. A torn append must not — reopen
         // would drop the incomplete tail while we would have tombstoned nothing
         // here, but update/replace siblings of this path would lose priors.
         if(rolled_back == rollback_result::truncate_failed)
         {
             if(complete_appended_records(m_storage, m_db, original_size, 1))
             {
-                index.insert(document, metadata.position);
-                m_index = std::move(staged);
+                index.insert(document, metadata.position, log);
+                undo.commit();
                 assign_revision(revision, metadata);
                 return {};
             }
@@ -877,8 +940,8 @@ yar::db::db_result<> yar::db::engine::create_impl(
             "Failed to append and flush the new document"s)};
     }
 
-    index.insert(document, metadata.position);
-    m_index = std::move(staged);
+    index.insert(document, metadata.position, log);
+    undo.commit();
     assign_revision(revision, metadata);
     return {};
 }
@@ -1374,14 +1437,15 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         return 0;
 
     {
-        auto checking = m_index;
-        auto& checking_index = checking[std::string{collection}];
+        auto rehearsal = write_undo{m_index};
+        auto& checking_index = rehearsal[collection];
+        auto* log = rehearsal.log(collection);
         for(auto& entry : pending)
         {
-            checking_index.erase(entry.old_document);
+            checking_index.erase(entry.old_document, log);
             if(const auto clash = checking_index.conflicts_with(entry.new_document))
                 return std::unexpected{unique_error(db_operation::update, *clash, false)};
-            checking_index.insert(entry.new_document, entry.position);
+            checking_index.insert(entry.new_document, entry.position, log);
         }
     }
 
@@ -1393,8 +1457,9 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
             db_operation::update,
             "Failed to determine database size: "s + file_size_error.message())};
 
-    auto staged = m_index;
-    auto& staged_index = staged[std::string{collection}];
+    auto undo = write_undo{m_index};
+    auto& staged_index = undo[collection];
+    auto* log = undo.log(collection);
     for(auto& entry : pending)
     {
         // Do not clear() away a prior append failure. ENOSPC mid-batch can leave
@@ -1404,15 +1469,15 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         if(m_storage.fail())
             break;
 
-        staged_index.erase(entry.old_document);
-        staged_index.update(entry.new_document);
+        staged_index.erase(entry.old_document, log);
+        staged_index.update(entry.new_document, log);
         m_storage.clear();
         m_storage.seekp(0, m_storage.end);
         m_storage << entry.metadata_record << entry.new_document;
         if(m_storage.fail())
             break;
 
-        staged_index.insert(entry.new_document, entry.metadata_record.position);
+        staged_index.insert(entry.new_document, entry.metadata_record.position, log);
     }
     m_storage.flush();
     if(m_storage.fail())
@@ -1444,7 +1509,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
                 m_storage.flush();
                 for(auto& entry : pending)
                     documents += std::move(entry.new_document);
-                m_index = std::move(staged);
+                undo.commit();
                 assign_revision(revision, pending.front().metadata_record);
                 return pending.size();
             }
@@ -1524,7 +1589,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
             }
             for(auto& entry : pending)
                 documents += std::move(entry.new_document);
-            m_index = std::move(staged);
+            undo.commit();
             assign_revision(revision, pending.front().metadata_record);
             return pending.size();
         }
@@ -1544,7 +1609,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
 
     for(auto& entry : pending)
         documents += std::move(entry.new_document);
-    m_index = std::move(staged);
+    undo.commit();
     assign_revision(revision, pending.front().metadata_record);
     return pending.size();
 }
@@ -1618,10 +1683,11 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
             db_operation::destroy,
             "Failed to determine database size: "s + file_size_error.message())};
 
-    auto staged = m_index;
-    auto& staged_index = staged[std::string{collection}];
+    auto undo = write_undo{m_index};
+    auto& staged_index = undo[collection];
+    auto* log = undo.log(collection);
     for(const auto& document : documents.get<yar::db::object::array>())
-        staged_index.erase(document);
+        staged_index.erase(document, log);
 
     // Same failbit discipline as multi-update append: do not clear() away a
     // mid-loop status write failure. Otherwise a later successful seekp/write
@@ -1667,15 +1733,15 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
             if(m_storage.fail())
             {
                 // Cannot prove every row is tombstoned. Refuse further writes;
-                // still publish staged so durable deletes are not served live.
+                // still keep the index edits so durable deletes are not served live.
                 m_writable = false;
-                m_index = std::move(staged);
+                undo.commit();
                 return std::unexpected{db_error(
                     db_error_code::rollback_failure,
                     db_operation::destroy,
                     "Delete markers could not be fully re-asserted after a failed status restore"s)};
             }
-            m_index = std::move(staged);
+            undo.commit();
             return positions.size();
         }
         if(rolled_back != rollback_result::ok)
@@ -1692,7 +1758,7 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
             "Failed to mark documents as deleted"s)};
     }
 
-    m_index = std::move(staged);
+    undo.commit();
     return positions.size();
 }
 
@@ -1787,10 +1853,11 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             db_operation::replace,
             "Failed to determine database size: "s + file_size_error.message())};
 
-    auto staged = m_index;
-    auto& staged_index = staged[std::string{collection}];
+    auto undo = write_undo{m_index};
+    auto& staged_index = undo[collection];
+    auto* log = undo.log(collection);
     for(const auto& old_document : old_documents)
-        staged_index.erase(old_document);
+        staged_index.erase(old_document, log);
 
     // Mirror create/update: do not let replace clobber another live primary key.
     // After erasing matched rows, contains_id only sees uninvolved documents.
@@ -1820,7 +1887,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
     if(const auto clash = staged_index.conflicts_with(document))
         return std::unexpected{unique_error(db_operation::replace, *clash, false)};
 
-    staged_index.update(document);
+    staged_index.update(document, log);
 
     auto metadata = *chain_metadata;
     m_storage.clear();
@@ -1834,14 +1901,14 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             m_db,
             original_size,
             {});
-        // Complete successor remains on disk. Publish staged (and tombstone the
-        // prior) so API and reopen agree. A torn successor must not tombstone
+        // Complete successor remains on disk. Keep the index edits (and tombstone
+        // the prior) so API and reopen agree. A torn successor must not tombstone
         // the prior — reopen would drop the incomplete tail and lose the row.
         if(rolled_back == rollback_result::truncate_failed)
         {
             if(complete_appended_records(m_storage, m_db, original_size, 1))
             {
-                staged_index.insert(document, metadata.position);
+                staged_index.insert(document, metadata.position, log);
                 for(const auto position : positions)
                 {
                     if(m_storage.fail())
@@ -1854,7 +1921,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
                         break;
                 }
                 m_storage.flush();
-                m_index = std::move(staged);
+                undo.commit();
                 assign_revision(revision, metadata);
                 return positions.size();
             }
@@ -1878,7 +1945,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             db_operation::replace,
             "Failed to append and flush the replacement document"s)};
     }
-    staged_index.insert(document, metadata.position);
+    staged_index.insert(document, metadata.position, log);
 
     // Mark prior live versions as updated (not deleted) so history remains walkable.
     // Failbit discipline: do not clear() away a failed tombstone before the next.
@@ -1899,7 +1966,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
         // Replacement was flushed. If undo cannot restore created on prior
         // rows, or restore succeeds but truncating the successor fails, reopen
         // indexes the successor while a stale m_index / error return would
-        // disagree — publish staged instead.
+        // disagree — keep the index edits instead.
         const auto rolled_back = rollback(
             m_storage,
             m_db,
@@ -1923,7 +1990,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
                 }
                 m_storage.flush();
             }
-            m_index = std::move(staged);
+            undo.commit();
             assign_revision(revision, metadata);
             return positions.size();
         }
@@ -1941,7 +2008,7 @@ yar::db::db_result<std::size_t> yar::db::engine::replace_impl(
             "Failed to mark replaced document versions as updated"s)};
     }
 
-    m_index = std::move(staged);
+    undo.commit();
     assign_revision(revision, metadata);
     return positions.size();
 }
@@ -2174,7 +2241,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         std::optional<std::size_t> append_index;
     };
 
-    auto staged = m_index;
+    auto undo = write_undo{m_index};
     auto appends = std::vector<planned_append>{};
     auto priors = std::vector<prior_mark>{};
     auto plans = std::vector<item_plan>{};
@@ -2196,7 +2263,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             return current;
         }
 
-        const auto* index = find_index(staged, collection);
+        const auto* index = find_index(m_index, collection);
         if(index == nullptr or not index->contains_id(static_cast<sequence_type>(id)))
             return current;
 
@@ -2245,12 +2312,13 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         const auto queue_append = [&](object document, batch_effect effect)
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
-            auto& collection_index = staged[request.collection];
+            auto* log = undo.log(request.collection);
+            auto& collection_index = undo[request.collection];
             // Distinct negative positions so a unique-value lookup can name the
             // in-group owner. -1 stays "no file position" for If-Match.
             const auto placeholder = static_cast<position_type>(
                 -static_cast<position_type>(appends.size()) - 2);
-            collection_index.insert(document, placeholder);
+            collection_index.insert(document, placeholder, log);
             const auto slot = appends.size();
             appends.push_back({request.collection, document, false, false, {}});
             live_appends[{request.collection, id}] = slot;
@@ -2291,8 +2359,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
                 }
             }
 
-            staged[request.collection].update(document);
-            if(const auto clash = staged[request.collection].conflicts_with(document))
+            undo[request.collection].update(document, undo.log(request.collection));
+            if(const auto clash = undo[request.collection].conflicts_with(document))
                 return std::unexpected{fail_unique(index, *clash)};
             queue_append(std::move(document), batch_effect::created);
             continue;
@@ -2317,7 +2385,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             else
                 priors.push_back({current.metadata_record.position, true});
 
-            staged[request.collection].erase(current.document);
+            undo[request.collection].erase(current.document, undo.log(request.collection));
             live_appends.erase({request.collection, id});
             remember(batch_effect::deleted, current.document, std::nullopt);
             continue;
@@ -2340,8 +2408,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
 
                 auto document = request.body;
                 document["_id"s] = id;
-                staged[request.collection].update(document);
-                if(const auto clash = staged[request.collection].conflicts_with(document))
+                undo[request.collection].update(document, undo.log(request.collection));
+                if(const auto clash = undo[request.collection].conflicts_with(document))
                     return std::unexpected{fail_unique(index, *clash)};
                 queue_append(std::move(document), batch_effect::created);
                 continue;
@@ -2374,9 +2442,10 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             else
                 priors.push_back({current.metadata_record.position, false});
 
-            staged[request.collection].erase(current.document);
-            staged[request.collection].update(document);
-            if(const auto clash = staged[request.collection].conflicts_with(document))
+            auto* log = undo.log(request.collection);
+            undo[request.collection].erase(current.document, log);
+            undo[request.collection].update(document, log);
+            if(const auto clash = undo[request.collection].conflicts_with(document))
                 return std::unexpected{fail_unique(index, *clash)};
             const auto effect = request.method == batch_method::update
                 ? batch_effect::updated
@@ -2477,6 +2546,18 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         }
     }
 
+    auto place_live = [&]()
+    {
+        for(const auto& slot : live_appends | std::views::values)
+        {
+            auto& item = appends[slot];
+            auto* log = undo.log(item.collection);
+            auto& collection_index = undo[item.collection];
+            collection_index.erase(item.document, log);
+            collection_index.insert(item.document, item.metadata_record.position, log);
+        }
+    };
+
     auto mark_status = [&](position_type position, metadata::action status) mutable
     {
         if(m_storage.fail())
@@ -2511,13 +2592,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         m_storage.flush();
         if(m_storage.fail())
         {
-            for(const auto& [key, slot] : live_appends)
-            {
-                auto& item = appends[slot];
-                staged[item.collection].erase(item.document);
-                staged[item.collection].insert(item.document, item.metadata_record.position);
-            }
-            m_index = std::move(staged);
+            place_live();
+            undo.commit();
             m_writable = false;
             return std::unexpected{db_error(
                 db_error_code::rollback_failure,
@@ -2526,13 +2602,8 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         }
     }
 
-    for(const auto& [key, slot] : live_appends)
-    {
-        auto& item = appends[slot];
-        staged[item.collection].erase(item.document);
-        staged[item.collection].insert(item.document, item.metadata_record.position);
-    }
-    m_index = std::move(staged);
+    place_live();
+    undo.commit();
 
     auto items = std::vector<batch_item>{};
     items.reserve(plans.size());

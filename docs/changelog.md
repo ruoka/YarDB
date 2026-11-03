@@ -8,6 +8,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 ## November 2026
 
+### Storage
+
+| Item | Summary |
+|------|---------|
+| **In-memory indexes** | In-memory indexes are `std::map`, and a write undoes index edits instead of copying `m_index`. |
+
 ### HTTP
 
 | Item | Summary |

@@ -24,13 +24,13 @@ using position_type = std::streamoff;
 
 using positions_type = std::vector<position_type>;
 
-using primary_index_type = std::flat_map<primary_key_type, position_type>;
+using primary_index_type = std::map<primary_key_type, position_type>;
 
 // Order integer_type and number_type by numeric value so range queries and
 // equality treat JSON doubles and OData integer literals consistently.
-using secondary_index_type = std::flat_map<secondary_key_type, positions_type, xson::primitive_less_t>;
+using secondary_index_type = std::map<secondary_key_type, positions_type, xson::primitive_less_t>;
 
-using secondary_index_map = std::flat_map<secondary_index_name, secondary_index_type>;
+using secondary_index_map = std::map<secondary_index_name, secondary_index_type>;
 
 // Walks every stored position for keys in [key_begin, key_end).
 class secondary_position_iterator
@@ -319,6 +319,142 @@ private:
     std::optional<std::size_t> m_known_size;
 };
 
+class index;
+
+// Inverse of the index edits a write applied. Discard keeps them; apply puts
+// the index back. The log stores positions and keys, not a copy of either map.
+class index_undo
+{
+public:
+
+    void apply(index& target);
+
+    void discard() noexcept
+    {
+        m_ops.clear();
+    }
+
+private:
+
+    friend class index;
+
+    struct primary_inserted
+    {
+        primary_key_type id;
+    };
+
+    struct primary_replaced
+    {
+        primary_key_type id;
+        position_type position;
+    };
+
+    struct primary_removed
+    {
+        primary_key_type id;
+        position_type position;
+    };
+
+    struct secondary_key_added
+    {
+        secondary_index_name field;
+        secondary_key_type key;
+    };
+
+    struct secondary_pushed
+    {
+        secondary_index_name field;
+        secondary_key_type key;
+    };
+
+    struct secondary_removed
+    {
+        secondary_index_name field;
+        secondary_key_type key;
+        std::size_t at;
+        position_type position;
+        bool erased_key;
+    };
+
+    struct secondary_map_added
+    {
+        secondary_index_name field;
+    };
+
+    struct unique_added
+    {
+        secondary_index_name field;
+    };
+
+    struct sequence_set
+    {
+        sequence_type previous;
+    };
+
+    using op = std::variant<
+        primary_inserted,
+        primary_replaced,
+        primary_removed,
+        secondary_key_added,
+        secondary_pushed,
+        secondary_removed,
+        secondary_map_added,
+        unique_added,
+        sequence_set>;
+
+    void note_primary_inserted(primary_key_type id)
+    {
+        m_ops.push_back(primary_inserted{id});
+    }
+
+    void note_primary_replaced(primary_key_type id, position_type position)
+    {
+        m_ops.push_back(primary_replaced{id, position});
+    }
+
+    void note_primary_removed(primary_key_type id, position_type position)
+    {
+        m_ops.push_back(primary_removed{id, position});
+    }
+
+    void note_secondary_key(const secondary_index_name& field, const secondary_key_type& key)
+    {
+        m_ops.push_back(secondary_key_added{field, key});
+    }
+
+    void note_secondary_pushed(const secondary_index_name& field, const secondary_key_type& key)
+    {
+        m_ops.push_back(secondary_pushed{field, key});
+    }
+
+    void note_secondary_removed(
+        const secondary_index_name& field,
+        const secondary_key_type& key,
+        std::size_t at,
+        position_type position,
+        bool erased_key)
+    {
+        m_ops.push_back(secondary_removed{field, key, at, position, erased_key});
+    }
+
+    void note_secondary_map(const secondary_index_name& field)
+    {
+        m_ops.push_back(secondary_map_added{field});
+    }
+
+    void note_unique(const secondary_index_name& field)
+    {
+        m_ops.push_back(unique_added{field});
+    }
+
+    void note_sequence(sequence_type previous)
+    {
+        m_ops.push_back(sequence_set{previous});
+    }
+
+    std::vector<op> m_ops;
+};
+
 // A unique secondary value is already held by another live document, or the
 // field is present but not a primitive. id is that document when one is known.
 struct unique_conflict
@@ -336,16 +472,24 @@ public:
 
     index() = default;
 
+    index(const index&) = delete;
+
+    index& operator=(const index&) = delete;
+
+    index(index&&) = default;
+
+    index& operator=(index&&) = default;
+
     // Add a single secondary index key
     // @param key Field name to index
-    void add(const std::string& key);
+    void add(const std::string& key, index_undo* undo = nullptr);
 
     // Add multiple secondary index keys
     // @param keys Field names to index
-    void add(std::span<const std::string> keys);
+    void add(std::span<const std::string> keys, index_undo* undo = nullptr);
 
     // Mark indexed fields unique. Names that are not secondary keys are ignored.
-    void add_unique(std::span<const std::string> fields);
+    void add_unique(std::span<const std::string> fields, index_undo* undo = nullptr);
 
     // Secondary index key names (view into the index; valid while this object lives)
     std::span<const std::string> keys() const;
@@ -390,7 +534,8 @@ public:
     // Update document and assign _id if missing
     // Increments sequence counter for new _id assignment
     // @param document Document to update (may be modified to add _id)
-    void update(xson::object& document);
+    // @param undo When set, records the previous sequence
+    void update(xson::object& document, index_undo* undo = nullptr);
 
     // True when a live primary-key entry already exists for id
     bool contains_id(primary_key_type id) const;
@@ -403,14 +548,18 @@ public:
     // Appends position for duplicate secondary key values
     // @param document Document to index
     // @param position Storage file position where document is stored
-    void insert(xson::object& document, position_type position);
+    // @param undo When set, records the inverse primary and secondary edits
+    void insert(xson::object& document, position_type position, index_undo* undo = nullptr);
 
     // Erase document from all indexes
     // Removes from primary key index and matching positions in secondary indexes
     // @param document Document to remove from index
-    void erase(const xson::object& document);
+    // @param undo When set, records the positions to put back
+    void erase(const xson::object& document, index_undo* undo = nullptr);
 
 private:
+
+    friend class index_undo;
 
     std::optional<primary_key_type> id_at(position_type position) const;
 
@@ -419,6 +568,9 @@ private:
     primary_index_type m_primary_keys;
 
     secondary_index_map m_secondary_keys;
+
+    // Sorted like the map, so keys() stays a contiguous view.
+    std::vector<std::string> m_key_names;
 
     std::vector<std::string> m_unique_keys;
 };

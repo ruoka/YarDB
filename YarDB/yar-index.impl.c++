@@ -12,8 +12,23 @@ auto make_primary_key = [](const xson::primitive& v){return std::get<xson::integ
 
 auto make_secondary_key = [](const xson::primitive& v){return v;};
 
+// True when [begin, end) is inverted. Map iterators are bidirectional, so this
+// compares keys instead of walking begin toward end or past it.
+template<typename Map>
+bool bounds_inverted(
+    const Map& keys,
+    typename Map::const_iterator begin,
+    typename Map::const_iterator end)
+{
+    if(begin == end or end == keys.cend())
+        return false;
+    if(begin == keys.cend())
+        return true;
+    return keys.key_comp()(end->first, begin->first);
+}
+
 // Shared $gt/$gte/$lt/$lte/$eq (and bare equality) bound resolution for primary
-// and secondary flat_maps. Callers apply $head/$tail and wrap iterators.
+// and secondary maps. Callers apply $head/$tail and wrap iterators.
 template<typename Map, typename MakeKey>
 auto analyze_key_bounds(const yar::db::object& selector, const Map& keys, MakeKey make_key)
 {
@@ -36,10 +51,9 @@ auto analyze_key_bounds(const yar::db::object& selector, const Map& keys, MakeKe
         std::tie(begin, end) = keys.equal_range(make_key(selector));
 
     // AND-merged OData ranges can be empty/inverted (age gt 10 and age lt 5).
-    // flat_map iterators are random-access; walking an inverted [begin, end)
-    // via distance/advance is undefined behavior. Secondary position iterators
-    // similarly must not walk key_begin past key_end.
-    if(begin > end)
+    // Do not walk key_begin past key_end: secondary position iterators increment
+    // until the end iterator, which is undefined if the range is inverted.
+    if(bounds_inverted(keys, begin, end))
         begin = end;
 
     return std::pair{begin, end};
@@ -53,6 +67,15 @@ yar::db::index_view query_analysis_primary(
 {
     auto [begin, end] = analyze_key_bounds(selector, keys, make_key);
 
+    // The whole primary map is keys.size(). Distance walks only a real subrange
+    // ($head, $tail, or a bound that is not the full map).
+    const auto span_count = [&](auto first, auto last)
+    {
+        if(first == keys.cbegin() and last == keys.cend())
+            return static_cast<xson::integer_type>(keys.size());
+        return static_cast<xson::integer_type>(std::ranges::distance(first, last));
+    };
+
     // Primary applies $head/$tail on key iterators, and only when equality did
     // not already replace the range (same exclusive chain as before).
     if(not selector.has("$eq"s) and not selector.has_value())
@@ -60,7 +83,7 @@ yar::db::index_view query_analysis_primary(
         if(selector.has("$head"s))
         {
             const xson::integer_type n = selector["$head"s];
-            const xson::integer_type len = std::ranges::distance(begin, end);
+            const xson::integer_type len = span_count(begin, end);
             auto itr = begin;
             std::ranges::advance(itr, std::min(n, len));
             end = itr;
@@ -68,14 +91,14 @@ yar::db::index_view query_analysis_primary(
         else if(selector.has("$tail"s))
         {
             const xson::integer_type n = selector["$tail"s];
-            const xson::integer_type len = std::ranges::distance(begin, end);
+            const xson::integer_type len = span_count(begin, end);
             auto itr = end;
             std::ranges::advance(itr, -std::min(n, len));
             begin = itr;
         }
     }
 
-    const std::size_t known_size = std::ranges::distance(begin, end);
+    const std::size_t known_size = static_cast<std::size_t>(span_count(begin, end));
 
     if(not selector.has("$desc"s))
         return {begin, end, known_size};
@@ -128,13 +151,6 @@ yar::db::index_view query_analysis_secondary(
             yar::db::secondary_index_type::const_reverse_iterator{key_begin},
             yar::db::secondary_index_type::const_reverse_iterator{key_begin}},
         known_size};
-}
-
-void remove_position(yar::db::positions_type& positions, yar::db::position_type position)
-{
-    const auto it = std::ranges::find(positions, position);
-    if(it != positions.end())
-        positions.erase(it);
 }
 
 bool is_pagination_key(const std::string& key)
@@ -270,18 +286,24 @@ std::size_t count_by_scan(
 
 } // namespace
 
-void yar::db::index::add(const std::string& key)
+void yar::db::index::add(const std::string& key, yar::db::index_undo* undo)
 {
-    if(not m_secondary_keys.contains(key))
-        m_secondary_keys.emplace(key, yar::db::secondary_index_type{});
+    if(m_secondary_keys.contains(key))
+        return;
+
+    m_secondary_keys.emplace(key, yar::db::secondary_index_type{});
+    const auto at = std::ranges::lower_bound(m_key_names, key);
+    m_key_names.insert(at, key);
+    if(undo != nullptr)
+        undo->note_secondary_map(key);
 }
 
-void yar::db::index::add(std::span<const std::string> keys)
+void yar::db::index::add(std::span<const std::string> keys, yar::db::index_undo* undo)
 {
-    std::ranges::for_each(keys, [this](const std::string& key) { add(key); });
+    std::ranges::for_each(keys, [this, undo](const std::string& key) { add(key, undo); });
 }
 
-void yar::db::index::add_unique(std::span<const std::string> fields)
+void yar::db::index::add_unique(std::span<const std::string> fields, yar::db::index_undo* undo)
 {
     for(const auto& field : fields)
     {
@@ -290,12 +312,14 @@ void yar::db::index::add_unique(std::span<const std::string> fields)
         if(std::ranges::contains(m_unique_keys, field))
             continue;
         m_unique_keys.push_back(field);
+        if(undo != nullptr)
+            undo->note_unique(field);
     }
 }
 
 std::span<const std::string> yar::db::index::keys() const
 {
-    return m_secondary_keys.keys();
+    return m_key_names;
 }
 
 std::span<const std::string> yar::db::index::unique_keys() const
@@ -394,7 +418,7 @@ bool yar::db::index::primary_key(const yar::db::object& selector) const
 bool yar::db::index::secondary_key(const yar::db::object& selector) const
 {
     return std::ranges::any_of(
-        m_secondary_keys.keys(),
+        m_key_names,
         [&](const std::string& field_name) { return selector.has(field_name); });
 }
 
@@ -422,19 +446,23 @@ yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
             }
 
     if(not selector.has("$desc"s))
-        return {std::ranges::cbegin(m_primary_keys), std::ranges::cend(m_primary_keys)};
+        return {std::ranges::cbegin(m_primary_keys), std::ranges::cend(m_primary_keys), m_primary_keys.size()};
 
     return {
         std::ranges::crbegin(m_primary_keys),
-        std::ranges::crend(m_primary_keys)};
+        std::ranges::crend(m_primary_keys),
+        m_primary_keys.size()};
 }
 
-void yar::db::index::update(yar::db::object& document)
+void yar::db::index::update(yar::db::object& document, yar::db::index_undo* undo)
 {
+    const auto previous = m_sequence;
     if(document.has("_id"s))
         m_sequence = std::max<yar::db::sequence_type>(m_sequence, document["_id"s]);
     else
         document["_id"s] = ++m_sequence;
+    if(undo != nullptr and m_sequence != previous)
+        undo->note_sequence(previous);
 }
 
 bool yar::db::index::contains_id(yar::db::primary_key_type id) const
@@ -450,12 +478,23 @@ std::optional<yar::db::position_type> yar::db::index::position(yar::db::primary_
     return it->second;
 }
 
-void yar::db::index::insert(yar::db::object& document, yar::db::position_type position)
+void yar::db::index::insert(yar::db::object& document, yar::db::position_type position, yar::db::index_undo* undo)
 {
     const auto pk = make_primary_key(document["_id"s]);
-    m_primary_keys[pk] = position;
+    if(const auto primary_it = m_primary_keys.find(pk); primary_it == m_primary_keys.end())
+    {
+        m_primary_keys.emplace(pk, position);
+        if(undo != nullptr)
+            undo->note_primary_inserted(pk);
+    }
+    else if(primary_it->second != position)
+    {
+        if(undo != nullptr)
+            undo->note_primary_replaced(pk, primary_it->second);
+        primary_it->second = position;
+    }
 
-    for(const auto& field_name : m_secondary_keys.keys())
+    for(const auto& field_name : m_key_names)
     {
         if(not document.has(field_name))
             continue;
@@ -467,13 +506,24 @@ void yar::db::index::insert(yar::db::object& document, yar::db::position_type po
             continue;
 
         const auto sk = make_secondary_key(value);
-        auto& positions = m_secondary_keys[field_name][sk];
-        if(std::ranges::find(positions, position) == positions.end())
-            positions.push_back(position);
+        auto& secondary = m_secondary_keys.at(field_name);
+        const auto secondary_it = secondary.find(sk);
+        if(secondary_it == secondary.end())
+        {
+            secondary.emplace(sk, yar::db::positions_type{position});
+            if(undo != nullptr)
+                undo->note_secondary_key(field_name, sk);
+        }
+        else if(std::ranges::find(secondary_it->second, position) == secondary_it->second.end())
+        {
+            secondary_it->second.push_back(position);
+            if(undo != nullptr)
+                undo->note_secondary_pushed(field_name, sk);
+        }
     }
 }
 
-void yar::db::index::erase(const yar::db::object& document)
+void yar::db::index::erase(const yar::db::object& document, yar::db::index_undo* undo)
 {
     const auto pk = make_primary_key(document["_id"s]);
     const auto primary_it = m_primary_keys.find(pk);
@@ -482,8 +532,10 @@ void yar::db::index::erase(const yar::db::object& document)
 
     const auto position = primary_it->second;
     m_primary_keys.erase(primary_it);
+    if(undo != nullptr)
+        undo->note_primary_removed(pk, position);
 
-    for(const auto& field_name : m_secondary_keys.keys())
+    for(const auto& field_name : m_key_names)
     {
         if(not document.has(field_name))
             continue;
@@ -493,14 +545,80 @@ void yar::db::index::erase(const yar::db::object& document)
             continue;
 
         const auto sk = make_secondary_key(value);
-        auto& secondary = m_secondary_keys[field_name];
+        auto& secondary = m_secondary_keys.at(field_name);
         const auto secondary_it = secondary.find(sk);
         if(secondary_it == secondary.end())
             continue;
 
-        auto& positions = secondary[sk];
-        remove_position(positions, position);
-        if(positions.empty())
-            secondary.erase(sk);
+        auto& positions = secondary_it->second;
+        const auto pos_it = std::ranges::find(positions, position);
+        if(pos_it == positions.end())
+            continue;
+
+        const auto at = static_cast<std::size_t>(pos_it - positions.begin());
+        const auto erased_key = positions.size() == 1;
+        positions.erase(pos_it);
+        if(erased_key)
+            secondary.erase(secondary_it);
+        if(undo != nullptr)
+            undo->note_secondary_removed(field_name, sk, at, position, erased_key);
     }
+}
+
+void yar::db::index_undo::apply(yar::db::index& target)
+{
+    for(auto op = m_ops.rbegin(); op != m_ops.rend(); ++op)
+    {
+        if(const auto* action = std::get_if<primary_inserted>(&*op))
+            target.m_primary_keys.erase(action->id);
+        else if(const auto* action = std::get_if<primary_replaced>(&*op))
+            target.m_primary_keys.insert_or_assign(action->id, action->position);
+        else if(const auto* action = std::get_if<primary_removed>(&*op))
+            target.m_primary_keys.insert_or_assign(action->id, action->position);
+        else if(const auto* action = std::get_if<secondary_key_added>(&*op))
+        {
+            if(const auto field = target.m_secondary_keys.find(action->field); field != target.m_secondary_keys.end())
+                field->second.erase(action->key);
+        }
+        else if(const auto* action = std::get_if<secondary_pushed>(&*op))
+        {
+            const auto field = target.m_secondary_keys.find(action->field);
+            if(field == target.m_secondary_keys.end())
+                continue;
+            const auto key = field->second.find(action->key);
+            if(key == field->second.end() or key->second.empty())
+                continue;
+            key->second.pop_back();
+            if(key->second.empty())
+                field->second.erase(key);
+        }
+        else if(const auto* action = std::get_if<secondary_removed>(&*op))
+        {
+            auto& secondary = target.m_secondary_keys.at(action->field);
+            if(action->erased_key)
+            {
+                secondary.emplace(action->key, yar::db::positions_type{action->position});
+                continue;
+            }
+            auto& positions = secondary.at(action->key);
+            const auto at = std::min(action->at, positions.size());
+            positions.insert(positions.begin() + static_cast<std::ptrdiff_t>(at), action->position);
+        }
+        else if(const auto* action = std::get_if<secondary_map_added>(&*op))
+        {
+            target.m_secondary_keys.erase(action->field);
+            const auto name = std::ranges::find(target.m_key_names, action->field);
+            if(name != target.m_key_names.end())
+                target.m_key_names.erase(name);
+        }
+        else if(const auto* action = std::get_if<unique_added>(&*op))
+        {
+            const auto name = std::ranges::find(target.m_unique_keys, action->field);
+            if(name != target.m_unique_keys.end())
+                target.m_unique_keys.erase(name);
+        }
+        else if(const auto* action = std::get_if<sequence_set>(&*op))
+            target.m_sequence = action->previous;
+    }
+    m_ops.clear();
 }

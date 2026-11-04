@@ -461,14 +461,14 @@ inline auto validate_collection_name(std::string_view collection_name)
     if(collection_name[0] < 'a' or collection_name[0] > 'z')
         throw std::invalid_argument{"Collection name must start with a lowercase letter"};
     
-    // Must contain only lowercase letters, digits, and underscores
+    // Must contain only lowercase letters, digits, underscores and hyphens
     constexpr auto is_valid_collection_char = [](const char c)
     {
-        return (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_';
+        return (c >= 'a' and c <= 'z') or (c >= '0' and c <= '9') or c == '_' or c == '-';
     };
 
     if(not std::ranges::all_of(collection_name, is_valid_collection_char))
-        throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, and underscore allowed)"};
+        throw std::invalid_argument{"Collection name contains invalid character (only lowercase letters, digits, underscore and hyphen allowed)"};
     
     return std::string{collection_name};
 }

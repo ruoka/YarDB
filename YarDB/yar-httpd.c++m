@@ -34,9 +34,9 @@ const auto correlation_id_header_str = std::string{correlation_id_header};
 // /sse, /messages). Native MCP claims /sse and /messages/; keep them out of the
 // collection matcher so enable_mcp(false) yields 404 instead of treating "sse"
 // as a collection name.
-inline const auto collection_route = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*"s;
-inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*(\\?.*)?"s;
-inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9]*/[0-9]+"s;
+inline const auto collection_route = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9_-]*"s;
+inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9_-]*(\\?.*)?"s;
+inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$|sse$|messages$)[a-z][a-z0-9_-]*/[0-9]+"s;
 
 // Handler type aliases for middleware composition
 using handler = ::http::callback;
@@ -1484,7 +1484,7 @@ private:
         auto batch_middlewares = build_middleware_chain(method_post, "POST_BATCH"sv, "POST_BATCH_ERROR"sv, true);
 
         // Read _id - Refactored to use middleware pattern and helper functions
-        // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
+        // Route pattern /[a-z][a-z0-9_-]*/[0-9]+ ensures uri.path[2] is numeric
         auto get_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
         {
             const auto ctx = handler_context{request, m_engine};
@@ -1562,7 +1562,7 @@ private:
             ::http::middleware::wrap(get_document_handler, get_document_middlewares));
 
         // Read collection with OData query parameters - Refactored to use middleware pattern
-        // Route pattern allows optional query string: /[a-z][a-z0-9]*(\?.*)?
+        // Route pattern allows optional query string: /[a-z][a-z0-9_-]*(\?.*)?
         // Note: Collection names must start with a letter, but can contain digits
         auto get_collection_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, ::http::headers& headers)
         {
@@ -1955,7 +1955,7 @@ private:
         };
 
         auto get_index_middlewares = build_middleware_chain(method_get, "GET_INDEX"sv, "GET_INDEX_ERROR"sv, true);
-        m_server.get("/_db/[a-z][a-z0-9]*"s).response(
+        m_server.get("/_db/[a-z][a-z0-9_-]*"s).response(
             "application/json"sv,
             ::http::middleware::wrap(get_index_handler, get_index_middlewares));
 
@@ -2099,7 +2099,7 @@ private:
         };
 
         auto put_index_middlewares = build_middleware_chain(method_put, "PUT_INDEX"sv, "PUT_INDEX_ERROR"sv, true);
-        m_server.put("/_db/[a-z][a-z0-9]*"s).response(
+        m_server.put("/_db/[a-z][a-z0-9_-]*"s).response(
             "application/json"sv,
             ::http::middleware::wrap(put_index_handler, put_index_middlewares));
 
@@ -2300,13 +2300,13 @@ private:
         };
 
         auto patch_index_middlewares = build_middleware_chain(method_patch, "PATCH_INDEX"sv, "PATCH_INDEX_ERROR"sv, true);
-        m_server.patch("/_db/[a-z][a-z0-9]*"s).response(
+        m_server.patch("/_db/[a-z][a-z0-9_-]*"s).response(
             "application/json"sv,
             ::http::middleware::wrap(patch_index_handler, patch_index_middlewares));
 
 
         // Update aka replace _id (upsert behavior) - Refactored to use middleware pattern
-        // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
+        // Route pattern /[a-z][a-z0-9_-]*/[0-9]+ ensures uri.path[2] is numeric
         auto put_document_handler = [this](::http::request_view request, ::http::body_view body, ::http::headers& headers)
         {
             // Validate body is not empty
@@ -2368,7 +2368,7 @@ private:
             ::http::middleware::wrap(put_document_handler, put_document_middlewares));
 
         // Update aka modify _id - Refactored to use middleware pattern
-        // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
+        // Route pattern /[a-z][a-z0-9_-]*/[0-9]+ ensures uri.path[2] is numeric
         auto patch_document_handler = [this](::http::request_view request, ::http::body_view body, ::http::headers& headers)
         {
             // Validate body is not empty
@@ -2462,7 +2462,7 @@ private:
             ::http::middleware::wrap(patch_document_handler, patch_document_middlewares));
 
         // Delete _id - Refactored to use middleware pattern
-        // Route pattern /[a-z][a-z0-9]*/[0-9]+ ensures uri.path[2] is numeric
+        // Route pattern /[a-z][a-z0-9_-]*/[0-9]+ ensures uri.path[2] is numeric
         auto delete_document_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, [[maybe_unused]] ::http::headers& headers)
         {
             const auto ctx = handler_context{request, m_engine};
@@ -2569,7 +2569,7 @@ private:
                 "/ready"s,
                 "/metrics"s,
                 "/\\$metadata"s,
-                "/_db/[a-z][a-z0-9]*"s,
+                "/_db/[a-z][a-z0-9_-]*"s,
                 "/_reindex"s})
         {
             m_server.options(path).response("*/*"sv, options_callback);

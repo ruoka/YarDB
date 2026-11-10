@@ -1244,8 +1244,10 @@ bool yar::db::engine::read(
     }
 
     const auto keys = orderby_keys(query);
-    const auto orderby = not keys.empty();
-    if(not orderby and after_id)
+    const auto primary_id_order =
+        keys.size() == 1 and keys.front().field == "_id"s and not keys.front().descending;
+    const auto orderby = not keys.empty() and not primary_id_order;
+    if((not orderby or primary_id_order) and after_id)
         resume_primary_key(query, *after_id);
 
     auto success = false;
@@ -1260,7 +1262,7 @@ bool yar::db::engine::read(
         reader >> metadata >> document;
         if(document.match(query))
         {
-            if(not orderby)
+            if(not orderby or primary_id_order)
             {
                 if(skip > 0)
                 {

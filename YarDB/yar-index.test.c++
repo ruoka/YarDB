@@ -336,6 +336,27 @@ auto test_set()
             }), 2u);
         };
 
+        section("PrimaryRangeIntersectSecondaryEq") = []
+        {
+            index_fixture fixture{"./index_primary_intersect.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "A"s}, {"tag"s, 1ll}});
+            fixture.insert(object{{"status"s, "A"s}, {"tag"s, 2ll}});
+            fixture.insert(object{{"status"s, "B"s}, {"tag"s, 3ll}});
+            fixture.insert(object{{"status"s, "B"s}, {"tag"s, 4ll}});
+
+            const auto both = object{
+                {"_id"s, object{{"$gt"s, 1ll}}},
+                {"status"s, "A"s}};
+            require_eq(fixture.view_count(both), 1u);
+            require_eq(fixture.count(both), 1u);
+
+            const auto all_a = object{
+                {"_id"s, object{{"$gt"s, 0ll}}},
+                {"status"s, "A"s}};
+            require_eq(fixture.view_count(all_a), 2u);
+        };
+
         section("ViewUsesTightestExactSecondarySpan") = []
         {
             // service sorts ahead of updatedMs. The day's bound is the smaller span.

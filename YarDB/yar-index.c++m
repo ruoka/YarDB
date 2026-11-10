@@ -155,6 +155,69 @@ private:
     std::size_t m_pos_idx = 0;
 };
 
+// Walks a primary-key subrange and yields only file positions listed on a
+// secondary index span (AND of _id bounds with an indexed eq/range).
+class primary_intersection_iterator
+{
+public:
+
+    using primary_iterator = primary_index_type::const_iterator;
+
+    primary_intersection_iterator() = default;
+
+    primary_intersection_iterator(
+        primary_iterator current,
+        primary_iterator end,
+        std::shared_ptr<const std::unordered_set<position_type>> allowed) :
+        m_it{current},
+        m_end{end},
+        m_allowed{std::move(allowed)}
+    {
+        advance_to_allowed();
+    }
+
+    auto operator*() const -> position_type
+    {
+        return m_it->second;
+    }
+
+    auto& operator++()
+    {
+        ++m_it;
+        advance_to_allowed();
+        return *this;
+    }
+
+    auto operator++(int)
+    {
+        auto tmp = *this;
+        ++*this;
+        return tmp;
+    }
+
+    friend bool operator==(const primary_intersection_iterator& lhs, const primary_intersection_iterator& rhs)
+    {
+        return lhs.m_it == rhs.m_it;
+    }
+
+    auto operator!=(const primary_intersection_iterator& rhs) const -> bool
+    {
+        return not(*this == rhs);
+    }
+
+private:
+
+    void advance_to_allowed()
+    {
+        while(m_it != m_end and not m_allowed->contains(m_it->second))
+            ++m_it;
+    }
+
+    primary_iterator m_it{};
+    primary_iterator m_end{};
+    std::shared_ptr<const std::unordered_set<position_type>> m_allowed;
+};
+
 class index_iterator
 {
 public:
@@ -163,7 +226,7 @@ public:
     using value_type = position_type;
     using iterator_concept = std::forward_iterator_tag;
 
-    enum class kind {primary, secondary, reverse_primary, reverse_secondary};
+    enum class kind {primary, secondary, reverse_primary, reverse_secondary, primary_intersect};
 
     using primary_iterator = primary_index_type::const_iterator;
 
@@ -202,6 +265,11 @@ public:
         m_kind{kind::reverse_secondary}
     {}
 
+    index_iterator(primary_intersection_iterator current) :
+        m_state{current},
+        m_kind{kind::primary_intersect}
+    {}
+
     auto operator*() const -> position_type
     {
         switch(m_kind)
@@ -214,6 +282,8 @@ public:
             return std::get<reverse_primary_iterator>(m_state)->second;
         case kind::reverse_secondary:
             return *std::get<reverse_secondary_position_iterator>(m_state);
+        case kind::primary_intersect:
+            return *std::get<primary_intersection_iterator>(m_state);
         }
         std::unreachable();
     }
@@ -233,6 +303,9 @@ public:
             break;
         case kind::reverse_secondary:
             ++std::get<reverse_secondary_position_iterator>(m_state);
+            break;
+        case kind::primary_intersect:
+            ++std::get<primary_intersection_iterator>(m_state);
             break;
         }
         return *this;
@@ -260,6 +333,8 @@ public:
             return std::get<reverse_primary_iterator>(lhs.m_state) == std::get<reverse_primary_iterator>(rhs.m_state);
         case kind::reverse_secondary:
             return std::get<reverse_secondary_position_iterator>(lhs.m_state) == std::get<reverse_secondary_position_iterator>(rhs.m_state);
+        case kind::primary_intersect:
+            return std::get<primary_intersection_iterator>(lhs.m_state) == std::get<primary_intersection_iterator>(rhs.m_state);
         }
         std::unreachable();
     }
@@ -275,7 +350,8 @@ private:
         primary_iterator,
         secondary_position_iterator,
         reverse_primary_iterator,
-        reverse_secondary_position_iterator> m_state;
+        reverse_secondary_position_iterator,
+        primary_intersection_iterator> m_state;
 
     kind m_kind;
 };

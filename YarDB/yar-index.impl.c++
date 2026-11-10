@@ -109,6 +109,56 @@ yar::db::index_view query_analysis_primary(
         known_size};
 }
 
+std::shared_ptr<const std::unordered_set<yar::db::position_type>> secondary_position_set(
+    const yar::db::object& field_selector,
+    const yar::db::secondary_index_type& keys)
+{
+    auto allowed = std::make_shared<std::unordered_set<yar::db::position_type>>();
+    const auto [key_begin, key_end] = analyze_key_bounds(field_selector, keys, make_secondary_key);
+    for(auto pos = yar::db::secondary_position_iterator{key_begin, key_end};
+        pos != yar::db::secondary_position_iterator{key_end, key_end};
+        ++pos)
+        allowed->insert(*pos);
+    return allowed;
+}
+
+yar::db::index_view query_analysis_primary_intersect(
+    const yar::db::object& id_selector,
+    const yar::db::primary_index_type& keys,
+    std::shared_ptr<const std::unordered_set<yar::db::position_type>> allowed)
+{
+    auto [begin, end] = analyze_key_bounds(id_selector, keys, make_primary_key);
+
+    if(not id_selector.has("$eq"s) and not id_selector.has_value())
+    {
+        const auto span_count = [&](auto first, auto last) {
+            if(first == keys.cbegin() and last == keys.cend())
+                return static_cast<xson::integer_type>(keys.size());
+            return static_cast<xson::integer_type>(std::ranges::distance(first, last));
+        };
+        if(id_selector.has("$head"s))
+        {
+            const xson::integer_type n = id_selector["$head"s];
+            const xson::integer_type len = span_count(begin, end);
+            auto itr = begin;
+            std::ranges::advance(itr, std::min(n, len));
+            end = itr;
+        }
+        else if(id_selector.has("$tail"s))
+        {
+            const xson::integer_type n = id_selector["$tail"s];
+            const xson::integer_type len = span_count(begin, end);
+            auto itr = end;
+            std::ranges::advance(itr, -std::min(n, len));
+            begin = itr;
+        }
+    }
+
+    return {
+        yar::db::index_iterator{yar::db::primary_intersection_iterator{begin, end, allowed}},
+        yar::db::index_iterator{yar::db::primary_intersection_iterator{end, end, allowed}}};
+}
+
 yar::db::index_view query_analysis_secondary(
     const yar::db::object& selector,
     const yar::db::secondary_index_type& keys)
@@ -353,6 +403,39 @@ std::size_t posting_span(
     return std::ranges::fold_left(
         begin, end, std::size_t{0},
         [](std::size_t total, const auto& entry) { return total + entry.second.size(); });
+}
+
+std::pair<const yar::db::object*, const yar::db::secondary_index_type*> tightest_secondary_field(
+    const yar::db::secondary_index_map& secondaries,
+    const yar::db::object& selector,
+    std::size_t primary_size)
+{
+    const yar::db::secondary_index_type* best = nullptr;
+    const yar::db::object* best_field = nullptr;
+    auto best_span = std::optional<std::size_t>{};
+    for(const auto& entry : secondaries)
+    {
+        if(entry.first.contains('+'))
+            continue;
+        if(not selector.has(entry.first))
+            continue;
+        const auto& field_selector = selector[entry.first];
+        if(not secondary_field_selector_usable(field_selector))
+            continue;
+
+        const auto span = index_only_field_selector(field_selector)
+            ? posting_span(field_selector, entry.second)
+            : primary_size;
+        if(not best_span or span < *best_span)
+        {
+            best_span = span;
+            best = &entry.second;
+            best_field = &field_selector;
+        }
+    }
+    if(best == nullptr)
+        return {nullptr, nullptr};
+    return {best_field, best};
 }
 
 std::optional<std::size_t> try_index_only_count(
@@ -602,7 +685,15 @@ std::size_t yar::db::index::count(std::istream& storage, const yar::db::object& 
 yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
 {
     if(primary_key(selector))
+    {
+        const auto [best_field, best_keys] = tightest_secondary_field(m_secondary_keys, selector, m_primary_keys.size());
+        if(best_field != nullptr and best_keys != nullptr)
+        {
+            auto allowed = secondary_position_set(*best_field, *best_keys);
+            return query_analysis_primary_intersect(selector["_id"s], m_primary_keys, std::move(allowed));
+        }
         return query_analysis_primary(selector["_id"s], m_primary_keys, make_primary_key);
+    }
 
     // Among exact secondary bounds, use the one with the fewest positions.
     // $ne, $in, and any selector the bound analysis cannot represent, count as
@@ -610,31 +701,9 @@ yar::db::index_view yar::db::index::view(const yar::db::object& selector) const
     // alphabetically earlier key. A compound name is not a document field.
     if(secondary_key(selector))
     {
-        const yar::db::secondary_index_type* best = nullptr;
-        const yar::db::object* best_field = nullptr;
-        auto best_span = std::optional<std::size_t>{};
-        for(const auto& entry : m_secondary_keys)
-        {
-            if(entry.first.contains('+'))
-                continue;
-            if(not selector.has(entry.first))
-                continue;
-            const auto& field_selector = selector[entry.first];
-            if(not secondary_field_selector_usable(field_selector))
-                continue;
-
-            const auto span = index_only_field_selector(field_selector)
-                ? posting_span(field_selector, entry.second)
-                : m_primary_keys.size();
-            if(not best_span or span < *best_span)
-            {
-                best_span = span;
-                best = &entry.second;
-                best_field = &field_selector;
-            }
-        }
-        if(best != nullptr)
-            return query_analysis_secondary(*best_field, *best);
+        const auto [best_field, best_keys] = tightest_secondary_field(m_secondary_keys, selector, m_primary_keys.size());
+        if(best_field != nullptr)
+            return query_analysis_secondary(*best_field, *best_keys);
     }
 
     if(not selector.has("$desc"s))

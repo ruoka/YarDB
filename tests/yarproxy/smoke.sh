@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       echo "usage: smoke.sh [--jsonl] [--case NAME] [--replicas=N]"
-      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, partial_backend_drain, empty_backends_502, head_no_hang, sse_no_poison, truncated_body_no_hang, truncated_backend_no_poison"
+      echo "cases: no_replicas, help, proxy_crud, write_fanout, read_round_robin, header_forward_auth, header_forward_correlation, partial_backend_drain, empty_backends_502, head_no_hang, sse_no_poison, truncated_body_no_hang, truncated_backend_no_poison, transfer_encoding_no_smuggle"
       echo "default replicas: 2 (override with --replicas=N or REPLICA_COUNT=N)"
       exit 0
       ;;
@@ -602,6 +602,82 @@ EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
   end_case truncated_backend_no_poison
 }
 
+test_transfer_encoding_no_smuggle() {
+  should_run transfer_encoding_no_smuggle || return 0
+  begin_case transfer_encoding_no_smuggle
+  ensure_cluster
+  local coll status te_out
+  coll="$(collection tesmuggle)"
+
+  run_yarsh_proxy "$(cat <<EOF
+POST /${coll}
+{"name":"te-seed"}
+EXIT
+EOF
+)"
+  assert_contains " 201 " "seed_for_te"
+
+  # TE + Content-Length: 0 leaves the following bytes unread when TE is ignored.
+  # Pre-fix yarproxy treated that leftover as a second request and fan-out
+  # DELETE'd the seeded document on every replica.
+  status=0
+  te_out="$(
+    PROXY_URL="${PROXY_URL}" COLL="${coll}" run_with_timeout 5 python3 - <<'PY' 2>&1
+import os, socket, urllib.parse
+url = urllib.parse.urlparse(os.environ["PROXY_URL"])
+coll = os.environ["COLL"]
+smuggled = (
+    f"DELETE /{coll}/1 HTTP/1.1\r\n"
+    f"Host: {url.hostname}\r\n"
+    f"Content-Length: 0\r\n"
+    f"\r\n"
+).encode()
+req = (
+    f"POST /{coll} HTTP/1.1\r\n"
+    f"Host: {url.hostname}\r\n"
+    f"Content-Type: application/json\r\n"
+    f"Content-Length: 0\r\n"
+    f"Transfer-Encoding: chunked\r\n"
+    f"\r\n"
+).encode() + smuggled
+with socket.create_connection((url.hostname, url.port), timeout=3) as sock:
+    sock.sendall(req)
+    sock.shutdown(socket.SHUT_WR)
+    sock.settimeout(3)
+    chunks = []
+    try:
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            chunks.append(data)
+    except TimeoutError:
+        pass
+    print(b"".join(chunks).decode("utf-8", "replace"))
+PY
+  )" || status=$?
+  LAST_OUTPUT="${te_out}"
+  if [[ "${status}" -eq 124 ]]; then
+    fail "transfer-encoding request timed out"
+    end_case transfer_encoding_no_smuggle
+    return 0
+  fi
+  assert_contains " 400 " "transfer_encoding_bad_request"
+
+  # Seeded document must still exist — smuggled DELETE must not have run.
+  status=0
+  LAST_OUTPUT="$(printf '%s\n' "GET /${coll}/1
+EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
+  if [[ "${status}" -ne 0 ]]; then
+    fail "GET after transfer-encoding timed out or failed (exit=${status})"
+    end_case transfer_encoding_no_smuggle
+    return 0
+  fi
+  assert_contains " 200 " "get_after_te_ok"
+  assert_contains '"name" : "te-seed"' "get_after_te_body"
+  end_case transfer_encoding_no_smuggle
+}
+
 main() {
   require_bins
   trap stop_cluster EXIT
@@ -620,6 +696,7 @@ main() {
   test_sse_no_poison
   test_truncated_body_no_hang
   test_truncated_backend_no_poison
+  test_transfer_encoding_no_smuggle
   # Auth cases restart the cluster with --pat; empty_backends_502 kills replicas.
   test_header_forward_auth
   test_header_forward_correlation

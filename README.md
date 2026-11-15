@@ -169,7 +169,7 @@ The intended one-service / one-file model, database locking, recovery, backups, 
 
 The project uses git submodules for dependencies:
 - `net`: Network library / net4cpp ([`v3.5.0`](https://github.com/ruoka/net4cpp/releases/tag/v3.5.0)+)
-- `xson`: JSON/FSON library / json4cpp ([`v3.1.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.1.0)+)
+- `xson`: JSON/FSON library / json4cpp ([`v3.2.0`](https://github.com/ruoka/json4cpp/releases/tag/v3.2.0)+)
 - `cryptic`: Cryptographic functions ([`v3.0.2`](https://github.com/ruoka/cryptic/releases/tag/v3.0.2)+)
 - `tester`: Testing framework ([`v3.1.0`](https://github.com/ruoka/tester/releases/tag/v3.1.0))
 

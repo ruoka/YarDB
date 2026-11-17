@@ -12,11 +12,20 @@ inline constexpr auto reserved_field_id = "_id";        // Primary key field in 
 inline constexpr auto reserved_field_collection = "collection";  // Collection name field in _db documents
 inline constexpr auto reserved_field_keys = "keys";     // Secondary keys field in _db documents
 
-// Reserved collection names
+// Reserved URI path prefix. Admin and protocol routes live under it (`/_db`, `/_sse`,
+// `/_messages`). A collection name must start with a–z, so a leading '_' never
+// collides with a data collection. Prefer this prefix over claiming ordinary names.
+inline constexpr char reserved_path_prefix = '_';
+
+// Reserved collection names (public probe paths that look like collections)
 inline constexpr auto reserved_collection_db = "_db";  // System collection containing metadata for all collections
 inline constexpr auto reserved_collection_health = "health";  // GET /health liveness probe (not a data collection)
 inline constexpr auto reserved_collection_ready = "ready";    // GET /ready readiness probe (not a data collection)
 inline constexpr auto reserved_collection_metrics = "metrics"; // GET /metrics Prometheus scrape (not a data collection)
+
+// Native MCP (HTTP+SSE). Under the reserved path prefix so `messages` stays a data collection.
+inline constexpr auto reserved_mcp_sse_path = "/_sse";
+inline constexpr auto reserved_mcp_messages_path = "/_messages/";
 
 // Query parameter limits
 inline constexpr long long max_query_top = 10000;           // Maximum value for $top query parameter

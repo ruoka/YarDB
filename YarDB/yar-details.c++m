@@ -429,12 +429,13 @@ inline bool is_public_api_path(std::string_view uri)
         and parsed.path[2].empty();
 }
 
-// Maintenance paths (`/_db/...`, `/_reindex`, …) — require admin PAT when configured.
+// Paths under the reserved '_' prefix (`/_db/...`, `/_reindex`, `/_sse`, `/_messages`, …).
+// Require admin PAT when configured. Collection names cannot start with '_'.
 inline bool is_admin_api_path(std::string_view uri)
 {
     const ::http::uri parsed{uri};
     const auto segment = parsed.path[1];
-    return not segment.empty() and segment.starts_with('_');
+    return not segment.empty() and segment.front() == yar::db::reserved_path_prefix;
 }
 
 // MCP tools that map to `/_*` maintenance routes — require admin PAT when configured.

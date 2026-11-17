@@ -2,7 +2,7 @@
   "mcpServers": {
     "yardb": {
       "type": "sse",
-      "url": "http://127.0.0.1:2112/sse"
+      "url": "http://127.0.0.1:2112/_sse"
     },
     "yardb-python-stdio": {
       "type": "stdio",

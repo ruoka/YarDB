@@ -146,13 +146,13 @@ Native MCP HTTP+SSE is built into `yardb` (default on; `--no-mcp` to disable). P
 
 | Transport | Entry | Notes |
 |-----------|-------|-------|
-| **Native HTTP/SSE** | `yardb` (`--mcp`) | `http://127.0.0.1:2112/sse` |
+| **Native HTTP/SSE** | `yardb` (`--mcp`) | `http://127.0.0.1:2112/_sse` (JSON-RPC `POST /_messages/`) |
 | **Python stdio** | `tools/yardb_mcp.py` | Reference |
 | **Python HTTP/SSE** | `tools/yardb_mcp_sse.py` | Reference (`:8000/sse`) |
 
 ```bash
 ./build-darwin-debug/bin/yardb 2112
-# Cursor / client: http://127.0.0.1:2112/sse
+# Cursor / client: http://127.0.0.1:2112/_sse
 
 # Optional Python reference bridges
 YARDB_URL=http://127.0.0.1:2112 python3 tools/yardb_mcp.py

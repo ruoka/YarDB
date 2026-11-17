@@ -327,7 +327,7 @@ inline std::unique_ptr<::http::mcp::server> make_mcp_server(
     yar::db::engine& engine,
     std::function<std::string()> ready_status)
 {
-    auto mcp = std::make_unique<::http::mcp::server>("/messages/");
+    auto mcp = std::make_unique<::http::mcp::server>(std::string{yar::db::reserved_mcp_messages_path});
     mcp->info({.name = "yardb"s, .version = "1.0.0"s})
         .list_tools([] { return tool_specs(); })
         .call_tool([&engine, ready_status = std::move(ready_status)](std::string_view name, std::string_view args) {

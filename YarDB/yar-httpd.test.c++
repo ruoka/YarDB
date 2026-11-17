@@ -4600,12 +4600,12 @@ auto test_set()
             require_eq(reason, "OK"s);
         };
 
-        section("GET /sse without Authorization returns 401 when PAT enabled") = [setup]
+        section("GET /_sse without Authorization returns 401 when PAT enabled") = [setup]
         {
             // Native MCP bypasses REST middleware; without an authorize gate,
-            // --pat would only protect REST while /sse stayed open.
+            // --pat would only protect REST while /_sse stayed open.
             auto stream = connect("localhost"s, setup->port());
-            stream << "GET /sse HTTP/1.1" << crlf
+            stream << "GET /_sse HTTP/1.1" << crlf
                    << "Host: localhost:" << setup->port() << crlf
                    << "Accept: text/event-stream" << crlf
                    << crlf << flush;
@@ -4616,10 +4616,10 @@ auto test_set()
             (void)body;
         };
 
-        section("GET /sse with valid Bearer PAT opens event stream") = [setup, valid_pat]
+        section("GET /_sse with valid Bearer PAT opens event stream") = [setup, valid_pat]
         {
             auto stream = connect("localhost"s, setup->port());
-            stream << "GET /sse HTTP/1.1" << crlf
+            stream << "GET /_sse HTTP/1.1" << crlf
                    << "Host: localhost:" << setup->port() << crlf
                    << "Authorization: " << valid_pat << crlf
                    << "Accept: text/event-stream" << crlf
@@ -4665,7 +4665,7 @@ auto test_set()
     {
         // Constructor attaches MCP by default, then yardb --no-mcp calls
         // enable_mcp(false). Pre-fix that only reset m_mcp and left router
-        // callbacks capturing the destroyed server (UAF on GET /sse).
+        // callbacks capturing the destroyed server (UAF on GET /_sse).
         const auto test_file = "./httpd_mcp_disable_test.db";
         auto setup = std::make_shared<fixture>(test_file);
 
@@ -4673,10 +4673,10 @@ auto test_set()
         setup->get_server().enable_mcp(false);
         require_false(setup->get_server().mcp_enabled());
 
-        section("GET /sse returns 404 after disable") = [setup]
+        section("GET /_sse returns 404 after disable") = [setup]
         {
             auto stream = connect("localhost"s, setup->port());
-            stream << "GET /sse HTTP/1.1" << crlf
+            stream << "GET /_sse HTTP/1.1" << crlf
                    << "Host: localhost:" << setup->port() << crlf
                    << "Accept: text/event-stream" << crlf
                    << crlf << flush;
@@ -4687,11 +4687,11 @@ auto test_set()
             (void)body;
         };
 
-        section("POST /messages returns 404 after disable") = [setup]
+        section("POST /_messages returns 404 after disable") = [setup]
         {
             const auto body = R"({"jsonrpc":"2.0","id":1,"method":"ping"})"s;
             auto [status, reason, headers, response_body] = make_request(
-                setup->port(), "POST"s, "/messages/?session_id=deadbeef"s, body
+                setup->port(), "POST"s, "/_messages/?session_id=deadbeef"s, body
             );
             require_eq(status, "404"s);
             (void)reason;
@@ -4710,6 +4710,19 @@ auto test_set()
             (void)body;
         };
 
+        section("messages is a data collection while MCP uses /_messages") = [setup]
+        {
+            // ISO 20022 and other apps own /messages; MCP stays under the '_' prefix.
+            const auto body = R"({"UID":"M1","type":"sese.023.001.13"})"s;
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "POST"s, "/messages"s, body
+            );
+            require_eq(status, "201"s);
+            (void)reason;
+            (void)headers;
+            (void)response_body;
+        };
+
         section("rebuild_routes after disable keeps MCP detached") = [setup]
         {
             // configure_authentication rebuilds routes; m_mcp_enabled is false
@@ -4721,7 +4734,7 @@ auto test_set()
             require_false(setup->get_server().mcp_enabled());
 
             auto stream = connect("localhost"s, setup->port());
-            stream << "GET /sse HTTP/1.1" << crlf
+            stream << "GET /_sse HTTP/1.1" << crlf
                    << "Host: localhost:" << setup->port() << crlf
                    << "Authorization: Bearer anything" << crlf
                    << "Accept: text/event-stream" << crlf
@@ -4847,7 +4860,7 @@ auto test_set()
 
         // Hold the SSE connection so the session_id stays valid for POSTs.
         auto sse = std::make_shared<net::endpointstream>(connect("localhost"s, setup->port()));
-        *sse << "GET /sse HTTP/1.1" << crlf
+        *sse << "GET /_sse HTTP/1.1" << crlf
              << "Host: localhost:" << setup->port() << crlf
              << "Authorization: " << data_pat << crlf
              << "Accept: text/event-stream" << crlf
@@ -4896,7 +4909,7 @@ auto test_set()
         {
             (void)sse;
             auto post = connect("localhost"s, setup->port());
-            post << "POST /messages/?session_id=" << session_id << " HTTP/1.1" << crlf
+            post << "POST /_messages/?session_id=" << session_id << " HTTP/1.1" << crlf
                  << "Host: localhost:" << setup->port() << crlf
                  << "Authorization: " << authorization << crlf
                  << "Content-Type: application/json" << crlf

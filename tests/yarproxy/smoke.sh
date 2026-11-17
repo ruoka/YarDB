@@ -399,7 +399,7 @@ EOF
 )"
   assert_contains " 201 " "seed_for_sse"
 
-  # yardb enables native MCP by default: GET /sse returns text/event-stream with
+  # yardb enables native MCP by default: GET /_sse returns text/event-stream with
   # Connection: keep-alive and no Content-Length, then streams events. Pre-fix
   # yarproxy treated that as a zero-length body, returned the backend to the
   # pool with unread SSE bytes, and the next GET hung on the status line while
@@ -407,12 +407,12 @@ EOF
   status=0
   sse_out="$(run_with_timeout 5 curl -sS -D - -o /dev/null \
     -H 'Accept: text/event-stream' \
-    "${PROXY_URL}/sse" 2>&1)" || status=$?
+    "${PROXY_URL}/_sse" 2>&1)" || status=$?
   LAST_OUTPUT="${sse_out}"
   # Proxy must not hang under the mutex: either 502 (unframed rejected) or a
   # finite response. A hung proxy makes the follow-up GET time out.
   if [[ "${status}" -eq 124 ]]; then
-    fail "GET /sse through yarproxy timed out (likely held replica mutex)"
+    fail "GET /_sse through yarproxy timed out (likely held replica mutex)"
     end_case sse_no_poison
     return 0
   fi
@@ -421,7 +421,7 @@ EOF
   LAST_OUTPUT="$(printf '%s\n' "GET /${coll}/1
 EXIT" | run_with_timeout 10 "${YARSH_BIN}" "${PROXY_URL}" 2>&1)" || status=$?
   if [[ "${status}" -ne 0 ]]; then
-    fail "GET after /sse timed out or failed (exit=${status}) — backend pool poisoned"
+    fail "GET after /_sse timed out or failed (exit=${status}) — backend pool poisoned"
     end_case sse_no_poison
     return 0
   fi

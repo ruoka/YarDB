@@ -484,7 +484,8 @@ YarDB exposes [MCP](https://modelcontextprotocol.io/) tools over native HTTP+SSE
 ```bash
 ./build-darwin-debug/bin/yardb --clog 2112
 # MCP URL for Cursor / clients:
-#   http://127.0.0.1:2112/sse
+#   http://127.0.0.1:2112/_sse
+# JSON-RPC posts go to /_messages/?session_id=… (reserved '_' prefix; /messages stays a data collection)
 ```
 
 Tools call the database engine in-process (not a second HTTP hop). DNS-rebinding
@@ -520,7 +521,7 @@ YARDB_URL=http://127.0.0.1:2112 tools/.venv-mcp-sse/bin/python tools/yardb_mcp_s
 
 [`.cursor/mcp.json`](../.cursor/mcp.json) registers:
 
-- `yardb` — native SSE at `http://127.0.0.1:2112/sse` (start `yardb` first)
+- `yardb` — native SSE at `http://127.0.0.1:2112/_sse` (start `yardb` first)
 - `yardb-python-stdio` / `yardb-python-sse` — reference Python bridges
 
 ### Tools

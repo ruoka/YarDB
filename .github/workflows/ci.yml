@@ -21,9 +21,10 @@ env:
   # net defaults to running network tests locally; in CI we disable them for determinism.
   NET_DISABLE_NETWORK_TESTS: "1"
 
+# Every job pins ubuntu-24.04: the LLVM 21 apt setup fails on Ubuntu 26.04, which ubuntu-latest became.
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     strategy:
@@ -137,7 +138,7 @@ jobs:
             test_results_${{ matrix.config }}.xml
 
   yarsh-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -166,7 +167,7 @@ jobs:
           path: yarsh_smoke.jsonl
 
   yardb-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -195,7 +196,7 @@ jobs:
           path: yardb_smoke.jsonl
 
   mcp-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -224,7 +225,7 @@ jobs:
           path: mcp_smoke.jsonl
 
   yarexport-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -253,7 +254,7 @@ jobs:
           path: yarexport_smoke.jsonl
 
   yarproxy-smoke:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -283,7 +284,7 @@ jobs:
 
   # Static analysis job
   static-analysis:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -316,7 +317,7 @@ jobs:
 
   # Submodule health check
   submodule-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:

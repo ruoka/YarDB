@@ -20,7 +20,8 @@ using namespace std::string_view_literals;
 using namespace net;
 using namespace yar::http::details; // Use functions from details module
 
-// Enum for OData metadata level
+// Enum for OData metadata level. A GET under minimal or full also names each
+// entity's version in @odata.etag.
 enum class metadata_level
 {
     none,           // No metadata (plain JSON)
@@ -1617,6 +1618,8 @@ inline auto apply_select(const xson::object& documents, std::string_view select_
         auto projected = xson::object{};
         if(doc.has("_id"s))
             projected["_id"s] = doc["_id"s];
+        if(doc.has("@odata.etag"s))
+            projected["@odata.etag"s] = doc["@odata.etag"s];
 
         for(const auto field : fields)
         {
@@ -2211,6 +2214,8 @@ export inline auto read_with_parsed_filter(
                 if(query_selector.has("$desc"s))
                     branch.selector["$desc"s] = true;
             }
+            if(query_selector.has("$etag"s))
+                branch.selector["$etag"s] = true;
             auto branch_docs = xson::object{};
             engine.read(collection, branch.selector, branch_docs);
             auto filtered = apply_negated_and_string_filters(

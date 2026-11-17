@@ -614,7 +614,7 @@ inline yar::db::put_preconditions put_preconditions_from_headers(const ::http::h
 // Generate ETag from metadata position
 inline auto generate_etag(std::int64_t position)
 {
-    return "\""s + std::to_string(position) + "\""s;
+    return yar::db::entity_tag(position);
 }
 
 // Format HTTP date (RFC 1123 format)

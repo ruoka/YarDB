@@ -1176,6 +1176,53 @@ auto test_set()
             require_eq(result.error().code, yar::db::db_error_code::precondition_failed);
         };
 
+        section("ReadEtagNamesTheVersionOfEachRow") = []
+        {
+            const auto test_file = "./engine_read_etag_test.db";
+            const auto setup = fixture{test_file};
+            auto engine = yar::db::engine{test_file};
+            constexpr auto collection = "ReadEtag"s;
+            require_true(engine.index(collection, {"status"s}).has_value());
+            auto alpha = object{{"status"s, "open"s}, {"name"s, "alpha"s}};
+            auto alpha_revision = yar::db::document_revision{};
+            require_true(engine.create(collection, alpha, &alpha_revision).has_value());
+            auto beta = object{{"status"s, "open"s}, {"name"s, "beta"s}};
+            auto beta_revision = yar::db::document_revision{};
+            require_true(engine.create(collection, beta, &beta_revision).has_value());
+            auto gamma = object{{"status"s, "done"s}, {"name"s, "gamma"s}};
+            require_true(engine.create(collection, gamma).has_value());
+            const auto tag_of = [](const object& documents, const string& name)
+            {
+                for(const auto& row : documents.get<object::array>())
+                    if(static_cast<string>(row["name"s]) == name)
+                        return static_cast<string>(row["@odata.etag"s]);
+                return ""s;
+            };
+
+            auto documents = object{};
+            require_true(engine.read(collection, object{{"status"s, "open"s}, {"$etag"s, true}}, documents));
+            require_eq(documents.size(), 2u);
+            require_eq(tag_of(documents, "alpha"s), yar::db::entity_tag(*alpha_revision.position));
+            require_eq(tag_of(documents, "beta"s), yar::db::entity_tag(*beta_revision.position));
+
+            documents = object{};
+            require_true(engine.read(collection, object{{"$orderby"s, "name"s}, {"$desc"s, true}, {"$etag"s, true}}, documents));
+            require_eq(documents.size(), 3u);
+            require_eq(static_cast<string>(documents[0]["name"s]), "gamma"s);
+            require_eq(static_cast<string>(documents[2]["@odata.etag"s]), yar::db::entity_tag(*alpha_revision.position));
+
+            auto updated = object{};
+            auto updated_revision = yar::db::document_revision{};
+            require_true(engine.update(collection, object{{"_id"s, alpha["_id"s]}}, object{{"status"s, "done"s}}, updated, {}, &updated_revision).has_value());
+            documents = object{};
+            require_true(engine.read(collection, object{{"status"s, "done"s}, {"$etag"s, true}}, documents));
+            require_eq(tag_of(documents, "alpha"s), yar::db::entity_tag(*updated_revision.position));
+
+            documents = object{};
+            require_true(engine.read(collection, object{{"status"s, "done"s}}, documents));
+            require_false(documents[0].has("@odata.etag"s));
+        };
+
         section("CreateRejectsDuplicateId") = []
         {
             const auto test_file = "./engine_duplicate_id_test.db";
@@ -1889,6 +1936,95 @@ auto test_set()
             require_eq(static_cast<xson::integer_type>(documents[0]["_id"s]), static_cast<xson::integer_type>(tied["_id"s]));
             require_eq(static_cast<xson::integer_type>(documents[1]["_id"s]), static_cast<xson::integer_type>(mid["_id"s]));
             require_eq(static_cast<xson::integer_type>(documents[2]["_id"s]), static_cast<xson::integer_type>(high["_id"s]));
+        };
+    };
+
+    test_case("an indexed filter reads in _id order, [yardb]") = []
+    {
+        const auto test_file = "./engine_indexed_order_test.db";
+        const auto setup = fixture{test_file};
+
+        // Rows 1 and 4 are edited after they are stored, and the index is
+        // declared after that. OPEN is 1, 2, 4 and 5.
+        const auto seed = [](yar::db::engine& engine, const std::string& collection)
+        {
+            for(auto n = 1ll; n <= 6; ++n)
+            {
+                auto document = object{{"status"s, n % 3 == 0 ? "DONE"s : "OPEN"s}, {"n"s, n}};
+                require_true(engine.create(collection, document).has_value());
+            }
+            require_true(engine.update(collection, object{{"_id"s, 1ll}}, object{{"n"s, 10ll}}).has_value());
+            require_true(engine.update(collection, object{{"_id"s, 4ll}}, object{{"n"s, 40ll}}).has_value());
+            require_true(engine.index(collection, {"status"s}).has_value());
+        };
+
+        const auto ids_of = [](const object& documents)
+        {
+            auto ids = std::vector<xson::integer_type>{};
+            for(const auto& document : documents.get<object::array>())
+                ids.push_back(static_cast<xson::integer_type>(document["_id"s]));
+            return ids;
+        };
+
+        section("Cursor pages see each matching row once") = [test_file, seed, ids_of]
+        {
+            auto engine = yar::db::engine{test_file};
+            seed(engine, "CursorPages"s);
+            require_true(engine.update("CursorPages"s, object{{"_id"s, 2ll}}, object{{"n"s, 20ll}}).has_value());
+
+            const auto page_after = [](xson::integer_type cursor)
+            {
+                return object{{"status"s, "OPEN"s}, {"_id"s, object{{"$gt"s, cursor}}}, {"$orderby"s, "_id"s}, {"$top"s, 2ll}};
+            };
+            auto seen = std::vector<xson::integer_type>{};
+            auto cursor = xson::integer_type{0};
+            auto documents = object{};
+            while(engine.read("CursorPages"s, page_after(cursor), documents))
+            {
+                const auto page = ids_of(documents);
+                seen.insert(seen.end(), page.begin(), page.end());
+                cursor = page.back();
+            }
+            require_container_eq(seen, std::vector<xson::integer_type>{1, 2, 4, 5});
+        };
+
+        section("A descending _id order streams from the highest match") = [test_file, seed, ids_of]
+        {
+            auto engine = yar::db::engine{test_file};
+            seed(engine, "DescendingOrder"s);
+            auto orderby = object{object::array{}};
+            orderby += object{{"field"s, "_id"s}, {"descending"s, true}};
+            const auto selector = object{{"status"s, "OPEN"s}, {"$orderby"s, std::move(orderby)}, {"$top"s, 3ll}};
+            auto documents = object{};
+            require_true(engine.read("DescendingOrder"s, selector, documents));
+            require_container_eq(ids_of(documents), std::vector<xson::integer_type>{5, 4, 2});
+        };
+
+        section("$desc reverses a filtered page") = [test_file, seed, ids_of]
+        {
+            auto engine = yar::db::engine{test_file};
+            seed(engine, "DescendingPage"s);
+            const auto selector = object{{"status"s, "OPEN"s}, {"$desc"s, true}, {"$top"s, 2ll}};
+            auto documents = object{};
+            require_true(engine.read("DescendingPage"s, selector, documents));
+            require_container_eq(ids_of(documents), std::vector<xson::integer_type>{5, 4});
+        };
+
+        section("An $orderby=_id keyset resumes after its _id") = [test_file, seed, ids_of]
+        {
+            auto engine = yar::db::engine{test_file};
+            seed(engine, "IdKeyset"s);
+            auto values = object{object::array{}};
+            auto sort_value = object{};
+            sort_value = 2ll;
+            values += std::move(sort_value);
+            auto cursor = object{};
+            cursor = 2ll;
+            values += std::move(cursor);
+            const auto selector = object{{"status"s, "OPEN"s}, {"$orderby"s, "_id"s}, {"$after"s, std::move(values)}, {"$top"s, 1ll}};
+            auto documents = object{};
+            require_true(engine.read("IdKeyset"s, selector, documents));
+            require_container_eq(ids_of(documents), std::vector<xson::integer_type>{4});
         };
     };
 

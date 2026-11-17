@@ -414,14 +414,13 @@ yar::db::index* find_index(
 }
 
 // Crash between appending a successor and tombstoning the prior row can leave
-// two status=created records for one _id. Primary insert would overwrite while
-// secondary entries for the stale pre-image remain. Drop the earlier live row
-// from the index (and heal its on-disk status) before indexing the later one.
-void supersede_prior_live_row(
+// two status=created records for one _id. The later one is the live version:
+// index::finish_load() keeps its postings, and the earlier row is marked
+// updated on disk before the later one is loaded.
+void heal_prior_live_row(
     std::fstream& storage,
-    yar::db::index& index,
-    const yar::db::object& document,
-    bool heal_status)
+    const yar::db::index& index,
+    const yar::db::object& document)
 {
     using xson::fson::operator >>;
     using xson::fson::operator <<;
@@ -440,16 +439,12 @@ void supersede_prior_live_row(
     storage.clear();
     storage.seekg(*prior_position, storage.beg);
     storage >> prior_metadata >> prior_document;
-    if(not storage.fail())
+    if(not storage.fail() and prior_metadata.status == yar::db::metadata::created)
     {
-        index.erase(prior_document);
-        if(heal_status and prior_metadata.status == yar::db::metadata::created)
-        {
-            storage.clear();
-            storage.seekp(*prior_position, storage.beg);
-            storage << yar::db::updated;
-            storage.flush();
-        }
+        storage.clear();
+        storage.seekp(*prior_position, storage.beg);
+        storage << yar::db::updated;
+        storage.flush();
     }
 
     storage.clear();
@@ -676,9 +671,11 @@ void yar::db::engine::populate_indexes()
             continue;
 
         auto& index = m_index[metadata.collection];
-        supersede_prior_live_row(m_storage, index, document, true);
-        index.insert(document, metadata.position);
+        heal_prior_live_row(m_storage, index, document);
+        index.load(document, metadata.position);
     }
+    for(auto& index : m_index | std::views::values)
+        index.finish_load();
 }
 
 yar::db::db_result<> yar::db::engine::reindex()
@@ -722,15 +719,14 @@ yar::db::db_result<> yar::db::engine::reindex()
 
         auto& rebuilt_index = rebuilt[metadata.collection];
         rebuilt_index.update(document);
+        // Rebuilds must not mutate durable statuses; reopen already heals
+        // dual-live rows. finish_load() keeps the later version in memory.
         if(metadata.status != metadata::deleted and metadata.status != metadata::updated)
-        {
-            // Rebuilds must not mutate durable statuses; reopen already heals
-            // dual-live rows. Here only the in-memory index is corrected.
-            supersede_prior_live_row(m_storage, rebuilt_index, document, false);
-            rebuilt_index.insert(document, metadata.position);
-        }
+            rebuilt_index.load(document, metadata.position);
     }
     m_storage.clear();
+    for(auto& rebuilt_index : rebuilt | std::views::values)
+        rebuilt_index.finish_load();
     m_index = std::move(rebuilt);
     return {};
 }
@@ -1022,9 +1018,7 @@ void erase_selector_key(yar::db::object& selector, const std::string& key)
 }
 
 // Primary-key resume. The next walk starts after cursor, so that row and every
-// row on the already-returned side are not read. $desc reverses the walk, and
-// the bound has to sit on the _id selector because that is what index::view
-// reverses.
+// row on the already-returned side are not read. $desc reverses the walk.
 void resume_primary_key(yar::db::object& query, xson::integer_type cursor)
 {
     const auto descending = query.has("$desc"s);
@@ -1242,12 +1236,30 @@ bool yar::db::engine::read(
             after_id = static_cast<xson::integer_type>(query["$after_id"s]);
         erase_selector_key(query, "$after_id"s);
     }
+    // match() compares an unknown $-key as a field, so $etag leaves the query too.
+    const auto stamp = query.has("$etag"s);
+    erase_selector_key(query, "$etag"s);
 
+    // $orderby of _id alone is the index walk, which $desc reverses. Its
+    // $skiptoken keyset ends with that _id, so it resumes the walk there.
     const auto keys = orderby_keys(query);
-    const auto primary_id_order =
-        keys.size() == 1 and keys.front().field == "_id"s and not keys.front().descending;
+    const auto primary_id_order = keys.size() == 1 and keys.front().field == "_id"s;
     const auto orderby = not keys.empty() and not primary_id_order;
-    if((not orderby or primary_id_order) and after_id)
+    if(primary_id_order)
+    {
+        if(keys.front().descending)
+            query["$desc"s] = true;
+        else
+            erase_selector_key(query, "$desc"s);
+
+        if(after_values and not after_id)
+        {
+            const auto& keyset = after_values->get<object::array>();
+            if(not keyset.empty() and keyset.back().is_integer())
+                after_id = static_cast<xson::integer_type>(keyset.back());
+        }
+    }
+    if(not orderby and after_id)
         resume_primary_key(query, *after_id);
 
     auto success = false;
@@ -1262,6 +1274,8 @@ bool yar::db::engine::read(
         reader >> metadata >> document;
         if(document.match(query))
         {
+            if(stamp)
+                document["@odata.etag"s] = entity_tag(metadata.position);
             if(not orderby or primary_id_order)
             {
                 if(skip > 0)
@@ -1444,10 +1458,9 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         auto* log = rehearsal.log(collection);
         for(auto& entry : pending)
         {
-            checking_index.erase(entry.old_document, log);
             if(const auto clash = checking_index.conflicts_with(entry.new_document))
                 return std::unexpected{unique_error(db_operation::update, *clash, false)};
-            checking_index.insert(entry.new_document, entry.position, log);
+            checking_index.replace(entry.old_document, entry.new_document, entry.position, log);
         }
     }
 
@@ -1471,7 +1484,6 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         if(m_storage.fail())
             break;
 
-        staged_index.erase(entry.old_document, log);
         staged_index.update(entry.new_document, log);
         m_storage.clear();
         m_storage.seekp(0, m_storage.end);
@@ -1479,7 +1491,7 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
         if(m_storage.fail())
             break;
 
-        staged_index.insert(entry.new_document, entry.metadata_record.position, log);
+        staged_index.replace(entry.old_document, entry.new_document, entry.metadata_record.position, log);
     }
     m_storage.flush();
     if(m_storage.fail())
@@ -2311,16 +2323,19 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             plans.push_back(std::move(plan));
         };
 
-        const auto queue_append = [&](object document, batch_effect effect)
+        const auto queue_append = [&](object document, batch_effect effect, const object* prior = nullptr)
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
             auto* log = undo.log(request.collection);
             auto& collection_index = undo[request.collection];
-            // Distinct negative positions so a unique-value lookup can name the
-            // in-group owner. -1 stays "no file position" for If-Match.
+            // A negative position until the group is written. -1 stays "no
+            // file position" for If-Match.
             const auto placeholder = static_cast<position_type>(
                 -static_cast<position_type>(appends.size()) - 2);
-            collection_index.insert(document, placeholder, log);
+            if(prior != nullptr)
+                collection_index.replace(*prior, document, placeholder, log);
+            else
+                collection_index.insert(document, placeholder, log);
             const auto slot = appends.size();
             appends.push_back({request.collection, document, false, false, {}});
             live_appends[{request.collection, id}] = slot;
@@ -2444,15 +2459,13 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             else
                 priors.push_back({current.metadata_record.position, false});
 
-            auto* log = undo.log(request.collection);
-            undo[request.collection].erase(current.document, log);
-            undo[request.collection].update(document, log);
+            undo[request.collection].update(document, undo.log(request.collection));
             if(const auto clash = undo[request.collection].conflicts_with(document))
                 return std::unexpected{fail_unique(index, *clash)};
             const auto effect = request.method == batch_method::update
                 ? batch_effect::updated
                 : batch_effect::replaced;
-            queue_append(std::move(document), effect);
+            queue_append(std::move(document), effect, &current.document);
             continue;
         }
     }
@@ -2555,8 +2568,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             auto& item = appends[slot];
             auto* log = undo.log(item.collection);
             auto& collection_index = undo[item.collection];
-            collection_index.erase(item.document, log);
-            collection_index.insert(item.document, item.metadata_record.position, log);
+            collection_index.replace(item.document, item.document, item.metadata_record.position, log);
         }
     };
 

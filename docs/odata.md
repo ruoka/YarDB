@@ -37,7 +37,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | Feature | Notes |
 |---------|--------|
 | `GET /$metadata` | OData 4.01 **JSON** CSDL |
-| Accept metadata | `odata=minimalmetadata` / `fullmetadata` / `nometadata` |
+| Accept metadata | `odata=minimalmetadata` / `fullmetadata` / `nometadata`. Under minimal or full, a GET names each entity's `@odata.etag` |
 | REST keys | `/collection/id` (not `collection(id)` URL convention) |
 
 ## In the pipeline

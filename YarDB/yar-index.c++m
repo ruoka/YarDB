@@ -22,13 +22,23 @@ using secondary_key_type = xson::primitive;
 
 using position_type = std::streamoff;
 
-using positions_type = std::vector<position_type>;
+// A live document under a secondary key: its _id and the file position of
+// that version.
+struct posting
+{
+    primary_key_type id;
+    position_type position;
+};
+
+// One posting per live _id in ascending _id order, so lists intersect by
+// merging and an _id bound is a binary search.
+using postings_type = std::vector<posting>;
 
 using primary_index_type = std::map<primary_key_type, position_type>;
 
 // Order integer_type and number_type by numeric value so range queries and
 // equality treat JSON doubles and OData integer literals consistently.
-using secondary_index_type = std::map<secondary_key_type, positions_type, xson::primitive_less_t>;
+using secondary_index_type = std::map<secondary_key_type, postings_type, xson::primitive_less_t>;
 
 using secondary_index_map = std::map<secondary_index_name, secondary_index_type>;
 
@@ -54,7 +64,7 @@ public:
 
     auto operator*() const -> position_type
     {
-        return m_key_it->second[m_pos_idx];
+        return m_key_it->second[m_pos_idx].position;
     }
 
     auto& operator++()
@@ -112,7 +122,7 @@ public:
 
     auto operator*() const -> position_type
     {
-        return m_key_it->second[m_pos_idx];
+        return m_key_it->second[m_pos_idx].position;
     }
 
     auto& operator++()
@@ -155,67 +165,57 @@ private:
     std::size_t m_pos_idx = 0;
 };
 
-// Walks a primary-key subrange and yields only file positions listed on a
-// secondary index span (AND of _id bounds with an indexed eq/range).
-class primary_intersection_iterator
+// The documents on every term, in _id order or its reverse. A term is one run
+// per key of a field's bound. A document has one value per field, so the runs
+// of a term never share an _id and the walk merges them. Terms intersect by
+// galloping each one to the furthest head. The runs point into the posting
+// lists, which must not change while the walk is open.
+class posting_stream_iterator
 {
 public:
 
-    using primary_iterator = primary_index_type::const_iterator;
+    using difference_type = std::ptrdiff_t;
+    using value_type = position_type;
+    using iterator_concept = std::forward_iterator_tag;
 
-    primary_intersection_iterator() = default;
-
-    primary_intersection_iterator(
-        primary_iterator current,
-        primary_iterator end,
-        std::shared_ptr<const std::unordered_set<position_type>> allowed) :
-        m_it{current},
-        m_end{end},
-        m_allowed{std::move(allowed)}
+    struct run
     {
-        advance_to_allowed();
+        const posting* first = nullptr;
+        const posting* last = nullptr;
+    };
+
+    using term = std::vector<run>;
+
+    posting_stream_iterator() = default;
+
+    posting_stream_iterator(std::vector<term> terms, bool descending);
+
+    position_type operator*() const
+    {
+        return m_current->position;
     }
 
-    auto operator*() const -> position_type
-    {
-        return m_it->second;
-    }
+    posting_stream_iterator& operator++();
 
-    auto& operator++()
-    {
-        ++m_it;
-        advance_to_allowed();
-        return *this;
-    }
-
-    auto operator++(int)
+    posting_stream_iterator operator++(int)
     {
         auto tmp = *this;
         ++*this;
         return tmp;
     }
 
-    friend bool operator==(const primary_intersection_iterator& lhs, const primary_intersection_iterator& rhs)
+    friend bool operator==(const posting_stream_iterator& lhs, const posting_stream_iterator& rhs)
     {
-        return lhs.m_it == rhs.m_it;
-    }
-
-    auto operator!=(const primary_intersection_iterator& rhs) const -> bool
-    {
-        return not(*this == rhs);
+        return lhs.m_current == rhs.m_current;
     }
 
 private:
 
-    void advance_to_allowed()
-    {
-        while(m_it != m_end and not m_allowed->contains(m_it->second))
-            ++m_it;
-    }
+    void align();
 
-    primary_iterator m_it{};
-    primary_iterator m_end{};
-    std::shared_ptr<const std::unordered_set<position_type>> m_allowed;
+    std::vector<term> m_terms;
+    bool m_descending = false;
+    const posting* m_current = nullptr;
 };
 
 class index_iterator
@@ -226,7 +226,7 @@ public:
     using value_type = position_type;
     using iterator_concept = std::forward_iterator_tag;
 
-    enum class kind {primary, secondary, reverse_primary, reverse_secondary, primary_intersect};
+    enum class kind {primary, secondary, reverse_primary, reverse_secondary, posting_stream};
 
     using primary_iterator = primary_index_type::const_iterator;
 
@@ -265,9 +265,9 @@ public:
         m_kind{kind::reverse_secondary}
     {}
 
-    index_iterator(primary_intersection_iterator current) :
-        m_state{current},
-        m_kind{kind::primary_intersect}
+    index_iterator(posting_stream_iterator current) :
+        m_state{std::move(current)},
+        m_kind{kind::posting_stream}
     {}
 
     auto operator*() const -> position_type
@@ -282,8 +282,8 @@ public:
             return std::get<reverse_primary_iterator>(m_state)->second;
         case kind::reverse_secondary:
             return *std::get<reverse_secondary_position_iterator>(m_state);
-        case kind::primary_intersect:
-            return *std::get<primary_intersection_iterator>(m_state);
+        case kind::posting_stream:
+            return *std::get<posting_stream_iterator>(m_state);
         }
         std::unreachable();
     }
@@ -304,8 +304,8 @@ public:
         case kind::reverse_secondary:
             ++std::get<reverse_secondary_position_iterator>(m_state);
             break;
-        case kind::primary_intersect:
-            ++std::get<primary_intersection_iterator>(m_state);
+        case kind::posting_stream:
+            ++std::get<posting_stream_iterator>(m_state);
             break;
         }
         return *this;
@@ -333,8 +333,8 @@ public:
             return std::get<reverse_primary_iterator>(lhs.m_state) == std::get<reverse_primary_iterator>(rhs.m_state);
         case kind::reverse_secondary:
             return std::get<reverse_secondary_position_iterator>(lhs.m_state) == std::get<reverse_secondary_position_iterator>(rhs.m_state);
-        case kind::primary_intersect:
-            return std::get<primary_intersection_iterator>(lhs.m_state) == std::get<primary_intersection_iterator>(rhs.m_state);
+        case kind::posting_stream:
+            return std::get<posting_stream_iterator>(lhs.m_state) == std::get<posting_stream_iterator>(rhs.m_state);
         }
         std::unreachable();
     }
@@ -351,7 +351,7 @@ private:
         secondary_position_iterator,
         reverse_primary_iterator,
         reverse_secondary_position_iterator,
-        primary_intersection_iterator> m_state;
+        posting_stream_iterator> m_state;
 
     kind m_kind;
 };
@@ -437,18 +437,26 @@ private:
         secondary_key_type key;
     };
 
-    struct secondary_pushed
+    struct secondary_inserted
     {
         secondary_index_name field;
         secondary_key_type key;
+        primary_key_type id;
+    };
+
+    struct secondary_moved
+    {
+        secondary_index_name field;
+        secondary_key_type key;
+        primary_key_type id;
+        position_type position;
     };
 
     struct secondary_removed
     {
         secondary_index_name field;
         secondary_key_type key;
-        std::size_t at;
-        position_type position;
+        posting entry;
         bool erased_key;
     };
 
@@ -472,7 +480,8 @@ private:
         primary_replaced,
         primary_removed,
         secondary_key_added,
-        secondary_pushed,
+        secondary_inserted,
+        secondary_moved,
         secondary_removed,
         secondary_map_added,
         unique_added,
@@ -498,19 +507,27 @@ private:
         m_ops.push_back(secondary_key_added{field, key});
     }
 
-    void note_secondary_pushed(const secondary_index_name& field, const secondary_key_type& key)
+    void note_secondary_inserted(const secondary_index_name& field, const secondary_key_type& key, primary_key_type id)
     {
-        m_ops.push_back(secondary_pushed{field, key});
+        m_ops.push_back(secondary_inserted{field, key, id});
+    }
+
+    void note_secondary_moved(
+        const secondary_index_name& field,
+        const secondary_key_type& key,
+        primary_key_type id,
+        position_type position)
+    {
+        m_ops.push_back(secondary_moved{field, key, id, position});
     }
 
     void note_secondary_removed(
         const secondary_index_name& field,
         const secondary_key_type& key,
-        std::size_t at,
-        position_type position,
+        posting entry,
         bool erased_key)
     {
-        m_ops.push_back(secondary_removed{field, key, at, position, erased_key});
+        m_ops.push_back(secondary_removed{field, key, entry, erased_key});
     }
 
     void note_secondary_map(const secondary_index_name& field)
@@ -574,7 +591,8 @@ public:
     std::span<const std::string> unique_keys() const;
 
     // Another live row holds a unique value of document, or a unique field is an
-    // object or array. Missing fields and JSON null do not collide.
+    // object or array. Missing fields and JSON null do not collide, and neither
+    // does the live version of document's own _id.
     std::optional<unique_conflict> conflicts_with(const xson::object& document) const;
 
     // A unique primitive value is stored on more than one live row. Nulls are ignored.
@@ -594,16 +612,19 @@ public:
     bool secondary_key(const xson::object& selector) const;
 
     // Get index view for querying documents by selector
-    // Returns iterator over positions matching the selector
+    // Returns iterator over positions matching the selector. Exact bounds on
+    // indexed fields intersect. The walk is in _id order when the selector
+    // bounds _id or pages ($top or $skip, or $orderby of _id alone), and in
+    // reverse for $desc.
     // @param selector Query selector (can use primary or secondary keys)
     // @return Index view providing iterator over matching document positions
     index_view view(const xson::object& selector) const;
 
     // Count documents matching the selector.
-    // A single indexed bound, and equality on exactly the fields of a compound
-    // key (a key name of fields joined by '+'), is the size of that posting list.
-    // Any other selector reads the tightest exact secondary bound and applies
-    // document.match.
+    // Equality on exactly the fields of a compound key (a key name of fields
+    // joined by '+') is the size of that posting list. Exact bounds on _id and
+    // on indexed fields are the size of their intersection. Neither reads the
+    // file. Any other selector walks the view and applies document.match.
     // @param storage Database file stream for fallback scans
     // @param selector Query selector (ignores $top, $skip, $desc)
     // @return Number of matching documents
@@ -623,23 +644,61 @@ public:
 
     // Insert document into index with storage position
     // Updates primary key index and all matching secondary key indexes
-    // Appends position for duplicate secondary key values
+    // A key holds one posting per _id, in _id order; an _id already there
+    // takes the new position
     // @param document Document to index
     // @param position Storage file position where document is stored
     // @param undo When set, records the inverse primary and secondary edits
     void insert(xson::object& document, position_type position, index_undo* undo = nullptr);
 
+    // Index the next version of a live document
+    // A key whose value did not change keeps its posting and takes the new
+    // position; a changed value moves the posting to the new key
+    // @param prior The version the index holds now
+    // @param document The version stored at position
+    // @param undo When set, records the inverse primary and secondary edits
+    void replace(const xson::object& prior, xson::object& document, position_type position, index_undo* undo = nullptr);
+
     // Erase document from all indexes
-    // Removes from primary key index and matching positions in secondary indexes
+    // Removes from primary key index and its postings in secondary indexes
     // @param document Document to remove from index
-    // @param undo When set, records the positions to put back
+    // @param undo When set, records the postings to put back
     void erase(const xson::object& document, index_undo* undo = nullptr);
+
+    // Open and reindex read the file in position order. load() appends without
+    // ordering, and finish_load() then orders each posting list by _id. An _id
+    // stored twice as live keeps the posting of the later version.
+    void load(xson::object& document, position_type position);
+
+    void finish_load();
 
 private:
 
     friend class index_undo;
 
-    std::optional<primary_key_type> id_at(position_type position) const;
+    // A view, and whether it intersects every exact bound of the selector.
+    struct planned_view
+    {
+        index_view view;
+        bool complete;
+    };
+
+    planned_view plan(const xson::object& selector) const;
+
+    void place_primary(primary_key_type id, position_type position, index_undo* undo);
+
+    void add_posting(
+        const std::string& field,
+        const secondary_key_type& key,
+        primary_key_type id,
+        position_type position,
+        index_undo* undo);
+
+    void remove_posting(
+        const std::string& field,
+        const secondary_key_type& key,
+        primary_key_type id,
+        index_undo* undo);
 
     // Equality on exactly the fields named by a compound key, or nullopt when
     // no compound covers the selector.

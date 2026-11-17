@@ -1521,6 +1521,8 @@ private:
             
             // Add OData metadata if requested
             yar::http::odata::add_metadata_if_requested(document, headers, ctx.collection, id);
+            if(revision.position.has_value() and yar::http::odata::parse_metadata_level(headers) != yar::http::odata::metadata_level::none)
+                document["@odata.etag"s] = generate_etag(revision.position.value());
             
             auto response_headers = ::http::headers{};
             
@@ -1736,6 +1738,10 @@ private:
                 }
             }
             const auto collection_name = validate_collection_name(uri.path[1]);
+            // Under OData metadata each row names the version it is, for If-Match.
+            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
+            if(metadata_level != yar::http::odata::metadata_level::none)
+                selector["$etag"s] = true;
 
             if(params.contains("$desc"s) and params["$desc"s] == "true"s)
                 selector["$desc"s] = true;
@@ -1894,7 +1900,6 @@ private:
             }
             
             // Add OData metadata if requested
-            const auto metadata_level = yar::http::odata::parse_metadata_level(headers);
             if(metadata_level != yar::http::odata::metadata_level::none)
             {
                 if(document.is_array())

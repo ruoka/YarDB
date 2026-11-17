@@ -59,9 +59,63 @@ public:
         return m_index.count(m_storage, selector);
     }
 
+    // Stores the next version of the document with doc's _id.
+    void update(object doc)
+    {
+        using xson::fson::operator<<;
+
+        auto metadata = yar::db::metadata{"index_test"s};
+        const auto prior = stored(*m_index.position(static_cast<xson::integer_type>(doc["_id"s])));
+        m_storage.seekp(0, ios::end);
+        const auto position = m_storage.tellp();
+        m_index.replace(prior, doc, position);
+        m_storage << metadata << doc;
+        m_storage.flush();
+    }
+
+    // Open's path: stored in file order, indexed by finish_load().
+    void load(object doc)
+    {
+        using xson::fson::operator<<;
+
+        auto metadata = yar::db::metadata{"index_test"s};
+        m_index.update(doc);
+        m_storage.seekp(0, ios::end);
+        const auto position = m_storage.tellp();
+        m_index.load(doc, position);
+        m_storage << metadata << doc;
+        m_storage.flush();
+    }
+
     std::size_t view_count(const object& selector)
     {
         return std::ranges::distance(m_index.view(selector));
+    }
+
+    std::vector<yar::db::position_type> positions(const object& selector)
+    {
+        return m_index.view(selector) | std::ranges::to<std::vector<yar::db::position_type>>();
+    }
+
+    // The field of each stored document the view walks, in walk order.
+    std::vector<xson::integer_type> walk(const object& selector, const string& field = "_id"s)
+    {
+        auto values = std::vector<xson::integer_type>{};
+        for(const auto position : m_index.view(selector))
+            values.push_back(static_cast<xson::integer_type>(stored(position)[field]));
+        return values;
+    }
+
+    object stored(yar::db::position_type position)
+    {
+        using xson::fson::operator>>;
+
+        auto metadata = yar::db::metadata{};
+        auto doc = object{};
+        m_storage.clear();
+        m_storage.seekg(position, ios::beg);
+        m_storage >> metadata >> doc;
+        return doc;
     }
 
 private:
@@ -230,7 +284,7 @@ auto test_set()
             require_eq(fixture.view_count(not_deleted), 3u);
         };
 
-        section("CountMultiFieldAndUsesScanFallback") = []
+        section("CountMultiFieldAndIntersectsPostings") = []
         {
             index_fixture fixture{"./index_count_multi.db"s};
             fixture.add_keys({"status"s, "age"s});
@@ -243,6 +297,8 @@ auto test_set()
                 {"age"s, object{{"$gt"s, 25ll}}}
             };
             require_eq(fixture.count(selector), 1u);
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, selector), 1u);
         };
 
         section("InsertSkipsObjectAndArraySecondaryValues") = []
@@ -373,6 +429,214 @@ auto test_set()
             };
             require_eq(fixture.view_count(day), 1u);
             require_eq(fixture.count(day), 1u);
+        };
+    };
+
+    test_case("index posting lists follow _id, [yardb]") = []
+    {
+        section("InsertKeepsEachPostingListInIdOrder") = []
+        {
+            index_fixture fixture{"./index_posting_order.db"s};
+            fixture.add_keys({"status"s});
+            for(const auto id : {5ll, 3ll, 9ll, 4ll})
+                fixture.insert(object{{"_id"s, id}, {"status"s, "A"s}});
+
+            // Appending in write order would walk 5, 3, 9, 4.
+            require_container_eq(fixture.walk(object{{"status"s, "A"s}}), std::vector<xson::integer_type>{3, 4, 5, 9});
+        };
+
+        section("AnUpdatedDocumentKeepsItsPlace") = []
+        {
+            index_fixture fixture{"./index_posting_update.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "A"s}, {"n"s, 1ll}});
+            fixture.insert(object{{"status"s, "A"s}, {"n"s, 2ll}});
+            fixture.insert(object{{"status"s, "A"s}, {"n"s, 3ll}});
+            fixture.update(object{{"_id"s, 1ll}, {"status"s, "A"s}, {"n"s, 10ll}});
+
+            const auto active = object{{"status"s, "A"s}};
+            require_container_eq(fixture.walk(active), std::vector<xson::integer_type>{1, 2, 3});
+            require_container_eq(fixture.walk(active, "n"s), std::vector<xson::integer_type>{10, 2, 3});
+
+            fixture.update(object{{"_id"s, 2ll}, {"status"s, "B"s}, {"n"s, 2ll}});
+            require_container_eq(fixture.walk(active), std::vector<xson::integer_type>{1, 3});
+            require_container_eq(fixture.walk(object{{"status"s, "B"s}}), std::vector<xson::integer_type>{2});
+        };
+
+        section("EqualitiesIntersectWithoutReadingTheFile") = []
+        {
+            index_fixture fixture{"./index_intersect_eq.db"s};
+            fixture.add_keys({"status"s, "type"s, "venue"s});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "x"s}, {"venue"s, "XHEL"s}});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "y"s}, {"venue"s, "XHEL"s}});
+            fixture.insert(object{{"status"s, "B"s}, {"type"s, "x"s}, {"venue"s, "XHEL"s}});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "x"s}, {"venue"s, "XSTO"s}});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "x"s}, {"venue"s, "XHEL"s}});
+
+            const auto two = object{{"status"s, "A"s}, {"type"s, "x"s}};
+            const auto three = object{{"status"s, "A"s}, {"type"s, object{{"$eq"s, "x"s}}}, {"venue"s, "XHEL"s}};
+            require_container_eq(fixture.walk(two), std::vector<xson::integer_type>{1, 4, 5});
+            require_container_eq(fixture.walk(three), std::vector<xson::integer_type>{1, 5});
+
+            // An empty stream fails a document scan, so these counts come from
+            // the posting lists alone.
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, two), 3u);
+            require_eq(fixture.index().count(empty, three), 2u);
+            require_eq(fixture.index().count(empty, object{{"status"s, "B"s}, {"type"s, "y"s}}), 0u);
+            require_eq(fixture.index().count(empty, object{{"status"s, "C"s}, {"type"s, "x"s}}), 0u);
+        };
+
+        section("AShortListGallopsThroughALongOne") = []
+        {
+            index_fixture fixture{"./index_intersect_skewed.db"s};
+            fixture.add_keys({"status"s, "type"s});
+            for(auto i = 1; i <= 1000; ++i)
+                fixture.insert(object{{"status"s, "A"s}, {"type"s, i % 100 == 0 ? "rare"s : "common"s}});
+
+            const auto rare = object{{"status"s, "A"s}, {"type"s, "rare"s}};
+            auto expected = std::vector<xson::integer_type>{};
+            for(auto id = 100ll; id <= 1000; id += 100)
+                expected.push_back(id);
+            require_container_eq(fixture.walk(rare), expected);
+
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, rare), 10u);
+
+            auto backward = rare;
+            backward["$desc"s] = true;
+            std::ranges::reverse(expected);
+            require_container_eq(fixture.walk(backward), expected);
+        };
+
+        section("ARangeMergesItsKeysIntoTheIntersection") = []
+        {
+            index_fixture fixture{"./index_intersect_range.db"s};
+            fixture.add_keys({"age"s, "status"s});
+            for(auto i = 1ll; i <= 20; ++i)
+                fixture.insert(object{{"age"s, i % 7}, {"status"s, i % 2 == 0 ? "A"s : "B"s}});
+
+            const auto window = object{{"status"s, "A"s}, {"age"s, object{{"$gte"s, 2ll}, {"$lt"s, 5ll}}}};
+            require_container_eq(fixture.walk(window), std::vector<xson::integer_type>{2, 4, 10, 16, 18});
+
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, window), 5u);
+        };
+
+        section("ALoneRangeWalksItsKeysAndAPagedOneFollowsId") = []
+        {
+            index_fixture fixture{"./index_lone_range.db"s};
+            fixture.add_keys({"age"s});
+            fixture.insert(object{{"age"s, 15ll}});
+            fixture.insert(object{{"age"s, 12ll}});
+            fixture.insert(object{{"age"s, 18ll}});
+            fixture.insert(object{{"age"s, 30ll}});
+
+            const auto teens = object{{"age"s, object{{"$gte"s, 10ll}, {"$lt"s, 20ll}}}};
+            require_container_eq(fixture.walk(teens), std::vector<xson::integer_type>{2, 1, 3});
+
+            auto paged = teens;
+            paged["$top"s] = 2ll;
+            require_container_eq(fixture.walk(paged), std::vector<xson::integer_type>{1, 2, 3});
+        };
+
+        section("AWideBoundJoinsOnlyWhenItDrives") = []
+        {
+            index_fixture fixture{"./index_seek_guard.db"s};
+            fixture.add_keys({"age"s, "status"s});
+            for(auto age = 0ll; age < 200; ++age)
+                fixture.insert(object{{"age"s, age}, {"status"s, age % 10 == 0 ? "A"s : "B"s}});
+
+            // 150 keys of age against 20 postings of A: A drives and age is
+            // left to document.match.
+            const auto wide = object{{"status"s, "A"s}, {"age"s, object{{"$lt"s, 150ll}}}};
+            require_eq(fixture.view_count(wide), 20u);
+            require_eq(fixture.count(wide), 15u);
+
+            auto empty = std::stringstream{};
+            const auto narrow = object{{"status"s, "A"s}, {"age"s, object{{"$lt"s, 50ll}}}};
+            require_eq(fixture.view_count(narrow), 5u);
+            require_eq(fixture.index().count(empty, narrow), 5u);
+
+            const auto driving = object{{"status"s, "B"s}, {"age"s, object{{"$lt"s, 100ll}}}};
+            require_eq(fixture.view_count(driving), 90u);
+            require_eq(fixture.index().count(empty, driving), 90u);
+        };
+
+        section("AnIdBoundTrimsEachPostingList") = []
+        {
+            index_fixture fixture{"./index_id_bound.db"s};
+            fixture.add_keys({"status"s});
+            for(auto n = 1ll; n <= 8; ++n)
+                fixture.insert(object{{"status"s, n % 2 == 0 ? "A"s : "B"s}, {"n"s, n}});
+            fixture.update(object{{"_id"s, 2ll}, {"status"s, "A"s}, {"n"s, 20ll}});
+            fixture.update(object{{"_id"s, 6ll}, {"status"s, "A"s}, {"n"s, 60ll}});
+
+            const auto after = [](xson::integer_type cursor)
+            {
+                return object{{"_id"s, object{{"$gt"s, cursor}}}, {"status"s, "A"s}};
+            };
+            require_container_eq(fixture.walk(after(0)), std::vector<xson::integer_type>{2, 4, 6, 8});
+            require_container_eq(fixture.walk(after(3), "n"s), std::vector<xson::integer_type>{4, 60, 8});
+            require_container_eq(fixture.walk(after(8)), std::vector<xson::integer_type>{});
+
+            auto backward = after(3);
+            backward["$desc"s] = true;
+            require_container_eq(fixture.walk(backward), std::vector<xson::integer_type>{8, 6, 4});
+
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, after(3)), 3u);
+            const auto span = object{{"_id"s, object{{"$gte"s, 4ll}, {"$lte"s, 6ll}}}, {"status"s, "A"s}};
+            require_eq(fixture.index().count(empty, span), 2u);
+        };
+
+        section("UndoPutsInsertedMovedAndRemovedPostingsBack") = []
+        {
+            index_fixture fixture{"./index_posting_undo.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"_id"s, 2ll}, {"status"s, "A"s}});
+            fixture.insert(object{{"_id"s, 4ll}, {"status"s, "A"s}});
+            fixture.insert(object{{"_id"s, 6ll}, {"status"s, "B"s}});
+
+            const auto a = object{{"status"s, "A"s}};
+            const auto b = object{{"status"s, "B"s}};
+            const auto a_before = fixture.positions(a);
+            const auto b_before = fixture.positions(b);
+
+            auto undo = yar::db::index_undo{};
+            auto middle = object{{"_id"s, 3ll}, {"status"s, "A"s}};
+            fixture.index().insert(middle, 9001, &undo);
+            auto gone = object{{"_id"s, 4ll}, {"status"s, "A"s}};
+            fixture.index().erase(gone, &undo);
+            auto moved = object{{"_id"s, 6ll}, {"status"s, "B"s}};
+            fixture.index().replace(moved, moved, 9002, &undo);
+            auto changed = object{{"_id"s, 2ll}, {"status"s, "B"s}};
+            fixture.index().replace(object{{"_id"s, 2ll}, {"status"s, "A"s}}, changed, 9003, &undo);
+
+            require_container_eq(fixture.positions(a), std::vector<yar::db::position_type>{9001});
+            require_container_eq(fixture.positions(b), std::vector<yar::db::position_type>{9003, 9002});
+
+            undo.apply(fixture.index());
+            require_container_eq(fixture.positions(a), a_before);
+            require_container_eq(fixture.positions(b), b_before);
+            require_eq(fixture.count(object{}), 3u);
+        };
+
+        section("LoadOrdersPostingsAndKeepsTheLaterLiveVersion") = []
+        {
+            index_fixture fixture{"./index_posting_load.db"s};
+            fixture.add_keys({"status"s});
+            fixture.load(object{{"_id"s, 5ll}, {"status"s, "A"s}});
+            fixture.load(object{{"_id"s, 3ll}, {"status"s, "A"s}});
+            // A crash between a successor's append and its prior's tombstone
+            // leaves two live records for _id 5.
+            fixture.load(object{{"_id"s, 5ll}, {"status"s, "B"s}});
+            fixture.load(object{{"_id"s, 1ll}, {"status"s, "A"s}});
+            fixture.index().finish_load();
+
+            require_container_eq(fixture.walk(object{{"status"s, "A"s}}), std::vector<xson::integer_type>{1, 3});
+            require_container_eq(fixture.walk(object{{"status"s, "B"s}}), std::vector<xson::integer_type>{5});
+            require_eq(fixture.count(object{}), 3u);
         };
     };
 

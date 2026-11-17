@@ -3190,6 +3190,126 @@ auto test_set()
         };
     };
 
+    test_case("OData metadata names each row's ETag, [yardb]") = []
+    {
+        const auto test_file = "./httpd_row_etag_test.db";
+        auto setup = std::make_shared<fixture>(test_file);
+        const auto minimal = "application/json;odata=minimalmetadata"s;
+
+        const auto created_path = [setup](const string& collection, const string& body)
+        {
+            auto [status, reason, headers, created] = make_request(setup->port(), "POST"s, "/"s + collection, body);
+            require_eq(status, "201"s);
+            return "/"s + collection + "/"s + std::to_string(static_cast<xson::integer_type>(json::parse(created)["_id"s]));
+        };
+        const auto document_etag = [setup](const string& path)
+        {
+            auto [status, reason, headers, body] = make_request(setup->port(), "GET"s, path);
+            require_eq(status, "200"s);
+            return headers["etag"s];
+        };
+
+        section("A list row's tag is the ETag If-Match takes") = [setup, minimal, created_path, document_etag]
+        {
+            const auto path = created_path("rowtags"s, R"({"name":"ada","status":"open"})"s);
+
+            auto [status, reason, headers, body] = make_request_with_accept(setup->port(), "GET"s, "/rowtags?$filter=status%20eq%20'open'"s, minimal);
+            require_eq(status, "200"s);
+            const auto listed = json::parse(body);
+            require_eq(listed["value"s].size(), 1u);
+            const auto tag = static_cast<string>(listed["value"s][0]["@odata.etag"s]);
+            require_eq(tag, document_etag(path));
+
+            auto [patch_status, patch_reason, patch_headers, patch_body] = make_request_with_headers(setup->port(), "PATCH"s, path, std::map<string, string>{{"If-Match", tag}}, R"({"status":"done"})"s);
+            require_eq(patch_status, "200"s);
+            auto [stale_status, stale_reason, stale_headers, stale_body] = make_request_with_headers(setup->port(), "PATCH"s, path, std::map<string, string>{{"If-Match", tag}}, R"({"status":"open"})"s);
+            require_eq(stale_status, "412"s);
+
+            auto [again_status, again_reason, again_headers, again_body] = make_request_with_accept(setup->port(), "GET"s, "/rowtags?$filter=status%20eq%20'done'"s, minimal);
+            require_eq(again_status, "200"s);
+            const auto again = json::parse(again_body);
+            require_eq(again["value"s].size(), 1u);
+            require_eq(static_cast<string>(again["value"s][0]["@odata.etag"s]), document_etag(path));
+        };
+
+        section("Full metadata, $select and an or filter keep the tag") = [setup, minimal, created_path, document_etag]
+        {
+            created_path("rowtagsel"s, R"({"name":"grace","status":"open"})"s);
+            created_path("rowtagsel"s, R"({"name":"linus","status":"done"})"s);
+            const auto tagged = [document_etag](const object& rows)
+            {
+                require_eq(rows.size(), 2u);
+                for(const auto& row : rows.get<object::array>())
+                    require_eq(static_cast<string>(row["@odata.etag"s]), document_etag("/rowtagsel/"s + std::to_string(static_cast<xson::integer_type>(row["_id"s]))));
+            };
+
+            auto [full_status, full_reason, full_headers, full_body] = make_request_with_accept(setup->port(), "GET"s, "/rowtagsel"s, "application/json;odata=fullmetadata"s);
+            require_eq(full_status, "200"s);
+            tagged(json::parse(full_body)["value"s]);
+
+            auto [select_status, select_reason, select_headers, select_body] = make_request_with_accept(setup->port(), "GET"s, "/rowtagsel?$select=name"s, minimal);
+            require_eq(select_status, "200"s);
+            const auto selected = json::parse(select_body);
+            require_false(selected["value"s][0].has("status"s));
+            tagged(selected["value"s]);
+
+            auto [or_status, or_reason, or_headers, or_body] = make_request_with_accept(setup->port(), "GET"s, "/rowtagsel?$filter=name%20eq%20'grace'%20or%20name%20eq%20'linus'"s, minimal);
+            require_eq(or_status, "200"s);
+            tagged(json::parse(or_body)["value"s]);
+        };
+
+        section("A read without metadata carries no tag") = [setup, created_path]
+        {
+            const auto path = created_path("rowtagnone"s, R"({"name":"edsger"})"s);
+
+            auto [plain_status, plain_reason, plain_headers, plain_body] = make_request(setup->port(), "GET"s, "/rowtagnone"s);
+            require_eq(plain_status, "200"s);
+            const auto plain = json::parse(plain_body);
+            require_eq(plain.size(), 1u);
+            require_false(plain[0].has("@odata.etag"s));
+
+            auto [none_status, none_reason, none_headers, none_body] = make_request_with_accept(setup->port(), "GET"s, "/rowtagnone"s, "application/json;odata=nometadata"s);
+            require_eq(none_status, "200"s);
+            require_false(json::parse(none_body)[0].has("@odata.etag"s));
+
+            auto [single_status, single_reason, single_headers, single_body] = make_request(setup->port(), "GET"s, path);
+            require_eq(single_status, "200"s);
+            require_false(json::parse(single_body).has("@odata.etag"s));
+        };
+
+        section("A document read under metadata names its ETag") = [setup, minimal, created_path]
+        {
+            const auto path = created_path("rowtagone"s, R"({"name":"barbara"})"s);
+
+            auto [status, reason, headers, body] = make_request_with_accept(setup->port(), "GET"s, path, minimal);
+            require_eq(status, "200"s);
+            require_eq(static_cast<string>(json::parse(body)["@odata.etag"s]), headers["etag"s]);
+        };
+
+        section("A $batch GET with the metadata accept tags each row") = [setup, minimal, created_path, document_etag]
+        {
+            const auto path = created_path("rowtagbatch"s, R"({"UID":"TX-1"})"s);
+
+            auto request = object{};
+            request["id"s] = "tx1"s;
+            request["method"s] = "GET"s;
+            request["url"s] = "rowtagbatch?$filter=UID%20eq%20'TX-1'"s;
+            request["headers"s] = object{"accept"s, minimal};
+            auto requests = object{object::array{}};
+            requests += std::move(request);
+            auto envelope = object{};
+            envelope["requests"s] = std::move(requests);
+
+            auto [status, reason, headers, body] = make_request(setup->port(), "POST"s, "/$batch"s, json::stringify(envelope));
+            require_eq(status, "200"s);
+            const auto answered = json::parse(body);
+            const auto& response = answered["responses"s][0];
+            require_eq(static_cast<xson::integer_type>(response["status"s]), 200);
+            require_eq(response["body"s]["value"s].size(), 1u);
+            require_eq(static_cast<string>(response["body"s]["value"s][0]["@odata.etag"s]), document_etag(path));
+        };
+    };
+
     test_case("GET /$metadata endpoint, [yardb]") = []
     {
         const auto test_file = "./metadata_endpoint_test.db";
@@ -6089,6 +6209,44 @@ auto test_set()
             const auto& items = second.get<object::array>();
             require_eq(items.size(), 1u);
             require_eq(static_cast<xson::integer_type>(items[0]["value"s]), 20);
+        };
+
+        section("GET $orderby=_id with an indexed filter resumes after the token row") = [setup, link_path]
+        {
+            auto [index_status, index_reason, index_headers, index_body] = make_request(
+                setup->port(), "PUT"s, "/_db/idpages"s, R"({"keys":["status"]})"s);
+            require_eq(index_status, "200"s);
+            (void)index_reason;
+            (void)index_headers;
+            (void)index_body;
+
+            for(const auto& status : {"OPEN"s, "DONE"s, "OPEN"s, "OPEN"s})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/idpages"s, "{\"status\":\""s + status + "\"}"s);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            // A token that repeated the first page would loop; five pages is
+            // more than the three rows need.
+            auto ids = std::vector<xson::integer_type>{};
+            auto path = "/idpages?$filter=status%20eq%20'OPEN'&$orderby=_id&$top=1"s;
+            for(auto page = 0; page < 5; ++page)
+            {
+                auto [status, reason, headers, response_body] = make_request(setup->port(), "GET"s, path, ""s);
+                require_eq(status, "200"s);
+                (void)reason;
+                const auto rows = json::parse(response_body);
+                for(const auto& row : rows.get<object::array>())
+                    ids.push_back(static_cast<xson::integer_type>(row["_id"s]));
+                if(not headers.contains("link"s))
+                    break;
+                path = link_path(headers["link"s]);
+            }
+            require_container_eq(ids, std::vector<xson::integer_type>{1, 3, 4});
         };
 
         section("GET without another row has no Link") = [setup]

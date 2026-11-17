@@ -81,6 +81,12 @@ struct batch_item
     document_revision revision{};
 };
 
+// The ETag of the document version whose record starts at position.
+inline std::string entity_tag(std::int64_t position)
+{
+    return std::format("\"{}\"", position);
+}
+
 // One $orderby key. descending applies only to this field.
 struct orderby_key
 {
@@ -135,6 +141,8 @@ public:
         std::string_view collection,
         object& document,
         document_revision* revision = nullptr);
+    // A selector with $etag stamps each returned document with @odata.etag, the
+    // entity_tag of the version read, under the same lock as its body.
     bool read(std::string_view collection, const object& selector, object& documents);
     // Like read(), and under the same shared lock fills revision from the first
     // document included in the result (index order; ignored when $orderby is set).

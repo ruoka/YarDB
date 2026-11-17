@@ -192,7 +192,11 @@ A client connects with HTTP. Opening a connection does not create, drop, or rebu
 
 The first declaration of a collection is a `PUT` or `PATCH`. Adding a key or a unique name that is not stored yet is another `PATCH`. Those requests scan the live documents, because the new key has to be filled and a new unique constraint has to be checked. `GET /_reindex` is the explicit rebuild of every index.
 
-A key whose name joins field names with `+`, such as `service+type+status`, is the compound of those fields. It is not a field on the document. Insert and erase build the posting list from the named fields, including documents already stored. A count of equality on exactly those fields is the size of that list. A filter that names several indexed fields reads the exact bound with the fewest positions (`eq`, or one `gt`/`ge` with one `lt`/`le`). An equal span keeps the alphabetically earlier key. `$ne` and `in` stay a candidate scan.
+A key whose name joins field names with `+`, such as `service+type+status`, is the compound of those fields. It is not a field on the document. Insert and erase build the posting list from the named fields, including documents already stored. A count of equality on exactly those fields is the size of that list.
+
+A posting list holds the `_id` and the file position of each live document under that key, in `_id` order. A new document has the largest `_id`, so its posting is appended. An update keeps the document's place and moves its position. Opening the file and declaring a key fill the lists in `_id` order. A query does not sort a list.
+
+A filter that names several indexed fields intersects their posting lists by `_id`. An exact bound is `eq`, or one `gt`/`ge` with one `lt`/`le`. A range is the union of the lists of its keys. The shortest bound drives. A range of more than 64 keys joins only as that driver; otherwise `document.match` checks it on the rows the intersection leaves. A bound on `_id` (`gt`, `ge`, `lt`, `le`) trims each list to that range first, so an `_id` cursor page beside an indexed `eq` reads only rows after the cursor, in `_id` order. `$desc` walks the intersection backward. A range alone, with no `_id` bound and no `$top` or `$skip`, walks its keys in key order. `$ne` and `in` stay a candidate scan.
 
 Sending the same `keys` and `unique` again returns the configuration already stored and leaves the file alone. A client that wants `UID` unique reads `GET /_db/{collection}` and sends `PATCH` only when `UID` is missing from `keys` or from `unique`. Repeating that declaration on every connect used to call `reindex()` and reread the whole file once per collection. That is what made a service slow to listen.
 
@@ -238,8 +242,8 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$count=true`** - Return count of matching documents instead of items
   - Returns a JSON number in the response body (e.g. `42`)
   - Works with `$filter` (including `or`, `ne`, and string functions)
-  - Uses index-only counting when the filter is a single indexed constraint with `$eq`/`$gt`/`$gte`/`$lt`/`$lte`, and when it is equality on exactly the fields of a compound key. Otherwise it reads the tightest exact secondary bound and applies `document.match`
-  - When the filter also names `_id` with `$gt`/`$gte`/`$lt`/`$lte` beside an indexed field, the engine walks that primary-key range and visits only file positions on the tightest secondary posting span; `$orderby=_id` alone streams with `$top` like an unordered primary walk
+  - Counts the posting intersection without reading a document when every term of the filter is `_id` or an indexed top-level field bounded by `$eq`/`$gt`/`$gte`/`$lt`/`$lte` and every term joined the intersection, and when it is equality on exactly the fields of a compound key. Otherwise it reads the rows the intersection leaves and applies `document.match`
+  - When the filter also names `_id` with `$gt`/`$gte`/`$lt`/`$lte` beside an indexed field, each posting list is trimmed to that `_id` range before the intersection, so the read visits no row outside it. `$orderby=_id` alone, ascending or descending, streams with `$top` like an unordered primary walk, and its `$skiptoken` resumes after the last `_id`
   - Example: `GET /users?$count=true`, `GET /users?$count=true&$filter=age%20gt%2025`
 
 - **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.
@@ -345,9 +349,11 @@ The `_id` field is always included as a non-nullable `Edm.Int64` key field for a
 
 YarDB supports OData metadata formats via the `Accept` header:
 
-- **`application/json;odata=fullmetadata`** - Includes `@odata.context`, `@odata.id`, `@odata.editLink`
-- **`application/json;odata=minimalmetadata`** - Includes only `@odata.context`
+- **`application/json;odata=fullmetadata`** - Includes `@odata.context`, `@odata.id`, `@odata.editLink`, and `@odata.etag` on a GET
+- **`application/json;odata=minimalmetadata`** - Includes `@odata.context`, and `@odata.etag` on a GET
 - **`application/json;odata=nometadata`** or default - Plain JSON (no metadata)
+
+Under minimal or full metadata, a GET names each entity's version in `@odata.etag`, the same value as that document's `ETag` header. A collection read stamps each row under the same lock as its body, so `If-Match` with that value writes over the version that was read, and a later write is `412`. `$select`, an `or` filter and a `$batch` GET keep it; a `$batch` GET takes `Accept` from its `headers`. Plain JSON carries no annotation. A write body is stored as sent, annotations included, so a client that writes a read row back whole drops its `@odata.*` keys first.
 
 Example request:
 ```

@@ -13,12 +13,16 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | Item | Summary |
 |------|---------|
 | **Posting lists in `_id` order** | A secondary posting list keeps each live document's `_id` and position in `_id` order, and an update keeps the document's place. A filter on several indexed fields intersects those lists by `_id`. A range joins as the union of its keys when it has at most 64 keys or drives. An `_id` bound trims each list first, so an `_id` cursor page beside an indexed `eq` reads only rows after the cursor, in order, and `$desc` reverses it. A count whose terms all joined reads no document. `$orderby=_id`, ascending or descending, streams with `$top`, and its `$skiptoken` resumes after that `_id` instead of repeating the first page. Opening a file sorts a list only when it is out of order; the query path does not sort. A unique check reads the posting instead of walking the primary map. The file format is unchanged. See [programs.md](programs.md#secondary-indexes) |
+| **Compound-key count** | An equality on a compound key counts from its posting list, and a read takes the tightest exact secondary bound. |
 | **In-memory indexes** | In-memory indexes are `std::map`, and a write undoes index edits instead of copying `m_index`. |
 
 ### HTTP
 
 | Item | Summary |
 |------|---------|
+| **Native MCP under `/_sse`** | `yardb` serves native MCP at `GET /_sse` and JSON-RPC `POST /_messages/`, under the `_` prefix of the admin routes, so `/messages` is a data collection. A client that names `/sse` moves to `/_sse`, which makes this release `v2.0.0`. See [programs.md](programs.md#mcp---cursor--agent-client) |
+| **Hyphenated collection names** | A collection name and its route may contain `-`, for example `/settlement-instructions`. |
+| **`yarproxy` refuses `Transfer-Encoding`** | As `net::http::server` does, `yarproxy` answers `400` to a request with `Transfer-Encoding` before it buffers or fans out, so bytes it framed by `Content-Length` cannot carry a second request to every replica. |
 | **Row `@odata.etag`** | Under `odata=minimalmetadata` or `fullmetadata`, a collection GET names each row's version in `@odata.etag`, stamped under the same lock as the row's body, and a document GET names it as well. It is the value of that document's `ETag` header, so a client that read a page can `PATCH` a row with `If-Match` without reading it again. `$select`, `or` filters and `$batch` GET keep it. Plain JSON is unchanged. See [programs.md](programs.md#2-metadata-in-responses) |
 | **`$batch` GET** | `POST /$batch` accepts `get`, compared case-insensitively, as an individual request outside an `atomicityGroup`. A body or an `atomicityGroup` on that GET is `422` and nothing is applied. The URL is a document or a collection read with the same query options as a standalone GET, including `$filter`. The individual status, headers, and body match that GET; the batch stays `200`. `dependsOn` is `424` and the GET is not executed when a dependency failed. A GET does not take the write lock or append a log record. The 8192-character `$filter` guard is unchanged. See [programs.md](programs.md#atomic-batch-post-batch) |
 

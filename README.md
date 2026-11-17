@@ -20,7 +20,7 @@ YarDB is a C++23 application that implements:
 
 - **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
 - **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, and `$count`; `$expand` is parsed but awaits a relationship model
-- **MCP server**: Native HTTP+SSE MCP on `yardb` (`GET /sse`, via `http::mcp` in net4cpp). Python `tools/yardb_mcp*.py` kept as reference/oracle
+- **MCP server**: Native HTTP+SSE MCP on `yardb` (`GET /_sse`, via `http::mcp` in net4cpp). Python `tools/yardb_mcp*.py` kept as reference/oracle
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
 - **Last-Modified Support**: Timestamp-based conditional requests for cache validation
@@ -173,7 +173,7 @@ The project uses git submodules for dependencies:
 - `cryptic`: Cryptographic functions ([`v3.0.2`](https://github.com/ruoka/cryptic/releases/tag/v3.0.2)+)
 - `tester`: Testing framework ([`v3.1.0`](https://github.com/ruoka/tester/releases/tag/v3.1.0))
 
-**Versioning:** YarDB [`v1.3.1`](https://github.com/ruoka/YarDB/releases/tag/v1.3.1); SemVer per repo; product majors ≠ dependency majors. Nested `deps/tester` copies move when cryptic, net, and xson do — see [`docs/versioning.md`](docs/versioning.md).
+**Versioning:** YarDB [`v2.0.0`](https://github.com/ruoka/YarDB/releases/tag/v2.0.0); SemVer per repo; product majors ≠ dependency majors. Nested `deps/tester` copies move when cryptic, net, and xson do — see [`docs/versioning.md`](docs/versioning.md).
 
 **Note**: The `std` module is built from libc++ source (provided by Clang 21+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core`.
 

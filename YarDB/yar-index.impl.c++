@@ -28,9 +28,9 @@ bool bounds_inverted(
 }
 
 // Shared $gt/$gte/$lt/$lte/$eq (and bare equality) bound resolution for primary
-// and secondary maps. Callers apply $head/$tail and wrap iterators.
+// and secondary maps. Callers apply $head/$tail and wrap the key span.
 template<typename Map, typename MakeKey>
-auto analyze_key_bounds(const yar::db::object& selector, const Map& keys, MakeKey make_key)
+yar::db::key_span<Map> analyze_key_bounds(const yar::db::object& selector, const Map& keys, MakeKey make_key)
 {
     auto begin = keys.cbegin();
     auto end = keys.cend();
@@ -51,12 +51,11 @@ auto analyze_key_bounds(const yar::db::object& selector, const Map& keys, MakeKe
         std::tie(begin, end) = keys.equal_range(make_key(selector));
 
     // AND-merged OData ranges can be empty/inverted (age gt 10 and age lt 5).
-    // Do not walk key_begin past key_end: secondary position iterators increment
-    // until the end iterator, which is undefined if the range is inverted.
+    // A join over an inverted span is undefined; collapse it to empty.
     if(bounds_inverted(keys, begin, end))
         begin = end;
 
-    return std::pair{begin, end};
+    return {begin, end};
 }
 
 // The whole primary map is keys.size(). Distance walks only a real subrange
@@ -73,29 +72,31 @@ std::size_t span_count(
 
 // The _id bound, then $head/$tail on key iterators, only when equality did
 // not already replace the range (same exclusive chain as before).
-auto primary_span(const yar::db::object& selector, const yar::db::primary_index_type& keys)
+yar::db::key_span<yar::db::primary_index_type> primary_span(
+    const yar::db::object& selector,
+    const yar::db::primary_index_type& keys)
 {
-    auto [begin, end] = analyze_key_bounds(selector, keys, make_primary_key);
+    auto span = analyze_key_bounds(selector, keys, make_primary_key);
     if(not selector.has("$eq"s) and not selector.has_value())
     {
         if(selector.has("$head"s))
         {
             const xson::integer_type n = selector["$head"s];
-            const auto len = static_cast<xson::integer_type>(span_count(keys, begin, end));
-            auto itr = begin;
+            const auto len = static_cast<xson::integer_type>(span_count(keys, span.begin(), span.end()));
+            auto itr = span.begin();
             std::ranges::advance(itr, std::min(n, len));
-            end = itr;
+            span = {span.begin(), itr};
         }
         else if(selector.has("$tail"s))
         {
             const xson::integer_type n = selector["$tail"s];
-            const auto len = static_cast<xson::integer_type>(span_count(keys, begin, end));
-            auto itr = end;
+            const auto len = static_cast<xson::integer_type>(span_count(keys, span.begin(), span.end()));
+            auto itr = span.end();
             std::ranges::advance(itr, -std::min(n, len));
-            begin = itr;
+            span = {itr, span.end()};
         }
     }
-    return std::pair{begin, end};
+    return span;
 }
 
 yar::db::index_view query_analysis_primary(
@@ -103,15 +104,15 @@ yar::db::index_view query_analysis_primary(
     const yar::db::primary_index_type& keys,
     bool backward)
 {
-    const auto [begin, end] = primary_span(selector, keys);
-    const auto known_size = span_count(keys, begin, end);
+    const auto span = primary_span(selector, keys);
+    const auto known_size = span_count(keys, span.begin(), span.end());
 
     if(not backward)
-        return {begin, end, known_size};
+        return {span.begin(), span.end(), known_size};
 
     return {
-        std::make_reverse_iterator(end),
-        std::make_reverse_iterator(begin),
+        std::make_reverse_iterator(span.end()),
+        std::make_reverse_iterator(span.begin()),
         known_size};
 }
 
@@ -127,44 +128,36 @@ yar::db::index_view query_analysis_secondary(
     const yar::db::secondary_index_type& keys,
     bool backward)
 {
-    auto [key_begin, key_end] = analyze_key_bounds(selector, keys, make_secondary_key);
-
-    auto pos_begin = yar::db::secondary_position_iterator{key_begin, key_end};
-    auto pos_end = yar::db::secondary_position_iterator{key_end, key_end};
+    const auto span = analyze_key_bounds(selector, keys, make_secondary_key);
     auto known_size = std::optional<std::size_t>{};
 
     if(not selector.has("$head"s) and not selector.has("$tail"s))
         known_size = std::ranges::fold_left(
-            key_begin, key_end, std::size_t{0},
+            span, std::size_t{0},
             [](std::size_t total, const auto& entry) { return total + entry.second.size(); });
 
+    // A reverse walk keeps the full key span. $head/$tail on a reverse secondary
+    // bound matched the earlier iterators, which also left the key span alone.
+    if(backward)
+        return {yar::db::reverse_secondary_positions(span), known_size};
+
+    auto positions = yar::db::secondary_positions(span);
+    auto drop = std::size_t{0};
+    auto take = std::optional<std::size_t>{};
+
     // Secondary $head/$tail limit positions (one doc can share a key), not keys.
+    // views::take ends in a sentinel; the owned walk stores drop/take counts.
     if(selector.has("$head"s))
-    {
-        const xson::integer_type n = selector["$head"s];
-        auto limited_end = pos_begin;
-        std::ranges::advance(limited_end, n, pos_end);
-        pos_end = limited_end;
-    }
+        take = static_cast<std::size_t>(static_cast<xson::integer_type>(selector["$head"s]));
     else if(selector.has("$tail"s))
     {
-        const xson::integer_type n = selector["$tail"s];
-        const xson::integer_type total = std::ranges::distance(pos_begin, pos_end);
+        const auto n = static_cast<std::size_t>(static_cast<xson::integer_type>(selector["$tail"s]));
+        const auto total = static_cast<std::size_t>(std::ranges::distance(positions));
         if(total > n)
-            std::ranges::advance(pos_begin, total - n, pos_end);
+            drop = total - n;
     }
 
-    if(not backward)
-        return {pos_begin, pos_end, known_size};
-
-    return {
-        yar::db::reverse_secondary_position_iterator{
-            yar::db::secondary_index_type::const_reverse_iterator{key_end},
-            yar::db::secondary_index_type::const_reverse_iterator{key_begin}},
-        yar::db::reverse_secondary_position_iterator{
-            yar::db::secondary_index_type::const_reverse_iterator{key_begin},
-            yar::db::secondary_index_type::const_reverse_iterator{key_begin}},
-        known_size};
+    return {std::move(positions), drop, take, known_size};
 }
 
 bool is_pagination_key(const std::string& key)

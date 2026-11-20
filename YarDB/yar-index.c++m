@@ -42,128 +42,58 @@ using secondary_index_type = std::map<secondary_key_type, postings_type, xson::p
 
 using secondary_index_map = std::map<secondary_index_name, secondary_index_type>;
 
-// Walks every stored position for keys in [key_begin, key_end).
-class secondary_position_iterator
+// A bound's keys. The iterators borrow the map; the span owns nothing.
+template<class Map>
+using key_span = std::ranges::subrange<typename Map::const_iterator, typename Map::const_iterator>;
+
+using secondary_key_span = key_span<secondary_index_type>;
+
+// Join each key's posting list into one sequence of file positions. The
+// iterators borrow the map and the vectors; the lists must not change while a
+// walk is open.
+struct postings_of
 {
-public:
-
-    using difference_type = std::ptrdiff_t;
-    using value_type = position_type;
-    using iterator_concept = std::forward_iterator_tag;
-
-    secondary_position_iterator() = default;
-
-    secondary_position_iterator(
-        secondary_index_type::const_iterator key_begin,
-        secondary_index_type::const_iterator key_end) :
-        m_key_it{key_begin},
-        m_key_end{key_end}
+    const postings_type& operator()(const secondary_index_type::value_type& entry) const
     {
-        skip_empty();
+        return entry.second;
     }
-
-    auto operator*() const -> position_type
-    {
-        return m_key_it->second[m_pos_idx].position;
-    }
-
-    auto& operator++()
-    {
-        ++m_pos_idx;
-        skip_empty();
-        return *this;
-    }
-
-    auto operator++(int)
-    {
-        auto tmp = *this;
-        ++*this;
-        return tmp;
-    }
-
-    friend bool operator==(const secondary_position_iterator&, const secondary_position_iterator&) = default;
-
-private:
-
-    void skip_empty()
-    {
-        while(m_key_it != m_key_end and m_pos_idx >= m_key_it->second.size())
-        {
-            m_pos_idx = 0;
-            ++m_key_it;
-        }
-    }
-
-    secondary_index_type::const_iterator m_key_it{};
-    secondary_index_type::const_iterator m_key_end{};
-    std::size_t m_pos_idx = 0;
 };
 
-class reverse_secondary_position_iterator
+struct position_of
 {
-public:
-
-    using difference_type = std::ptrdiff_t;
-    using value_type = position_type;
-    using iterator_concept = std::forward_iterator_tag;
-
-    reverse_secondary_position_iterator() = default;
-
-    reverse_secondary_position_iterator(
-        secondary_index_type::const_reverse_iterator key_begin,
-        secondary_index_type::const_reverse_iterator key_end) :
-        m_key_it{key_begin},
-        m_key_end{key_end}
+    position_type operator()(const posting& entry) const
     {
-        if(m_key_it != m_key_end)
-            m_pos_idx = m_key_it->second.size() - 1;
-        skip_empty();
+        return entry.position;
     }
-
-    auto operator*() const -> position_type
-    {
-        return m_key_it->second[m_pos_idx].position;
-    }
-
-    auto& operator++()
-    {
-        if(m_pos_idx > 0)
-            --m_pos_idx;
-        else
-        {
-            ++m_key_it;
-            if(m_key_it != m_key_end)
-                m_pos_idx = m_key_it->second.size() - 1;
-        }
-        skip_empty();
-        return *this;
-    }
-
-    auto operator++(int)
-    {
-        auto tmp = *this;
-        ++*this;
-        return tmp;
-    }
-
-    friend bool operator==(const reverse_secondary_position_iterator&, const reverse_secondary_position_iterator&) = default;
-
-private:
-
-    void skip_empty()
-    {
-        while(m_key_it != m_key_end and m_key_it->second.empty())
-        {
-            ++m_key_it;
-            if(m_key_it != m_key_end)
-                m_pos_idx = m_key_it->second.size() - 1;
-        }
-    }
-
-    secondary_index_type::const_reverse_iterator m_key_it{};
-    secondary_index_type::const_reverse_iterator m_key_end{};
-    std::size_t m_pos_idx = 0;
 };
+
+using forward_positions = decltype(
+    std::declval<secondary_key_span>()
+    | std::views::transform(postings_of{})
+    | std::views::join
+    | std::views::transform(position_of{}));
+
+// Reverse of the forward join: last key's last posting first. Same order as
+// walking keys backward and each posting list from the back.
+using reverse_positions = decltype(std::declval<forward_positions>() | std::views::reverse);
+
+// index_view::begin is const, so the cursors are the const join iterators.
+using secondary_position_iterator = std::ranges::iterator_t<const forward_positions>;
+
+using reverse_secondary_position_iterator = std::ranges::iterator_t<const reverse_positions>;
+
+inline forward_positions secondary_positions(secondary_key_span keys)
+{
+    return keys
+        | std::views::transform(postings_of{})
+        | std::views::join
+        | std::views::transform(position_of{});
+}
+
+inline reverse_positions reverse_secondary_positions(secondary_key_span keys)
+{
+    return secondary_positions(keys) | std::views::reverse;
+}
 
 // The documents on every term, in _id order or its reverse. A term is one run
 // per key of a field's bound. A document has one value per field, so the runs
@@ -356,25 +286,75 @@ private:
     kind m_kind;
 };
 
+// Primary and posting-stream walks store their cursors. A secondary walk owns
+// the join view: join iterators hold a pointer to that view, so begin()/end()
+// rebuild them from the owned member instead of caching a dangling Parent*.
 class index_view : public std::ranges::view_interface<index_view>
 {
 public:
 
     template<typename T>
     index_view(T begin, T end, std::optional<std::size_t> known_size = std::nullopt) :
-        m_begin{begin},
-        m_end{end},
+        m_state{cursors{index_iterator{begin}, index_iterator{end}}},
         m_known_size{known_size}
     {}
 
-    auto begin() const
+    index_view(
+        forward_positions positions,
+        std::size_t drop,
+        std::optional<std::size_t> take,
+        std::optional<std::size_t> known_size = std::nullopt) :
+        m_state{forward_walk{std::move(positions), drop, take}},
+        m_known_size{known_size}
+    {}
+
+    index_view(reverse_positions positions, std::optional<std::size_t> known_size = std::nullopt) :
+        m_state{reverse_walk{std::move(positions)}},
+        m_known_size{known_size}
+    {}
+
+    index_iterator begin() const
     {
-        return m_begin;
+        return std::visit([](const auto& walk) -> index_iterator
+        {
+            using walk_type = std::decay_t<decltype(walk)>;
+            if constexpr(std::is_same_v<walk_type, cursors>)
+                return walk.begin;
+            else if constexpr(std::is_same_v<walk_type, forward_walk>)
+            {
+                auto first = walk.positions.begin();
+                auto last = walk.positions.end();
+                std::ranges::advance(first, static_cast<std::ptrdiff_t>(walk.drop), last);
+                return index_iterator{first};
+            }
+            else
+                return index_iterator{walk.positions.begin()};
+        }, m_state);
     }
 
-    auto end() const
+    index_iterator end() const
     {
-        return m_end;
+        return std::visit([](const auto& walk) -> index_iterator
+        {
+            using walk_type = std::decay_t<decltype(walk)>;
+            if constexpr(std::is_same_v<walk_type, cursors>)
+                return walk.end;
+            else if constexpr(std::is_same_v<walk_type, forward_walk>)
+            {
+                auto first = walk.positions.begin();
+                auto last = walk.positions.end();
+                std::ranges::advance(first, static_cast<std::ptrdiff_t>(walk.drop), last);
+                if(walk.take)
+                {
+                    auto limited = first;
+                    std::ranges::advance(limited, static_cast<std::ptrdiff_t>(*walk.take), last);
+                    return index_iterator{limited};
+                }
+                return index_iterator{last};
+            }
+            else
+                return index_iterator{walk.positions.end()};
+        }, m_state);
     }
 
     // sized_range when known_size is set at construction; otherwise walks iterators
@@ -384,14 +364,32 @@ public:
             return *m_known_size;
 
         auto count = std::size_t{0};
-        for(auto it = m_begin; it != m_end; ++it)
+        for(auto it = begin(); it != end(); ++it)
             ++count;
         return count;
     }
 
 private:
 
-    index_iterator m_begin, m_end;
+    struct cursors
+    {
+        index_iterator begin;
+        index_iterator end;
+    };
+
+    struct forward_walk
+    {
+        forward_positions positions;
+        std::size_t drop = 0;
+        std::optional<std::size_t> take;
+    };
+
+    struct reverse_walk
+    {
+        reverse_positions positions;
+    };
+
+    std::variant<cursors, forward_walk, reverse_walk> m_state;
     std::optional<std::size_t> m_known_size;
 };
 

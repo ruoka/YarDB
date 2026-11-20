@@ -2113,16 +2113,27 @@ yar::db::db_result<yar::db::put_outcome> yar::db::engine::put(
 
 bool yar::db::engine::history(std::string_view collection, const yar::db::object& selector, yar::db::object& documents)
 {
+    auto entries = std::vector<history_entry>{};
+    const auto found = history(collection, selector, entries);
+    documents = yar::db::object{yar::db::object::array{}};
+    for(auto& entry : entries)
+        documents += std::move(entry.document);
+    return found;
+}
+
+bool yar::db::engine::history(
+    std::string_view collection,
+    const yar::db::object& selector,
+    std::vector<history_entry>& entries)
+{
     using xson::fson::operator >>;
 
     auto lock = std::shared_lock{m_rwlock};
-    // Same empty-array contract as read() when the collection is absent.
-    documents = yar::db::object{yar::db::object::array{}};
+    entries.clear();
     const auto* index = find_index(m_index, collection);
     if(index == nullptr)
         return false;
 
-    auto success = false;
     auto reader = open_reader();
 
     // view() may over-scan (unindexed fields fall back to the full primary
@@ -2142,8 +2153,10 @@ bool yar::db::engine::history(std::string_view collection, const yar::db::object
         auto position = live_position;
         while(position >= 0)
         {
-            documents += std::move(document);
-            success = true;
+            entries.push_back(history_entry{
+                std::move(document),
+                metadata.timestamp,
+                to_string(metadata.status)});
             position = metadata.previous;
             if(position < 0)
                 break;
@@ -2155,7 +2168,7 @@ bool yar::db::engine::history(std::string_view collection, const yar::db::object
         }
     }
 
-    return success;
+    return not entries.empty();
 }
 
 yar::db::db_result<std::size_t> yar::db::engine::upsert(

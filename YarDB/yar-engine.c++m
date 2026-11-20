@@ -44,6 +44,16 @@ struct document_revision
     std::optional<std::chrono::system_clock::time_point> timestamp;
 };
 
+// One stored version of a document, newest first when history() fills a vector.
+// status is the record's metadata action: created on the live version, updated
+// on a superseded one, deleted on a destroyed one. at is when that version was written.
+struct history_entry
+{
+    object document;
+    std::chrono::system_clock::time_point at{};
+    std::string status;
+};
+
 // One document write inside an atomic group. create is POST; replace is PUT;
 // update is PATCH; destroy is DELETE. id is the URL _id for every method
 // except create, where it is optional and the body may supply _id instead.
@@ -170,6 +180,8 @@ public:
         write_preconditions preconditions = {});
 
     bool history(std::string_view collection, const object& selector, object& documents);
+
+    bool history(std::string_view collection, const object& selector, std::vector<history_entry>& entries);
 
     db_result<std::size_t> upsert(
         std::string_view collection,

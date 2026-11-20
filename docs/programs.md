@@ -99,6 +99,7 @@ Once running, `yardb` provides the following REST endpoints:
 - `POST /{collection}` - Create a new document
 - `GET /{collection}` - Read all documents in collection
 - `GET /{collection}/{id}` - Read document by ID
+- `GET /{collection}/{id}/history` - Versions of that live document, newest first. Each row is `timestamp` (when that version was written), `status` (the record's metadata action: `created` on the live version, `updated` on a superseded one) and `document` (the stored body). A missing id is `404`, the same as `GET /{collection}/{id}`
 - `PUT /{collection}/{id}` - Replace document by ID (upsert: creates if not exists, updates if exists)
 - `PATCH /{collection}/{id}` - Partially update an existing document (`404` if missing; does not create)
 - `DELETE /{collection}/{id}` - Delete document by ID

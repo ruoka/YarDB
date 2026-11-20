@@ -6463,6 +6463,53 @@ auto test_set()
         };
     };
 
+    test_case("GET /{collection}/{id}/history returns versions newest first, [yardb]") = []
+    {
+    const auto test_file = "./httpd_history_test.db";
+    auto setup = std::make_shared<fixture>(test_file);
+
+    auto [created_status, created_reason, created_headers, created_body] = make_request(
+        setup->port(), "POST"s, "/histnotes"s, R"({"name":"v1"})"s);
+    require_eq(created_status, "201"s);
+    (void)created_reason;
+    (void)created_headers;
+    const auto created = json::parse(created_body);
+    const auto id = static_cast<xson::integer_type>(created["_id"s]);
+    const auto path = "/histnotes/"s + std::to_string(id);
+
+    auto [patched_status, patched_reason, patched_headers, patched_body] = make_request(
+        setup->port(), "PATCH"s, path, R"({"name":"v2"})"s);
+    require_eq(patched_status, "200"s);
+    (void)patched_reason;
+    (void)patched_headers;
+    (void)patched_body;
+
+    auto [status, reason, headers, body] = make_request(
+        setup->port(), "GET"s, path + "/history"s, ""s);
+    require_eq(status, "200"s);
+    require_eq(reason, "OK"s);
+    require_true(headers.contains("content-type"));
+    const auto versions = json::parse(body);
+    require_eq(versions.get<object::array>().size(), std::size_t{2});
+    require_eq(static_cast<string>(versions[0]["status"s]), "created"s);
+    require_eq(static_cast<string>(versions[0]["document"s]["name"s]), "v2"s);
+    require_eq(static_cast<xson::integer_type>(versions[0]["document"s]["_id"s]), id);
+    require_eq(static_cast<string>(versions[1]["status"s]), "updated"s);
+    require_eq(static_cast<string>(versions[1]["document"s]["name"s]), "v1"s);
+    const string newer = versions[0]["timestamp"s];
+    const string older = versions[1]["timestamp"s];
+    require_gt(newer.size(), std::size_t{0});
+    require_gt(older.size(), std::size_t{0});
+
+    auto [missing_status, missing_reason, missing_headers, missing_body] = make_request(
+        setup->port(), "GET"s, "/histnotes/999/history"s, ""s);
+    require_eq(missing_status, "404"s);
+    require_eq(missing_reason, "Not Found"s);
+    (void)missing_headers;
+    const auto error = json::parse(missing_body);
+    require_eq(static_cast<string>(error["message"s]), "Document not found"s);
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

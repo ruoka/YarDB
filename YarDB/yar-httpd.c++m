@@ -36,6 +36,7 @@ const auto correlation_id_header_str = std::string{correlation_id_header};
 inline const auto collection_route = "/(?!health$|ready$|metrics$)[a-z][a-z0-9_-]*"s;
 inline const auto collection_route_with_query = "/(?!health$|ready$|metrics$)[a-z][a-z0-9_-]*(\\?.*)?"s;
 inline const auto collection_route_with_id = "/(?!health$|ready$|metrics$)[a-z][a-z0-9_-]*/[0-9]+"s;
+inline const auto collection_route_with_history = "/(?!health$|ready$|metrics$)[a-z][a-z0-9_-]*/[0-9]+/history"s;
 
 // Handler type aliases for middleware composition
 using handler = ::http::callback;
@@ -1568,6 +1569,43 @@ private:
         m_server.get(collection_route_with_id).response(
             "application/json"sv,
             ::http::middleware::wrap(get_document_handler, get_document_middlewares));
+
+        // Versions of one live document, newest first. A missing id is the same
+        // 404 as GET /{collection}/{id}. Each row is the stored body plus the
+        // record time and the metadata action of that version.
+        auto get_history_handler = [this](::http::request_view request, [[maybe_unused]] ::http::body_view body, [[maybe_unused]] ::http::headers& headers)
+        {
+            const auto ctx = handler_context{request, m_engine};
+            const auto id = utils::stoll(ctx.uri.path[2]);
+            const auto selector = xson::object{"_id", id};
+            auto entries = std::vector<yar::db::history_entry>{};
+            if(not m_engine.history(ctx.collection, selector, entries))
+            {
+                auto error = xson::object{
+                    {"error", "Not Found"s},
+                    {"message", "Document not found"s},
+                    {"collection", ctx.collection},
+                    {"id", id}
+                };
+                return ::http::make_response(status_not_found, xson::json::stringify(error), std::optional<::http::headers>{});
+            }
+
+            auto versions = xson::object{xson::object::array{}};
+            for(auto& entry : entries)
+            {
+                versions += xson::object{
+                    {"timestamp"s, xson::to_iso8601(entry.at)},
+                    {"status"s, std::move(entry.status)},
+                    {"document"s, std::move(entry.document)}
+                };
+            }
+            return ::http::make_response(::http::status_ok, xson::json::stringify(versions), std::optional<::http::headers>{});
+        };
+
+        auto get_history_middlewares = build_middleware_chain(method_get, "GET_HISTORY"sv, "GET_HISTORY_ERROR"sv, true);
+        m_server.get(collection_route_with_history).response(
+            "application/json"sv,
+            ::http::middleware::wrap(get_history_handler, get_history_middlewares));
 
         // Read collection with OData query parameters - Refactored to use middleware pattern
         // Route pattern allows optional query string: /[a-z][a-z0-9_-]*(\?.*)?

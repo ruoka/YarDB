@@ -165,16 +165,6 @@ bool is_pagination_key(const std::string& key)
     return key == "$top"s or key == "$skip"s or key == "$desc"s or key == "$orderby"s;
 }
 
-auto selector_count_keys(const yar::db::object& selector)
-{
-    if(not selector.has_objects())
-        return std::vector<std::string>{};
-
-    return selector.get<yar::db::object::map>()
-        | std::views::transform([](const auto& entry) { return entry.first; })
-        | std::views::filter([](const std::string& key) { return not is_pagination_key(key); })
-        | std::ranges::to<std::vector<std::string>>();
-}
 
 // Secondary indexes store primitives only (see insert()). Nested document
 // selectors such as Customer/Country → {Customer:{Country:...}} use ordinary
@@ -456,25 +446,25 @@ run trimmed(const yar::db::postings_type& postings, const id_range& ids)
     return {first, last};
 }
 
-// A field's bound: its keys, how many, and the postings they hold.
+// A field's bound: its keys, how many, and the postings they hold. The span
+// borrows the secondary map; runs are built once when the stream is formed.
 struct term_plan
 {
     const yar::db::object* field = nullptr;
     const yar::db::secondary_index_type* keys = nullptr;
-    yar::db::secondary_index_type::const_iterator first{};
-    yar::db::secondary_index_type::const_iterator last{};
+    yar::db::secondary_key_span span{};
     std::size_t key_count = 0;
     std::size_t size = 0;
 };
 
 term_plan term_of(const yar::db::object& field, const yar::db::secondary_index_type& keys)
 {
-    const auto [first, last] = analyze_key_bounds(field, keys, make_secondary_key);
-    auto plan = term_plan{&field, &keys, first, last};
-    for(auto key = first; key != last; ++key)
+    const auto span = analyze_key_bounds(field, keys, make_secondary_key);
+    auto plan = term_plan{&field, &keys, span};
+    for(const auto& [key, postings] : span)
     {
         ++plan.key_count;
-        plan.size += key->second.size();
+        plan.size += postings.size();
     }
     return plan;
 }
@@ -483,10 +473,10 @@ term runs_of(const term_plan& plan, const id_range& ids)
 {
     auto runs = term{};
     runs.reserve(plan.key_count);
-    for(auto key = plan.first; key != plan.last; ++key)
+    for(const auto& [key, postings] : plan.span)
     {
-        if(const auto postings = trimmed(key->second, ids); postings.first != postings.last)
-            runs.push_back(postings);
+        if(const auto trimmed_postings = trimmed(postings, ids); trimmed_postings.first != trimmed_postings.last)
+            runs.push_back(trimmed_postings);
     }
     return runs;
 }
@@ -501,18 +491,14 @@ yar::db::index_view stream(std::vector<term> terms, bool backward)
             return total + static_cast<std::size_t>(postings.last - postings.first);
         });
     }
-    return {
-        yar::db::index_iterator{yar::db::posting_stream_iterator{std::move(terms), backward}},
-        yar::db::index_iterator{yar::db::posting_stream_iterator{}},
+    return yar::db::index_view{
+        yar::db::posting_stream_iterator{std::move(terms), backward},
         known_size};
 }
 
 yar::db::index_view empty_view()
 {
-    return {
-        yar::db::index_iterator{yar::db::posting_stream_iterator{}},
-        yar::db::index_iterator{yar::db::posting_stream_iterator{}},
-        std::size_t{0}};
+    return yar::db::index_view{yar::db::posting_stream_iterator{}, std::size_t{0}};
 }
 
 // A read that pages follows _id: $top or $skip without $orderby, or $orderby
@@ -540,7 +526,13 @@ bool windowed(const yar::db::object& field)
 // is not a compound name.
 bool exact_bounds_only(const yar::db::object& selector, std::span<const std::string> indexed)
 {
-    return std::ranges::all_of(selector_count_keys(selector), [&](const std::string& key)
+    if(not selector.has_objects())
+        return true;
+
+    auto names = selector.get<yar::db::object::map>()
+        | std::views::keys
+        | std::views::filter([](const std::string& key) { return not is_pagination_key(key); });
+    return std::ranges::all_of(names, [&](const auto& key)
     {
         if(key != "_id"s and (key.contains('+') or not std::ranges::contains(indexed, key)))
             return false;
@@ -907,6 +899,7 @@ yar::db::index::planned_view yar::db::index::plan(const yar::db::object& selecto
         return {query_analysis_secondary(*kept.front().field, *kept.front().keys, backward), complete};
 
     auto terms = std::vector<term>{};
+    terms.reserve(kept.size());
     for(const auto& candidate : kept)
     {
         auto runs = runs_of(candidate, ids);

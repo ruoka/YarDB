@@ -286,9 +286,10 @@ private:
     kind m_kind;
 };
 
-// Primary and posting-stream walks store their cursors. A secondary walk owns
-// the join view: join iterators hold a pointer to that view, so begin()/end()
-// rebuild them from the owned member instead of caching a dangling Parent*.
+// Primary walks store their cursors. A secondary walk owns the join view: join
+// iterators hold a pointer to that view, so begin()/end() rebuild them from
+// the owned member instead of caching a dangling Parent*. A posting-stream
+// walk owns the intersection cursor the same way (terms + heap state).
 class index_view : public std::ranges::view_interface<index_view>
 {
 public:
@@ -313,6 +314,11 @@ public:
         m_known_size{known_size}
     {}
 
+    index_view(posting_stream_iterator current, std::optional<std::size_t> known_size = std::nullopt) :
+        m_state{stream_walk{std::move(current)}},
+        m_known_size{known_size}
+    {}
+
     index_iterator begin() const
     {
         return std::visit([](const auto& walk) -> index_iterator
@@ -327,8 +333,10 @@ public:
                 std::ranges::advance(first, static_cast<std::ptrdiff_t>(walk.drop), last);
                 return index_iterator{first};
             }
-            else
+            else if constexpr(std::is_same_v<walk_type, reverse_walk>)
                 return index_iterator{walk.positions.begin()};
+            else
+                return index_iterator{walk.begin};
         }, m_state);
     }
 
@@ -352,8 +360,10 @@ public:
                 }
                 return index_iterator{last};
             }
-            else
+            else if constexpr(std::is_same_v<walk_type, reverse_walk>)
                 return index_iterator{walk.positions.end()};
+            else
+                return index_iterator{posting_stream_iterator{}};
         }, m_state);
     }
 
@@ -389,7 +399,12 @@ private:
         reverse_positions positions;
     };
 
-    std::variant<cursors, forward_walk, reverse_walk> m_state;
+    struct stream_walk
+    {
+        posting_stream_iterator begin;
+    };
+
+    std::variant<cursors, forward_walk, reverse_walk, stream_walk> m_state;
     std::optional<std::size_t> m_known_size;
 };
 

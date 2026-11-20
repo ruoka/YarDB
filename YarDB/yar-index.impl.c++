@@ -12,6 +12,11 @@ auto make_primary_key = [](const xson::primitive& v){return std::get<xson::integ
 
 auto make_secondary_key = [](const xson::primitive& v){return v;};
 
+// A term with more keys than this joins an intersection only when it drives
+// the walk. Seeking it costs a search for each of its runs it passes. The same
+// cap limits a pure $in membership list that becomes discrete runs.
+constexpr auto max_seek_runs = std::size_t{64};
+
 // True when [begin, end) is inverted. Map iterators are bidirectional, so this
 // compares keys instead of walking begin toward end or past it.
 template<typename Map>
@@ -189,10 +194,45 @@ bool secondary_field_selector_usable(const yar::db::object& field_selector)
         });
 }
 
+// True when the field is exactly {$in: array|map}. Membership values are the
+// array elements or the map's values (OData stores indexed keys "0","1",…).
+bool is_pure_in(const yar::db::object& field)
+{
+    if(not field.has_objects())
+        return false;
+    if(field.get<yar::db::object::map>().size() != 1 or not field.has("$in"s))
+        return false;
+    const auto& list = field["$in"s];
+    return list.is_array() or list.has_objects();
+}
+
+std::size_t in_membership_count(const yar::db::object& field)
+{
+    const auto& list = field["$in"s];
+    if(list.is_array())
+        return list.get<yar::db::object::array>().size();
+    return list.get<yar::db::object::map>().size();
+}
+
+template<typename Fn>
+void for_each_in_member(const yar::db::object& field, Fn&& fn)
+{
+    const auto& list = field["$in"s];
+    if(list.is_array())
+    {
+        for(const auto& value : list.get<yar::db::object::array>())
+            fn(value);
+        return;
+    }
+    for(const auto& [_, value] : list.get<yar::db::object::map>())
+        fn(value);
+}
+
 // True when index.view()'s range analysis can represent the field selector
 // exactly (view size == match count). Multi-op maps from AND-merged $filter
 // are not always safe: query_analysis_* lets $eq overwrite prior bounds, and
 // $gt/$gte (or $lt/$lte) are if/else-if so only one bound per side is applied.
+// A pure $in with at most max_seek_runs members is exact via discrete runs.
 bool index_only_field_selector(const yar::db::object& field_selector)
 {
     if(field_selector.has_value())
@@ -200,6 +240,9 @@ bool index_only_field_selector(const yar::db::object& field_selector)
 
     if(not field_selector.has_objects())
         return false;
+
+    if(is_pure_in(field_selector))
+        return in_membership_count(field_selector) <= max_seek_runs;
 
     auto has_eq = false;
     auto has_gt = false;
@@ -408,10 +451,6 @@ void seek(term& runs, yar::db::primary_key_type target, bool descending)
     }
 }
 
-// A term with more keys than this joins an intersection only when it drives
-// the walk. Seeking it costs a search for each of its runs it passes.
-constexpr auto max_seek_runs = std::size_t{64};
-
 // The _id range a selector allows, [low, high), open where absent.
 struct id_range
 {
@@ -446,15 +485,18 @@ run trimmed(const yar::db::postings_type& postings, const id_range& ids)
     return {first, last};
 }
 
-// A field's bound: its keys, how many, and the postings they hold. The span
-// borrows the secondary map; runs are built once when the stream is formed.
+// A field's bound: its keys, how many, and the postings they hold. A contiguous
+// bound borrows a key span; a pure $in stores discrete trimmed runs (sparse
+// keys). Runs are pointer pairs into existing posting vectors.
 struct term_plan
 {
     const yar::db::object* field = nullptr;
     const yar::db::secondary_index_type* keys = nullptr;
     yar::db::secondary_key_span span{};
+    term prebuilt{};
     std::size_t key_count = 0;
     std::size_t size = 0;
+    bool discrete = false;
 };
 
 term_plan term_of(const yar::db::object& field, const yar::db::secondary_index_type& keys)
@@ -469,8 +511,44 @@ term_plan term_of(const yar::db::object& field, const yar::db::secondary_index_t
     return plan;
 }
 
+// One run per distinct membership value that exists in the index, trimmed by
+// the current _id range. Missing values and non-primitives are omitted.
+term_plan term_of_in(
+    const yar::db::object& field,
+    const yar::db::secondary_index_type& keys,
+    const id_range& ids)
+{
+    auto plan = term_plan{&field, &keys};
+    plan.discrete = true;
+    plan.prebuilt.reserve(in_membership_count(field));
+    for_each_in_member(field, [&](const yar::db::object& value)
+    {
+        if(not value.has_value())
+            return;
+        const auto found = keys.find(make_secondary_key(value));
+        if(found == keys.end())
+            return;
+        const auto postings = trimmed(found->second, ids);
+        if(postings.first == postings.last)
+            return;
+        // Duplicate membership values share one posting list; keep a single run.
+        if(std::ranges::any_of(plan.prebuilt, [&](const run& existing)
+        {
+            return existing.first == postings.first;
+        }))
+            return;
+        plan.prebuilt.push_back(postings);
+        plan.size += static_cast<std::size_t>(postings.last - postings.first);
+    });
+    plan.key_count = plan.prebuilt.size();
+    return plan;
+}
+
 term runs_of(const term_plan& plan, const id_range& ids)
 {
+    if(plan.discrete)
+        return plan.prebuilt;
+
     auto runs = term{};
     runs.reserve(plan.key_count);
     for(const auto& [key, postings] : plan.span)
@@ -846,9 +924,9 @@ yar::db::index::planned_view yar::db::index::plan(const yar::db::object& selecto
         ids = *range;
     }
 
-    // $ne, $in, and any selector the bound analysis cannot represent narrow
-    // only a walk that no exact bound narrows. A compound name is not a
-    // document field.
+    // $ne and any selector the bound analysis cannot represent narrow only a
+    // walk that no exact bound narrows. A pure $in becomes discrete runs when
+    // small enough. A compound name is not a document field.
     auto exact = std::vector<term_plan>{};
     auto loose = std::optional<term_plan>{};
     for(const auto& [name, keys] : m_secondary_keys)
@@ -858,6 +936,17 @@ yar::db::index::planned_view yar::db::index::plan(const yar::db::object& selecto
         const auto& field = selector[name];
         if(not secondary_field_selector_usable(field))
             continue;
+        if(is_pure_in(field))
+        {
+            if(in_membership_count(field) <= max_seek_runs)
+            {
+                exact.push_back(term_of_in(field, keys, ids));
+                continue;
+            }
+            if(not loose)
+                loose = term_of(field, keys);
+            continue;
+        }
         if(index_only_field_selector(field))
             exact.push_back(term_of(field, keys));
         else if(not loose)
@@ -894,8 +983,9 @@ yar::db::index::planned_view yar::db::index::plan(const yar::db::object& selecto
             complete = false;
     }
 
-    // A lone bound that neither _id nor paging orders walks its keys in order.
-    if(kept.size() == 1 and not bounded and not paged)
+    // A lone contiguous bound that neither _id nor paging orders walks its
+    // keys in order. A sparse $in has no contiguous span; stream its runs.
+    if(kept.size() == 1 and not bounded and not paged and not kept.front().discrete)
         return {query_analysis_secondary(*kept.front().field, *kept.front().keys, backward), complete};
 
     auto terms = std::vector<term>{};

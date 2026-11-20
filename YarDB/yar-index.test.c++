@@ -590,6 +590,113 @@ auto test_set()
             require_eq(fixture.index().count(empty, span), 2u);
         };
 
+        section("APureInBecomesDiscreteRuns") = []
+        {
+            index_fixture fixture{"./index_in_runs.db"s};
+            fixture.add_keys({"status"s, "type"s});
+            fixture.insert(object{{"status"s, "active"s}, {"type"s, "x"s}});
+            fixture.insert(object{{"status"s, "pending"s}, {"type"s, "x"s}});
+            fixture.insert(object{{"status"s, "closed"s}, {"type"s, "y"s}});
+            fixture.insert(object{{"status"s, "active"s}, {"type"s, "y"s}});
+            fixture.insert(object{{"status"s, "archived"s}, {"type"s, "x"s}});
+
+            const auto three = object{
+                {"status"s, object{{"$in"s, object{object::array{object{"active"s}, object{"pending"s}, object{"closed"s}}}}}}};
+            require_container_eq(fixture.walk(three), std::vector<xson::integer_type>{1, 2, 3, 4});
+
+            const auto one = object{
+                {"status"s, object{{"$in"s, object{object::array{object{"pending"s}}}}}}};
+            require_container_eq(fixture.walk(one), std::vector<xson::integer_type>{2});
+
+            const auto none = object{
+                {"status"s, object{{"$in"s, object{object::array{object{"missing"s}, object{"gone"s}}}}}}};
+            require_container_eq(fixture.walk(none), std::vector<xson::integer_type>{});
+
+            const auto empty_list = object{
+                {"status"s, object{{"$in"s, object{object::array{}}}}}};
+            require_container_eq(fixture.walk(empty_list), std::vector<xson::integer_type>{});
+
+            // OData stores membership as a map of indexed values.
+            const auto as_map = object{
+                {"status"s, object{{"$in"s, object{{"0"s, "active"s}, {"1"s, "closed"s}}}}}};
+            require_container_eq(fixture.walk(as_map), std::vector<xson::integer_type>{1, 3, 4});
+
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, three), 4u);
+            require_eq(fixture.index().count(empty, none), 0u);
+            require_eq(fixture.index().count(empty, empty_list), 0u);
+        };
+
+        section("AnInIntersectsAnotherExactBound") = []
+        {
+            index_fixture fixture{"./index_in_intersect.db"s};
+            fixture.add_keys({"status"s, "type"s});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "x"s}});
+            fixture.insert(object{{"status"s, "B"s}, {"type"s, "x"s}});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "y"s}});
+            fixture.insert(object{{"status"s, "C"s}, {"type"s, "x"s}});
+
+            const auto both = object{
+                {"status"s, object{{"$in"s, object{object::array{object{"A"s}, object{"B"s}}}}}},
+                {"type"s, "x"s}};
+            require_container_eq(fixture.walk(both), std::vector<xson::integer_type>{1, 2});
+
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, both), 2u);
+        };
+
+        section("AnInTrimsByIdRange") = []
+        {
+            index_fixture fixture{"./index_in_id.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "A"s}});
+            fixture.insert(object{{"status"s, "B"s}});
+            fixture.insert(object{{"status"s, "A"s}});
+            fixture.insert(object{{"status"s, "B"s}});
+            fixture.insert(object{{"status"s, "C"s}});
+
+            const auto after = object{
+                {"_id"s, object{{"$gt"s, 2ll}}},
+                {"status"s, object{{"$in"s, object{object::array{object{"A"s}, object{"B"s}}}}}}};
+            require_container_eq(fixture.walk(after), std::vector<xson::integer_type>{3, 4});
+
+            auto empty = std::stringstream{};
+            require_eq(fixture.index().count(empty, after), 2u);
+        };
+
+        section("AWideInFallsBackAndStillMatches") = []
+        {
+            index_fixture fixture{"./index_in_wide.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "keep"s}});
+            fixture.insert(object{{"status"s, "other"s}});
+
+            auto members = object::array{};
+            for(auto i = 0; i < 65; ++i)
+                members.push_back(object{"v"s + std::to_string(i)});
+            members.push_back(object{"keep"s});
+
+            const auto wide = object{{"status"s, object{{"$in"s, object{std::move(members)}}}}};
+            // Over the run cap the planner falls back to a loose walk; match()
+            // still keeps the membership correct on count.
+            require_eq(fixture.view_count(wide), 2u);
+            require_eq(fixture.count(wide), 1u);
+        };
+
+        section("AnInOnAnUnindexedFieldScans") = []
+        {
+            index_fixture fixture{"./index_in_unindexed.db"s};
+            fixture.add_keys({"type"s});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "x"s}});
+            fixture.insert(object{{"status"s, "B"s}, {"type"s, "x"s}});
+            fixture.insert(object{{"status"s, "A"s}, {"type"s, "y"s}});
+
+            const auto by_status = object{
+                {"status"s, object{{"$in"s, object{object::array{object{"A"s}}}}}}};
+            require_eq(fixture.count(by_status), 2u);
+            require_eq(fixture.view_count(by_status), 3u);
+        };
+
         section("UndoPutsInsertedMovedAndRemovedPostingsBack") = []
         {
             index_fixture fixture{"./index_posting_undo.db"s};

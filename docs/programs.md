@@ -247,7 +247,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
   - When the filter also names `_id` with `$gt`/`$gte`/`$lt`/`$lte` beside an indexed field, each posting list is trimmed to that `_id` range before the intersection, so the read visits no row outside it. `$orderby=_id` alone, ascending or descending, streams with `$top` like an unordered primary walk, and its `$skiptoken` resumes after the last `_id`
   - Example: `GET /users?$count=true`, `GET /users?$count=true&$filter=age%20gt%2025`
 
-- **`$expand=relatedEntity`** - Nest related documents using the v1 relationship convention: navigation name is singular snake_case; field `{singular}_id` on the source document references `_id` in the plural collection (e.g. `$expand=customer` reads `customer_id` → `customers`). Missing targets nest as `null`. Applied before `$select`. Multiple navigations: comma-separated.
+- **`$expand=relatedEntity`** - Nest related documents using the relationship convention: navigation name is singular snake_case; related collection is the plural. Prefer field `{singular}_id` → related `_id`. Otherwise, for each unique secondary key `U` on the related collection (`PUT`/`PATCH /_db/...` `unique`), field `{singular}_{U}` (e.g. `customer_UID` → `customers.UID`) looks up that unique key. Non-unique secondaries are not used. Missing FK fields leave the document unchanged; a present but unusable FK, or a missing target, nests `null`. Applied before `$select`. Multiple navigations: comma-separated.
 
 - **`$compute`** — project arithmetic aliases before `$filter` / `$select` / paging (OData evaluation order):
   - Example: `GET /lines?$compute=Price mul Qty as LineTotal&$filter=LineTotal gt 10&$select=LineTotal`

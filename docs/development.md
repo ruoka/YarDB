@@ -266,7 +266,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 - **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`)
 - **`$apply` groupby/aggregate**: ✅ shipped — `groupby`/`aggregate`; pipeline `filter(...)/compute(...)/groupby(...)`; methods `sum`/`average`/`min`/`max`
 - **`$compute`**: ✅ shipped — `Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div`); not combinable with `$apply`
-- **Next**: multi-key groupby, `$count` aggregate; deeper `$expand` later (v1 `{singular}_id` is enough for now)
+- **Next**: multi-key groupby, `$count` aggregate; deeper `$expand` later (`{singular}_id` and unique-secondary `{singular}_{UniqueKey}` are enough for now)
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

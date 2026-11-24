@@ -2267,9 +2267,12 @@ export inline auto read_with_parsed_filter(
     return documents;
 }
 
-// Relationship convention (v1): collection names are plural snake_case; a reference
-// field is {singular}_id pointing at the related collection's _id. $expand=singular
-// loads that document and nests it under the singular navigation name.
+// Relationship convention for $expand=singular:
+// - v1 primary: {singular}_id → related collection _id (integer)
+// - unique secondary: else {singular}_{UniqueKey} → a key in engine.unique_keys(related)
+//   (primitive value; non-unique secondaries are never used). Primary wins when
+//   {singular}_id is present. Missing FK fields leave the document unchanged;
+//   a present but unusable FK nests null under the navigation name.
 //
 // Singularize: trailing "ies" → "y"; else strip a single trailing "s" (not "ss").
 // Pluralize: consonant+"y" → "ies"; else append "s".
@@ -2314,34 +2317,14 @@ inline auto parse_expand_navigations(std::string_view expand_value)
         | std::ranges::to<std::vector<std::string>>();
 }
 
-inline void expand_document(xson::object& document, std::string_view navigation, yar::db::engine& engine)
+inline void nest_expanded_document(
+    xson::object& document,
+    std::string_view navigation,
+    std::string_view related_collection,
+    const xson::object& selector,
+    yar::db::engine& engine)
 {
-    const auto ref_field = std::string{navigation} + "_id";
-    if(not document.has(ref_field))
-        return;
-
-    const auto& ref = document[ref_field];
-    if(not ref.is_integer())
-    {
-        document[std::string{navigation}] = nullptr;
-        return;
-    }
-
-    const xson::integer_type related_id = ref;
-    const auto related_collection = pluralize_collection_name(navigation);
-
-    try
-    {
-        validate_collection_name(related_collection);
-    }
-    catch(const std::invalid_argument&)
-    {
-        document[std::string{navigation}] = nullptr;
-        return;
-    }
-
     auto related_docs = xson::object{};
-    const auto selector = xson::object{"_id"s, related_id};
     const auto found = engine.read(related_collection, selector, related_docs);
     if(not found or not related_docs.is_array() or related_docs.get<xson::object::array>().empty())
     {
@@ -2352,7 +2335,70 @@ inline void expand_document(xson::object& document, std::string_view navigation,
     document[std::string{navigation}] = related_docs.get<xson::object::array>()[0];
 }
 
-// Apply $expand using {singular}_id → plural collection _id.
+inline void expand_document(xson::object& document, std::string_view navigation, yar::db::engine& engine)
+{
+    const auto related_collection = pluralize_collection_name(navigation);
+    const auto primary_field = std::string{navigation} + "_id";
+
+    if(document.has(primary_field))
+    {
+        const auto& ref = document[primary_field];
+        if(not ref.is_integer())
+        {
+            document[std::string{navigation}] = nullptr;
+            return;
+        }
+
+        try
+        {
+            validate_collection_name(related_collection);
+        }
+        catch(const std::invalid_argument&)
+        {
+            document[std::string{navigation}] = nullptr;
+            return;
+        }
+
+        const xson::integer_type related_id = ref;
+        nest_expanded_document(
+            document,
+            navigation,
+            related_collection,
+            xson::object{"_id"s, related_id},
+            engine);
+        return;
+    }
+
+    try
+    {
+        validate_collection_name(related_collection);
+    }
+    catch(const std::invalid_argument&)
+    {
+        return;
+    }
+
+    for(const auto& unique_key : engine.unique_keys(related_collection))
+    {
+        const auto ref_field = std::string{navigation} + "_" + unique_key;
+        if(not document.has(ref_field))
+            continue;
+
+        const auto& ref = document[ref_field];
+        if(not ref.has_value() or ref.is_null())
+        {
+            document[std::string{navigation}] = nullptr;
+            return;
+        }
+
+        auto selector = xson::object{};
+        selector[unique_key] = ref;
+        nest_expanded_document(document, navigation, related_collection, selector, engine);
+        return;
+    }
+}
+
+// Apply $expand: {singular}_id → _id, else {singular}_{UniqueKey} → unique secondary.
 inline auto apply_expand(
     const xson::object& documents,
     std::string_view expand_value,

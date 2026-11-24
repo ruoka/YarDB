@@ -16,6 +16,12 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 | **Compound-key count** | An equality on a compound key counts from its posting list, and a read takes the tightest exact secondary bound. |
 | **In-memory indexes** | In-memory indexes are `std::map`, and a write undoes index edits instead of copying `m_index`. |
 
+### Query
+
+| Item | Summary |
+|------|---------|
+| **`$expand` via unique secondary** | Besides `{singular}_id` → related `_id`, `$expand=singular` resolves `{singular}_{UniqueKey}` against a key listed in that collection's `unique` index config (e.g. `customer_UID` → `customers.UID`). Primary wins when `{singular}_id` is present; non-unique secondaries are not used. See [odata.md](odata.md) and [programs.md](programs.md#odata-query-parameters) |
+
 ### HTTP
 
 | Item | Summary |

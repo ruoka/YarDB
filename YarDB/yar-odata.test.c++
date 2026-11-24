@@ -2493,6 +2493,156 @@ auto register_odata_tests()
         };
     };
 
+    scenario("apply_expand nests via unique secondary key, [yardb]") = []
+    {
+        given("Customers with a unique UID and orders with customer_UID") = []
+        {
+            const auto test_file = "./odata_expand_unique_test.db"s;
+
+            when("Expanding customer by unique secondary") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("customers"s, {"UID"s}, {"UID"s}).has_value());
+
+                auto customer = xson::object{{"name"s, "Ada"s}, {"UID"s, "C-9"s}};
+                require_true(engine.create("customers"s, customer).has_value());
+                const auto customer_id = static_cast<xson::integer_type>(customer["_id"s]);
+
+                auto order = xson::object{
+                    {"customer_UID"s, "C-9"s},
+                    {"total"s, 19}
+                };
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(documents, "customer"sv, "orders"s, engine);
+
+                then("Each order with customer_UID nests the matching customer") = [expanded, customer_id, test_file]
+                {
+                    require_true(expanded.is_array());
+                    require_true(expanded.get<xson::object::array>().size() >= 1u);
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc.has("customer"s));
+                    require_true(doc["customer"s].is_object());
+                    check_eq(static_cast<xson::integer_type>(doc["customer"s]["_id"s]), customer_id);
+                    check_eq(static_cast<std::string>(doc["customer"s]["UID"s]), "C-9"s);
+                    check_eq(static_cast<std::string>(doc["customer_UID"s]), "C-9"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("A missing unique secondary target nests null") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("customers"s, {"UID"s}, {"UID"s}).has_value());
+
+                auto order = xson::object{
+                    {"customer_UID"s, "missing"s},
+                    {"total"s, 1}
+                };
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(documents, "customer"sv, "orders"s, engine);
+
+                then("customer is null") = [expanded, test_file]
+                {
+                    require_true(expanded.is_array());
+                    require_true(expanded.get<xson::object::array>().size() >= 1u);
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc.has("customer"s));
+                    require_true(doc["customer"s].is_null());
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("customer_id is preferred over customer_UID") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("customers"s, {"UID"s}, {"UID"s}).has_value());
+
+                auto by_id = xson::object{{"name"s, "ById"s}, {"UID"s, "U-id"s}};
+                require_true(engine.create("customers"s, by_id).has_value());
+                const auto by_id_pk = static_cast<xson::integer_type>(by_id["_id"s]);
+
+                auto by_uid = xson::object{{"name"s, "ByUid"s}, {"UID"s, "U-uid"s}};
+                require_true(engine.create("customers"s, by_uid).has_value());
+
+                auto order = xson::object{
+                    {"customer_id"s, by_id_pk},
+                    {"customer_UID"s, "U-uid"s},
+                    {"total"s, 7}
+                };
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(documents, "customer"sv, "orders"s, engine);
+
+                then("The primary key wins") = [expanded, by_id_pk, test_file]
+                {
+                    require_true(expanded.is_array());
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc.has("customer"s));
+                    require_true(doc["customer"s].is_object());
+                    check_eq(static_cast<xson::integer_type>(doc["customer"s]["_id"s]), by_id_pk);
+                    check_eq(static_cast<std::string>(doc["customer"s]["name"s]), "ById"s);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("A non-unique secondary field is ignored") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("customers"s, {"code"s}).has_value());
+
+                auto customer = xson::object{{"name"s, "Ada"s}, {"code"s, "X1"s}};
+                require_true(engine.create("customers"s, customer).has_value());
+
+                auto order = xson::object{
+                    {"customer_code"s, "X1"s},
+                    {"total"s, 3}
+                };
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(documents, "customer"sv, "orders"s, engine);
+
+                then("No customer navigation is nested") = [expanded, test_file]
+                {
+                    require_true(expanded.is_array());
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc.has("customer_code"s));
+                    require_false(doc.has("customer"s));
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
     scenario("parse_filter bool null and numeric cross-type, [yardb]") = []
     {
         given("Documents with boolean, null, and JSON double fields") = []

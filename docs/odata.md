@@ -15,7 +15,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$select` | Projection; `_id` always included |
 | `$count=true` | Returns a JSON number; works with `$filter` |
 | `$batch` | `POST /$batch` atomicity groups, independent writes, GET reads outside a group, and `dependsOn`; see [programs.md](programs.md#atomic-batch-post-batch) |
-| `$expand` | v1: `{singular}_id` → plural collection `_id` |
+| `$expand` | `{singular}_id` → plural collection `_id`; else `{singular}_{UniqueKey}` → a unique secondary key on that collection |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
 | `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field))`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`. `groupby((field))` returns one row per distinct value of that top-level field |
 
@@ -55,7 +55,7 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 
 | Feature | Example |
 |---------|---------|
-| Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs |
+| Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs (unique-secondary expand via `{singular}_{UniqueKey}` is shipped) |
 | `$search` | `$search=wireless` |
 | `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
 | Richer string/date functions | `indexof`, `year(...)` |

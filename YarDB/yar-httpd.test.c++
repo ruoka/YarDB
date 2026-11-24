@@ -1755,6 +1755,54 @@ auto test_set()
             require_true(found_null);
         };
 
+        section("GET with $expand nests via unique secondary key") = [setup]
+        {
+            auto [idx_status, idx_reason, idx_headers, idx_body] = make_request(
+                setup->port(), "PUT"s, "/_db/accounts"s,
+                R"({"keys":["UID"],"unique":["UID"]})"s
+            );
+            require_eq(idx_status, "200"s);
+
+            auto [c_status, c_reason, c_headers, c_body] = make_request(
+                setup->port(), "POST"s, "/accounts"s,
+                R"({"name":"Ada","UID":"C-9"})"s
+            );
+            require_eq(c_status, "201"s);
+            const auto account = json::parse(c_body);
+            require_true(account.has("_id"s));
+            const auto account_id = static_cast<xson::integer_type>(account["_id"s]);
+
+            auto [o_status, o_reason, o_headers, o_body] = make_request(
+                setup->port(), "POST"s, "/uid_orders"s,
+                R"({"account_UID":"C-9","total":19})"s
+            );
+            require_eq(o_status, "201"s);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/uid_orders?$expand=account"s, ""s
+            );
+
+            require_eq(status, "200"s);
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            require_true(documents.get<object::array>().size() >= 1u);
+
+            auto found_expanded = false;
+            for(const auto& item : documents.get<object::array>())
+            {
+                if(not item.has("account_UID"s))
+                    continue;
+                if(static_cast<string>(item["account_UID"s]) != "C-9"s)
+                    continue;
+                require_true(item.has("account"s));
+                require_true(item["account"s].is_object());
+                require_eq(static_cast<xson::integer_type>(item["account"s]["_id"s]), account_id);
+                require_eq(static_cast<string>(item["account"s]["UID"s]), "C-9"s);
+                found_expanded = true;
+            }
+            require_true(found_expanded);
+        };
+
         section("GET with invalid $filter returns 400 Bad Request") = [setup]
         {
             // Invalid filter expression

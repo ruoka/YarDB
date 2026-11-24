@@ -2364,6 +2364,13 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         const auto queue_append = [&](object document, batch_effect effect, const object* prior = nullptr)
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
+            // A later create or upsert in this group puts the id back. Drop the
+            // delete so it is not appended after the new version; reopen would
+            // otherwise hide the document the group just wrote.
+            std::erase_if(pending_deletes, [&](const appended_delete& item)
+            {
+                return item.collection == request.collection and item.id == id;
+            });
             auto* log = undo.log(request.collection);
             auto& collection_index = undo[request.collection];
             // A negative position until the group is written. -1 stays "no

@@ -2278,6 +2278,128 @@ auto test_set()
             auto gone = object{};
             require_false(reopened.read(collection, object{{"_id"s, id}}, gone));
         };
+
+        section("Group delete then recreate does not append a trailing delete") = []
+        {
+            const auto test_file = "./engine_group_delete_recreate_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "revive"s;
+            auto post_id = xson::integer_type{0};
+            auto put_id = xson::integer_type{0};
+            auto dropped_id = xson::integer_type{0};
+            {
+                auto engine = yar::db::engine{test_file};
+                auto post = object{{"name"s, "old-post"s}};
+                auto put = object{{"name"s, "old-put"s}};
+                auto dropped = object{{"name"s, "gone"s}};
+                require_true(engine.create(collection, post).has_value());
+                require_true(engine.create(collection, put).has_value());
+                require_true(engine.create(collection, dropped).has_value());
+                post_id = post["_id"s];
+                put_id = put["_id"s];
+                dropped_id = dropped["_id"s];
+
+                auto requests = std::vector<yar::db::batch_request>{};
+                auto drop_post = yar::db::batch_request{};
+                drop_post.method = yar::db::batch_method::destroy;
+                drop_post.collection = collection;
+                drop_post.id = post_id;
+                requests.push_back(std::move(drop_post));
+
+                auto recreated = yar::db::batch_request{};
+                recreated.method = yar::db::batch_method::create;
+                recreated.collection = collection;
+                recreated.body = object{{"_id"s, post_id}, {"name"s, "new-post"s}};
+                requests.push_back(std::move(recreated));
+
+                auto drop_put = yar::db::batch_request{};
+                drop_put.method = yar::db::batch_method::destroy;
+                drop_put.collection = collection;
+                drop_put.id = put_id;
+                requests.push_back(std::move(drop_put));
+
+                auto upserted = yar::db::batch_request{};
+                upserted.method = yar::db::batch_method::replace;
+                upserted.collection = collection;
+                upserted.id = put_id;
+                upserted.body = object{{"name"s, "new-put"s}};
+                requests.push_back(std::move(upserted));
+
+                auto drop_only = yar::db::batch_request{};
+                drop_only.method = yar::db::batch_method::destroy;
+                drop_only.collection = collection;
+                drop_only.id = dropped_id;
+                requests.push_back(std::move(drop_only));
+
+                require_true(engine.apply_group(requests).has_value());
+
+                auto post_docs = object{};
+                require_true(engine.read(collection, object{{"_id"s, post_id}}, post_docs));
+                require_eq(static_cast<string>(post_docs[0]["name"s]), "new-post"s);
+                auto put_docs = object{};
+                require_true(engine.read(collection, object{{"_id"s, put_id}}, put_docs));
+                require_eq(static_cast<string>(put_docs[0]["name"s]), "new-put"s);
+                auto gone = object{};
+                require_false(engine.read(collection, object{{"_id"s, dropped_id}}, gone));
+
+                const auto feed = engine.delta(collection, 0);
+                require_true(feed.has_value());
+                auto removed_post = false;
+                auto removed_put = false;
+                auto removed_dropped = false;
+                for(const auto& change : feed->changes)
+                {
+                    if(not change.removed)
+                        continue;
+                    const auto id = static_cast<xson::integer_type>(change.document["_id"s]);
+                    if(id == post_id)
+                        removed_post = true;
+                    if(id == put_id)
+                        removed_put = true;
+                    if(id == dropped_id)
+                        removed_dropped = true;
+                }
+                require_false(removed_post);
+                require_false(removed_put);
+                require_true(removed_dropped);
+            }
+
+            auto saw_delete = false;
+            {
+                using xson::fson::operator >>;
+                auto storage = std::ifstream{test_file, std::ios::binary};
+                while(storage.peek() != std::char_traits<char>::eof())
+                {
+                    auto metadata = yar::db::metadata{};
+                    auto document = object{};
+                    storage >> metadata >> document;
+                    require_true(static_cast<bool>(storage));
+                    if(metadata.status != yar::db::metadata::deleted)
+                        continue;
+                    saw_delete = true;
+                    require_eq(metadata.collection, collection);
+                    require_eq(static_cast<xson::integer_type>(document["_id"s]), dropped_id);
+                }
+            }
+            require_true(saw_delete);
+
+            auto reopened = yar::db::engine{test_file};
+            auto post_docs = object{};
+            require_true(reopened.read(collection, object{{"_id"s, post_id}}, post_docs));
+            require_eq(static_cast<string>(post_docs[0]["name"s]), "new-post"s);
+            auto put_docs = object{};
+            require_true(reopened.read(collection, object{{"_id"s, put_id}}, put_docs));
+            require_eq(static_cast<string>(put_docs[0]["name"s]), "new-put"s);
+            auto gone = object{};
+            require_false(reopened.read(collection, object{{"_id"s, dropped_id}}, gone));
+            require_true(reopened.reindex().has_value());
+            post_docs = object{};
+            require_true(reopened.read(collection, object{{"_id"s, post_id}}, post_docs));
+            require_eq(static_cast<string>(post_docs[0]["name"s]), "new-post"s);
+            put_docs = object{};
+            require_true(reopened.read(collection, object{{"_id"s, put_id}}, put_docs));
+            require_eq(static_cast<string>(put_docs[0]["name"s]), "new-put"s);
+        };
     };
 
     return true;

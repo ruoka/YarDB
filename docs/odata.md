@@ -17,7 +17,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$batch` | `POST /$batch` atomicity groups, independent writes, GET reads outside a group, and `dependsOn`; see [programs.md](programs.md#atomic-batch-post-batch) |
 | `$expand` | `{singular}_id` → plural collection `_id`; else `{singular}_{UniqueKey}` → a unique secondary key on that collection |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
-| `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field))`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`, and `aggregate($count as Alias)`. `groupby((field))` returns one row per distinct value of that top-level field |
+| `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field,...))`, `groupby((field,...),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`, and `aggregate($count as Alias)`. `groupby` returns one row per distinct tuple of those top-level fields, including `groupby((country,status),aggregate(...))` |
 
 ### `$filter`
 
@@ -46,9 +46,7 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 
 ### Near-term (next)
 
-| Feature | Example | Status |
-|---------|---------|--------|
-| Multi-key `$apply` groupby | `groupby((country,status),aggregate(...))` | Planned |
+No items. The next larger query feature is deeper `$expand`, under Later.
 
 ### Later
 
@@ -65,20 +63,22 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 ## Design notes for `$apply`
 
 - Slash-separated transforms outside quotes/parens: `filter(...)/compute(...)/groupby(...)`.
-- `groupby((field))` is supported (OData Data Aggregation 4.0 §3.2.3 and §7.1). The second parameter of `groupby` is optional. Omitted, the result is one object per distinct value of that top-level field, and each object contains only that field. A missing property is one group whose value is `null`. An object or array value is rejected (**422**). One field only; multi-key groupby stays planned. A second transformation after the group list is rejected. `groupby((field),aggregate(...))` still returns the grouping field plus the aggregate alias.
+- `groupby((field,...))` is supported (OData Data Aggregation 4.0 §3.2.3 and §7.1), including several grouping properties: `groupby((country,status))` and `groupby((country,status),aggregate(...))`. The second parameter of `groupby` is optional. Omitted, the result is one object per distinct tuple, and each object contains only those fields. A missing property is `null` in that column, so a missing `country` with `status` `active` is a different group from a present country; JSON `null` joins that same group. An object or array value in any grouping property is rejected (**422**). Names are top-level fields only. An empty name, a repeated name, or a transformation after the group list (including another pipeline step after `groupby`) is rejected. With an aggregate, each row is the grouping fields plus the aggregate alias.
 - Sibling query `$filter` runs **after** `$apply` (OData Aggregation evaluation order), so aggregate aliases like `Total` are filterable. Pre-aggregation narrowing uses a pipeline `filter(...)` step.
 - `compute(...)` inside `$apply` uses the same arithmetic as query `$compute`.
 - Query `$compute` cannot be combined with `$apply` (**422**) — use `compute(...)` in the pipeline.
 - `$apply` does **not** compose with `$expand`, `$select`, `$orderby`, `$top`, `$skip`, or `$count` (rejected with **422**).
-- Response for aggregate/groupby is a JSON **array** of group objects, e.g. `[{"status":"active","Total":42},…]` or `[{"type":"sss.match"},{"type":"sss.settle"}]`.
+- Response for aggregate/groupby is a JSON **array** of group objects, e.g. `[{"status":"active","Total":42},…]`, `[{"country":"FI","status":"active","Total":15}]`, or `[{"type":"sss.match"},{"type":"sss.settle"}]`.
 - Group keys and compute operands are top-level fields only (no `Customer/Country` yet).
 - Aggregate methods: `sum`, `average`, `min`, `max`, and `$count`. Compute ops: `add`, `sub`, `mul`, `div`.
-- `$count` counts instances, not a property: `aggregate($count as Total)` and `groupby((field),aggregate($count as Count))`. Every input row counts, including a row that omits a property or holds a non-numeric value. An empty whole-set aggregate is `[{"Total":0}]`. A groupby of an empty set is `[]`. `amount with $count` is not this form.
+- `$count` counts instances, not a property: `aggregate($count as Total)` and `groupby((country,status),aggregate($count as Count))`. Every input row counts, including a row that omits a property or holds a non-numeric value. An empty whole-set aggregate is `[{"Total":0}]`. A groupby of an empty set is `[]`. `amount with $count` is not this form.
 - Compute/aggregate aliases cannot be `_id` (**422**). `filter(...)` / `compute(...)` / `aggregate(...)` / `groupby(...)` require a balanced closing `)` with no trailing junk. `aggregate($count)` without `as <alias>` is **422**.
 
 ```bash
 curl -s "http://127.0.0.1:2112/tasks?\$apply=groupby((type))"
 curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((status),aggregate(amount%20with%20sum%20as%20Total))"
+curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((country,status),aggregate(amount%20with%20sum%20as%20Total))"
+curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((country,status))"
 curl -s "http://127.0.0.1:2112/orders?\$apply=aggregate(\$count%20as%20Total)"
 curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((status),aggregate(\$count%20as%20Count))"
 curl -s "http://127.0.0.1:2112/orders?\$apply=filter(status%20eq%20'active')/groupby((country),aggregate(amount%20with%20sum%20as%20Total))"

@@ -2462,6 +2462,245 @@ auto test_set()
             require_eq(counts["pending"s], 1);
         };
 
+        section("GET groupby((country,status)) sums each pair") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairorders"s,
+                    R"({"country":"FI","status":"active","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairorders"s,
+                    R"({"country":"FI","status":"active","amount":5})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairorders"s,
+                    R"({"country":"FI","status":"pending","amount":7})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairorders"s,
+                    R"({"country":"SE","status":"active","amount":3})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairorders?$apply=groupby((country,status),aggregate(amount%20with%20sum%20as%20Total))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto totals = std::map<string, integer_type>{};
+            for(const auto& row : rows.get<object::array>())
+            {
+                require_false(row.has("_id"s));
+                const auto key = row["country"s].get<string>() + "|"s + row["status"s].get<string>();
+                totals[key] = static_cast<integer_type>(row["Total"s]);
+            }
+            require_eq(totals.size(), 3u);
+            require_eq(totals["FI|active"s], 15);
+            require_eq(totals["FI|pending"s], 7);
+            require_eq(totals["SE|active"s], 3);
+        };
+
+        section("GET groupby((country,status)) returns each distinct pair once") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairs"s,
+                    R"({"country":"FI","status":"active","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairs"s,
+                    R"({"country":"FI","status":"active","amount":1})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairs"s,
+                    R"({"country":"SE","status":"pending"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairs?$apply=groupby((country,status))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto seen = std::map<string, int>{};
+            for(const auto& row : rows.get<object::array>())
+            {
+                require_eq(row.size(), 2u);
+                require_false(row.has("_id"s));
+                require_false(row.has("amount"s));
+                const auto key = row["country"s].get<string>() + "|"s + row["status"s].get<string>();
+                seen[key] += 1;
+            }
+            require_eq(seen.size(), 2u);
+            require_eq(seen["FI|active"s], 1);
+            require_eq(seen["SE|pending"s], 1);
+        };
+
+        section("GET multi-key groupby $count keeps a null column") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/paircounts"s,
+                    R"({"country":"FI","status":"active"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/paircounts"s,
+                    R"({"country":"FI","status":"active","amount":"n/a"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/paircounts"s,
+                    R"({"status":"active"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/paircounts?$apply=groupby((country,status),aggregate($count%20as%20Count))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto counts = std::map<string, integer_type>{};
+            for(const auto& row : rows.get<object::array>())
+            {
+                const auto country = row["country"s].is_null()
+                    ? "null"s
+                    : row["country"s].get<string>();
+                counts[country + "|"s + row["status"s].get<string>()] =
+                    static_cast<integer_type>(row["Count"s]);
+            }
+            require_eq(counts["FI|active"s], 2);
+            require_eq(counts["null|active"s], 1);
+        };
+
+        section("GET multi-key groupby on an empty collection returns an empty array") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairempty?$apply=groupby((country,status),aggregate($count%20as%20Count))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 0u);
+        };
+
+        section("GET multi-key groupby rejects an object key") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairobjects"s,
+                    R"({"country":"FI","status":{"code":"active"},"amount":10})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairobjects?$apply=groupby((country,status),aggregate(amount%20with%20sum%20as%20Total))"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().contains("primitive"s));
+        };
+
+        section("GET multi-key groupby rejects alias _id") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairorders?$apply=groupby((country,status),aggregate($count%20as%20_id))"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().contains("_id"s));
+        };
+
+        section("GET multi-key groupby rejects a transformation after the group list") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairorders?$apply=groupby((country,status),filter(status%20eq%20'active'))"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().contains("transformation"s));
+
+            auto [step_status, step_reason, step_headers, step_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairorders?$apply=groupby((country,status))/aggregate(amount%20with%20sum%20as%20Total)"s,
+                ""s);
+            require_eq(step_status, "422"s);
+            (void)step_reason;
+            (void)step_headers;
+            auto step_error = json::parse(step_body);
+            require_true(step_error["message"s].get<string>().contains("final"s));
+        };
+
+        section("GET filter(...)/groupby((country,status)) applies the pipeline filter") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairfilter"s,
+                    R"({"status":"active","country":"FI","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairfilter"s,
+                    R"({"status":"pending","country":"FI","amount":50})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/pairfilter"s,
+                    R"({"status":"active","country":"SE","amount":3})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/pairfilter?$apply=filter(status%20eq%20'active')/groupby((country,status),aggregate(amount%20with%20sum%20as%20Total))"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto totals = std::map<string, integer_type>{};
+            for(const auto& row : rows.get<object::array>())
+                totals[row["country"s].get<string>()] = static_cast<integer_type>(row["Total"s]);
+            require_eq(totals.size(), 2u);
+            require_eq(totals["FI"s], 10);
+            require_eq(totals["SE"s], 3);
+        };
+
         section("GET aggregate($count as Total) on an empty collection is 0") = [setup]
         {
             auto [status, reason, headers, body] = make_request(

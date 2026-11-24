@@ -2844,10 +2844,13 @@ export inline void omit_rows_through_keyset(
 //   filter(<$filter-expr>)/groupby((field))
 //   compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)
 //   groupby((status),aggregate(amount with sum as Total))
+//   groupby((status),aggregate($count as Count))
 //   groupby((type))   // distinct values; each row contains only that field
 //   aggregate(amount with sum as Total)
+//   aggregate($count as Total)
 // Standalone query option: $compute=Price mul Qty as LineTotal[, ...]
-// Methods: sum, average, min, max. Arithmetic: add, sub, mul, div.
+// Methods: sum, average, min, max, and $count (instance count, no source
+// property). Arithmetic: add, sub, mul, div.
 // Top-level fields only. The aggregate after groupby is optional
 // (OData Data Aggregation 4.0 §3.2.3 / §7.1): one row per distinct value.
 
@@ -2856,7 +2859,8 @@ export enum class aggregate_method
     sum,
     average,
     min,
-    max
+    max,
+    count
 };
 
 export enum class compute_op
@@ -2869,7 +2873,7 @@ export enum class compute_op
 
 export struct aggregate_clause
 {
-    std::string field;
+    std::string field; // empty when method is count ($count has no source property)
     aggregate_method method;
     std::string alias;
 };
@@ -3017,7 +3021,26 @@ inline aggregate_method parse_aggregate_method(std::string_view token)
         return aggregate_method::max;
     throw std::invalid_argument{
         "Unsupported aggregate method '"s + std::string{token}
-        + "' (v1 supports sum, average, min, max)"s};
+        + "' (v1 supports sum, average, min, max; instance counts use aggregate($count as Alias))"s};
+}
+
+// `aggregate($count as Alias)` counts instances. It is not `with <method>`.
+// `as` with nothing after it is an empty alias, same as other aggregates.
+inline aggregate_clause parse_count_aggregate(std::string_view inner)
+{
+    constexpr auto count_tok = "$count"sv;
+    constexpr auto as_word = "as"sv;
+    constexpr auto as_prefix = "as "sv;
+    auto rest = utils::trim(inner.substr(count_tok.size()));
+    if(rest == as_word or rest.starts_with(as_prefix))
+    {
+        auto alias = rest == as_word
+            ? std::string_view{}
+            : utils::trim(rest.substr(as_prefix.size()));
+        validate_apply_alias(alias, "$apply aggregate alias");
+        return aggregate_clause{""s, aggregate_method::count, std::string{alias}};
+    }
+    throw std::invalid_argument{"aggregate($count) requires '$count as <alias>'"};
 }
 
 export inline aggregate_clause parse_aggregate_clause(std::string_view expr)
@@ -3027,6 +3050,13 @@ export inline aggregate_clause parse_aggregate_clause(std::string_view expr)
     if(not text.starts_with(prefix))
         throw std::invalid_argument{"Invalid aggregate(...) expression"};
     auto inner = extract_apply_function_args(text, prefix);
+    constexpr auto count_tok = "$count"sv;
+    // `$count` is a keyword, so `$countx` stays a field name and takes the
+    // `with <method>` path (and fails there).
+    if(inner.starts_with(count_tok)
+        and (inner.size() == count_tok.size() or inner[count_tok.size()] == ' '))
+        return parse_count_aggregate(inner);
+
     constexpr auto with_tok = " with "sv;
     constexpr auto as_tok = " as "sv;
     const auto with_pos = inner.find(with_tok);
@@ -3383,6 +3413,13 @@ inline void accumulate_number(aggregate_acc& acc, double value)
     ++acc.count;
 }
 
+// `$count` counts instances, not numeric property values.
+inline void accumulate_count(aggregate_acc& acc)
+{
+    acc.any = true;
+    ++acc.count;
+}
+
 inline bool accumulate_value(aggregate_acc& acc, const xson::object& value)
 {
     if(value.is_integer())
@@ -3400,6 +3437,14 @@ inline bool accumulate_value(aggregate_acc& acc, const xson::object& value)
 
 inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method method)
 {
+    // An empty input is 0, not null. sum/min/max/average stay null.
+    if(method == aggregate_method::count)
+    {
+        auto result = xson::object{};
+        result = static_cast<xson::integer_type>(acc.count);
+        return result;
+    }
+
     if(not acc.any)
     {
         auto null_value = xson::object{};
@@ -3413,6 +3458,9 @@ inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method 
     {
         switch(method)
         {
+            case aggregate_method::count:
+                result = static_cast<xson::integer_type>(acc.count);
+                return result;
             case aggregate_method::sum:
                 if(acc.int_sum_ok)
                 {
@@ -3457,6 +3505,7 @@ inline xson::object finish_aggregate(const aggregate_acc& acc, aggregate_method 
     {
         switch(method)
         {
+            case aggregate_method::count: return static_cast<double>(acc.count);
             case aggregate_method::sum: return acc.sum;
             case aggregate_method::average: return acc.sum / static_cast<double>(acc.count);
             case aggregate_method::min: return acc.min;
@@ -3510,19 +3559,27 @@ export inline xson::object apply_aggregation(const xson::object& documents, cons
         return ins->second;
     };
 
+    auto accumulate_doc = [&](group_state& state, const xson::object& doc)
+    {
+        for(auto i = std::size_t{0}; i < query.aggregates.size(); ++i)
+        {
+            const auto& clause = query.aggregates[i];
+            if(clause.method == aggregate_method::count)
+            {
+                accumulate_count(state.accs[i]);
+                continue;
+            }
+            if(not doc.has(clause.field))
+                continue;
+            std::ignore = accumulate_value(state.accs[i], doc[clause.field]);
+        }
+    };
+
     if(query.group_fields.empty())
     {
         auto& state = ensure_group(""s, xson::object{});
         for(const auto& doc : items)
-        {
-            for(auto i = std::size_t{0}; i < query.aggregates.size(); ++i)
-            {
-                const auto& clause = query.aggregates[i];
-                if(not doc.has(clause.field))
-                    continue;
-                std::ignore = accumulate_value(state.accs[i], doc[clause.field]);
-            }
-        }
+            accumulate_doc(state, doc);
     }
     else
     {
@@ -3531,13 +3588,7 @@ export inline xson::object apply_aggregation(const xson::object& documents, cons
         {
             const auto key_value = group_key_value(doc, gfield);
             auto& state = ensure_group(group_key_string(key_value), key_value);
-            for(auto i = std::size_t{0}; i < query.aggregates.size(); ++i)
-            {
-                const auto& clause = query.aggregates[i];
-                if(not doc.has(clause.field))
-                    continue;
-                std::ignore = accumulate_value(state.accs[i], doc[clause.field]);
-            }
+            accumulate_doc(state, doc);
         }
     }
 

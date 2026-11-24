@@ -2391,6 +2391,122 @@ auto test_set()
             auto error = json::parse(body);
             require_true(error["message"s].get<string>().contains("$compute"s));
         };
+
+        section("GET aggregate($count as Total) counts every document") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/headcounts"s,
+                    R"({"status":"active","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/headcounts"s,
+                    R"({"status":"active"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/headcounts"s,
+                    R"({"status":"pending","amount":"n/a"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/headcounts?$apply=aggregate($count%20as%20Total)"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 1u);
+            require_true(rows.get<object::array>()[0]["Total"s].is_integer());
+            require_eq(
+                static_cast<integer_type>(rows.get<object::array>()[0]["Total"s]),
+                3);
+        };
+
+        section("GET groupby aggregate($count as Count) counts each group") = [setup]
+        {
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/statuscounts"s,
+                    R"({"status":"active","amount":10})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/statuscounts"s,
+                    R"({"status":"active"})"s)),
+                "201"s);
+            require_eq(
+                std::get<0>(make_request(
+                    setup->port(), "POST"s, "/statuscounts"s,
+                    R"({"status":"pending","amount":"n/a"})"s)),
+                "201"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/statuscounts?$apply=groupby((status),aggregate($count%20as%20Count))"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            auto counts = std::map<string, integer_type>{};
+            for(const auto& row : rows.get<object::array>())
+                counts[row["status"s].get<string>()] = static_cast<integer_type>(row["Count"s]);
+            require_eq(counts["active"s], 2);
+            require_eq(counts["pending"s], 1);
+        };
+
+        section("GET aggregate($count as Total) on an empty collection is 0") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/emptycounts?$apply=aggregate($count%20as%20Total)"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto rows = json::parse(body);
+            require_true(rows.is_array());
+            require_eq(rows.get<object::array>().size(), 1u);
+            require_eq(
+                static_cast<integer_type>(rows.get<object::array>()[0]["Total"s]),
+                0);
+        };
+
+        section("GET aggregate($count as _id) is rejected") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/headcounts?$apply=aggregate($count%20as%20_id)"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().contains("_id"s));
+        };
+
+        section("GET aggregate($count) without an alias is rejected") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/headcounts?$apply=aggregate($count)"s,
+                ""s);
+            require_eq(status, "422"s);
+            (void)reason;
+            (void)headers;
+            auto error = json::parse(body);
+            require_true(error["message"s].get<string>().contains("$count"s));
+        };
     };
 
     test_case("PUT and PATCH /_db/{collection_name} - Add secondary indexes, [yardb]") = []

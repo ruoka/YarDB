@@ -19,7 +19,7 @@ Today each open database file still has a single writer (exclusive `.pid` lock).
 YarDB is a C++23 application that implements:
 
 - **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
-- **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, and `$count`; `$expand` is parsed but awaits a relationship model
+- **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count`, and `$expand` (`{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` when that key is unique)
 - **MCP server**: Native HTTP+SSE MCP on `yardb` (`GET /_sse`, via `http::mcp` in net4cpp). Python `tools/yardb_mcp*.py` kept as reference/oracle
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control

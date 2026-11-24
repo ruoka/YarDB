@@ -2078,6 +2078,208 @@ auto test_set()
         require_eq(documents.size(), 1u);
     };
 
+    test_case("appended delete records and delta cursor, [yardb]") = []
+    {
+        section("Destroy appends a delete record and leaves earlier bytes") = []
+        {
+            const auto test_file = "./engine_append_delete_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "notes"s;
+            auto prefix = ""s;
+            auto id = xson::integer_type{0};
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index(collection, {"name"s}, {"name"s}).has_value());
+                auto doc = object{{"name"s, "ada"s}};
+                require_true(engine.create(collection, doc).has_value());
+                id = doc["_id"s];
+                const auto size_after_create = std::filesystem::file_size(test_file);
+                prefix.resize(static_cast<std::size_t>(size_after_create));
+                auto before = std::ifstream{test_file, std::ios::binary};
+                before.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+                require_true(static_cast<bool>(before));
+
+                require_true(engine.destroy(collection, object{{"_id"s, id}}).has_value());
+                auto live = object{};
+                require_false(engine.read(collection, object{}, live));
+                require_true(std::filesystem::file_size(test_file) > size_after_create);
+
+                auto kept = ""s;
+                kept.resize(prefix.size());
+                auto after = std::ifstream{test_file, std::ios::binary};
+                after.read(kept.data(), static_cast<std::streamsize>(kept.size()));
+                require_eq(kept, prefix);
+
+                const auto feed = engine.delta(collection, 0);
+                require_true(feed.has_value());
+                require_eq(feed->changes.size(), 2u);
+                require_false(feed->changes[0].removed);
+                require_eq(static_cast<string>(feed->changes[0].document["name"s]), "ada"s);
+                require_true(feed->changes[1].removed);
+                require_eq(static_cast<xson::integer_type>(feed->changes[1].document["_id"s]), id);
+
+                const auto again = engine.delta(collection, feed->token);
+                require_true(again.has_value());
+                require_true(again->changes.empty());
+                require_eq(again->token, feed->token);
+
+                const auto unknown = engine.delta(collection, 1);
+                require_false(unknown.has_value());
+                require_eq(unknown.error().code, yar::db::db_error_code::invalid_argument);
+
+                auto next = object{{"name"s, "bea"s}};
+                require_true(engine.create(collection, next).has_value());
+                const auto third = engine.delta(collection, feed->token);
+                require_true(third.has_value());
+                require_eq(third->changes.size(), 1u);
+                require_false(third->changes[0].removed);
+                require_eq(static_cast<string>(third->changes[0].document["name"s]), "bea"s);
+            }
+
+            auto saw_delete = false;
+            auto saw_created = false;
+            {
+                using xson::fson::operator >>;
+                auto storage = std::ifstream{test_file, std::ios::binary};
+                while(storage.peek() != std::char_traits<char>::eof())
+                {
+                    auto metadata = yar::db::metadata{};
+                    auto document = object{};
+                    storage >> metadata >> document;
+                    require_true(static_cast<bool>(storage));
+                    if(metadata.collection == collection
+                        and metadata.status == yar::db::metadata::created
+                        and document.has("name"s)
+                        and static_cast<string>(document["name"s]) == "ada"s)
+                        saw_created = true;
+                    if(metadata.status == yar::db::metadata::deleted)
+                    {
+                        saw_delete = true;
+                        require_eq(metadata.collection, collection);
+                        require_eq(static_cast<xson::integer_type>(document["_id"s]), id);
+                        require_false(document.has("name"s));
+                    }
+                }
+            }
+            require_true(saw_created);
+            require_true(saw_delete);
+
+            auto reopened = yar::db::engine{test_file};
+            auto hidden = object{};
+            require_false(reopened.read(collection, object{{"_id"s, id}}, hidden));
+            require_false(reopened.read(collection, object{{"name"s, "ada"s}}, hidden));
+            auto again = object{{"name"s, "ada"s}};
+            require_true(reopened.create(collection, again).has_value());
+            require_true(reopened.reindex().has_value());
+            auto visible = object{};
+            require_true(reopened.read(collection, object{{"name"s, "ada"s}}, visible));
+            require_eq(visible.size(), 1u);
+        };
+
+        section("Delta since a token sees an update and a delete") = []
+        {
+            const auto test_file = "./engine_delta_since_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "feed"s;
+            auto engine = yar::db::engine{test_file};
+            auto first = object{{"name"s, "v1"s}};
+            require_true(engine.create(collection, first).has_value());
+            const auto id = static_cast<xson::integer_type>(first["_id"s]);
+            const auto start = engine.delta(collection, 0);
+            require_true(start.has_value());
+            require_eq(start->changes.size(), 1u);
+
+            require_true(engine.update(
+                collection,
+                object{{"_id"s, id}},
+                object{{"name"s, "v2"s}}).has_value());
+            require_true(engine.destroy(collection, object{{"_id"s, id}}).has_value());
+
+            const auto feed = engine.delta(collection, start->token);
+            require_true(feed.has_value());
+            require_eq(feed->changes.size(), 2u);
+            require_false(feed->changes[0].removed);
+            require_eq(static_cast<string>(feed->changes[0].document["name"s]), "v2"s);
+            require_eq(static_cast<xson::integer_type>(feed->changes[0].document["_id"s]), id);
+            require_true(feed->changes[1].removed);
+            require_eq(static_cast<xson::integer_type>(feed->changes[1].document["_id"s]), id);
+
+            const auto from_start = engine.delta(collection, 0);
+            require_true(from_start.has_value());
+            require_eq(from_start->changes.size(), 2u);
+            require_eq(static_cast<string>(from_start->changes[0].document["name"s]), "v2"s);
+            require_true(from_start->changes[1].removed);
+
+            auto live = object{};
+            require_false(engine.read(collection, object{}, live));
+            const auto past_end = engine.delta(collection, feed->token + 1);
+            require_false(past_end.has_value());
+            require_eq(past_end.error().code, yar::db::db_error_code::invalid_argument);
+        };
+
+        section("Group delete appends a record and does not rewrite the document") = []
+        {
+            const auto test_file = "./engine_group_append_delete_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "grouped"s;
+            auto id = xson::integer_type{0};
+            auto prefix = ""s;
+            {
+                auto engine = yar::db::engine{test_file};
+                auto alice = object{{"name"s, "alice"s}};
+                require_true(engine.create(collection, alice).has_value());
+                id = alice["_id"s];
+                const auto size_after_create = std::filesystem::file_size(test_file);
+                prefix.resize(static_cast<std::size_t>(size_after_create));
+                auto before = std::ifstream{test_file, std::ios::binary};
+                before.read(prefix.data(), static_cast<std::streamsize>(prefix.size()));
+
+                auto requests = std::vector<yar::db::batch_request>{};
+                auto drop = yar::db::batch_request{};
+                drop.method = yar::db::batch_method::destroy;
+                drop.collection = collection;
+                drop.id = id;
+                requests.push_back(std::move(drop));
+                require_true(engine.apply_group(requests).has_value());
+
+                auto kept = ""s;
+                kept.resize(prefix.size());
+                auto after = std::ifstream{test_file, std::ios::binary};
+                after.read(kept.data(), static_cast<std::streamsize>(kept.size()));
+                require_eq(kept, prefix);
+
+                auto gone = object{};
+                require_false(engine.read(collection, object{{"_id"s, id}}, gone));
+            }
+
+            auto saw_delete = false;
+            {
+                using xson::fson::operator >>;
+                auto storage = std::ifstream{test_file, std::ios::binary};
+                while(storage.peek() != std::char_traits<char>::eof())
+                {
+                    auto metadata = yar::db::metadata{};
+                    auto document = object{};
+                    storage >> metadata >> document;
+                    require_true(static_cast<bool>(storage));
+                    if(metadata.collection == collection and metadata.status == yar::db::metadata::created)
+                        require_eq(static_cast<string>(document["name"s]), "alice"s);
+                    if(metadata.status == yar::db::metadata::deleted)
+                    {
+                        saw_delete = true;
+                        require_eq(metadata.collection, collection);
+                        require_eq(static_cast<xson::integer_type>(document["_id"s]), id);
+                    }
+                }
+            }
+            require_true(saw_delete);
+
+            auto reopened = yar::db::engine{test_file};
+            auto gone = object{};
+            require_false(reopened.read(collection, object{{"_id"s, id}}, gone));
+        };
+    };
+
     return true;
 }
 

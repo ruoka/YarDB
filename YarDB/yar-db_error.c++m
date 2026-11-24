@@ -16,7 +16,8 @@ enum class db_error_code
     corrupt_storage,
     precondition_failed,
     conflict,
-    not_found
+    not_found,
+    invalid_argument
 };
 
 enum class db_operation
@@ -27,7 +28,8 @@ enum class db_operation
     replace,
     index,
     reindex,
-    batch
+    batch,
+    read
 };
 
 struct db_error

@@ -260,8 +260,10 @@ YarDB implements OData-compliant query parameters for advanced querying:
     - `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))`
     - `GET /orders?$apply=filter(status eq 'active')/groupby((country),aggregate(amount with sum as Total))`
     - `GET /lines?$apply=compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)`
+    - `GET /orders?$apply=aggregate($count as Total)`
+    - `GET /orders?$apply=groupby((status),aggregate($count as Count))`
   - Steps: `filter(...)`, `compute(...)`, `groupby((field),aggregate(...))`, `aggregate(...)`
-  - Aggregate methods: `sum`, `average`, `min`, `max`
+  - Aggregate methods: `sum`, `average`, `min`, `max`, and `$count` (`aggregate($count as Alias)` counts every instance; an empty set is `0`)
   - Optional sibling `$filter` runs after `$apply` (aggregate aliases are visible); pre-aggregation narrowing uses pipeline `filter(...)`
   - Not combined with `$top` / `$skip` / `$orderby` / `$select` / `$expand` / `$count` / `$compute` (422)
   - Full supported-vs-pipeline list: [odata.md](odata.md)

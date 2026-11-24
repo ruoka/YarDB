@@ -3356,6 +3356,203 @@ auto register_odata_tests()
                 };
             };
         };
+
+        given("aggregate($count as Alias)") = []
+        {
+            when("Parsing a whole-set $count") = []
+            {
+                const auto pipeline = parse_apply("aggregate($count as Total)"sv);
+
+                then("The clause is a count with no source field") = [pipeline]
+                {
+                    require_eq(pipeline.steps.size(), 1u);
+                    const auto& query = pipeline.steps[0].aggregate;
+                    require_true(query.group_fields.empty());
+                    require_eq(query.aggregates.size(), 1u);
+                    require_true(query.aggregates[0].field.empty());
+                    require_eq(query.aggregates[0].alias, "Total"s);
+                    require_eq(
+                        static_cast<int>(query.aggregates[0].method),
+                        static_cast<int>(aggregate_method::count));
+                };
+            };
+
+            when("Parsing groupby((status),aggregate($count as Count))") = []
+            {
+                const auto pipeline = parse_apply(
+                    "groupby((status),aggregate($count as Count))"sv);
+
+                then("The group field and count alias are extracted") = [pipeline]
+                {
+                    const auto& query = pipeline.steps[0].aggregate;
+                    require_eq(query.group_fields.size(), 1u);
+                    require_eq(query.group_fields[0], "status"s);
+                    require_eq(query.aggregates.size(), 1u);
+                    require_true(query.aggregates[0].field.empty());
+                    require_eq(query.aggregates[0].alias, "Count"s);
+                    require_eq(
+                        static_cast<int>(query.aggregates[0].method),
+                        static_cast<int>(aggregate_method::count));
+                };
+            };
+
+            when("Counting every instance, including rows sum would skip") = []
+            {
+                auto null_amount = object{{"status"s, "pending"s}};
+                null_amount["amount"s] = nullptr;
+                auto docs = object{object::array{
+                    object{{"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"status"s, "active"s}},
+                    object{{"status"s, "pending"s}, {"amount"s, "n/a"s}},
+                    null_amount,
+                    object{{"name"s, "bare"s}},
+                }};
+                const auto pipeline = parse_apply("aggregate($count as Total)"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("Total is the number of input rows") = [result]
+                {
+                    require_true(result.is_array());
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_true(rows[0]["Total"s].is_integer());
+                    require_eq(static_cast<integer_type>(rows[0]["Total"s]), 5);
+                };
+            };
+
+            when("Grouping by status") = []
+            {
+                auto docs = object{object::array{
+                    object{{"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"status"s, "active"s}},
+                    object{{"status"s, "pending"s}, {"amount"s, "n/a"s}},
+                    object{{"name"s, "bare"s}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((status),aggregate($count as Count))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("Each group counts its instances, and a missing key is null") = [result]
+                {
+                    require_true(result.is_array());
+                    auto counts = std::map<string, integer_type>{};
+                    auto nulls = integer_type{0};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        require_true(row["Count"s].is_integer());
+                        if(row["status"s].is_null())
+                            nulls += static_cast<integer_type>(row["Count"s]);
+                        else
+                            counts[row["status"s].get<string>()] =
+                                static_cast<integer_type>(row["Count"s]);
+                    }
+                    require_eq(counts["active"s], 2);
+                    require_eq(counts["pending"s], 1);
+                    require_eq(nulls, 1);
+                };
+            };
+
+            when("The input set is empty") = []
+            {
+                auto docs = object{object::array{}};
+                const auto whole = parse_apply("aggregate($count as Total)"sv);
+                const auto grouped = parse_apply(
+                    "groupby((status),aggregate($count as Count))"sv);
+                const auto whole_result = apply_aggregation(docs, whole.steps[0].aggregate);
+                const auto grouped_result = apply_aggregation(docs, grouped.steps[0].aggregate);
+
+                then("Whole-set $count is 0 and groupby has no rows") = [=]
+                {
+                    const auto& rows = whole_result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_true(rows[0]["Total"s].is_integer());
+                    require_eq(static_cast<integer_type>(rows[0]["Total"s]), 0);
+                    require_eq(grouped_result.get<object::array>().size(), 0u);
+                };
+            };
+
+            when("A pipeline filter narrows the set first") = []
+            {
+                auto docs = object{object::array{
+                    object{{"status"s, "active"s}},
+                    object{{"status"s, "active"s}},
+                    object{{"status"s, "pending"s}},
+                }};
+                const auto pipeline = parse_apply(
+                    "filter(status eq 'active')/aggregate($count as Active)"sv);
+                const auto result = execute_apply_pipeline(docs, pipeline);
+
+                then("Only the filtered rows are counted") = [result]
+                {
+                    const auto& rows = result.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    require_eq(static_cast<integer_type>(rows[0]["Active"s]), 2);
+                };
+            };
+
+            when("The alias is _id or the syntax is incomplete") = []
+            {
+                then("parse_apply rejects $count as _id") = []
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_apply("aggregate($count as _id)"sv);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains("_id"s));
+                    }
+                    require_true(threw);
+                };
+
+                then("parse_apply rejects aggregate($count) without an alias") = []
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_apply("aggregate($count)"sv);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains("$count as"s));
+                    }
+                    require_true(threw);
+                };
+
+                then("parse_apply rejects an empty $count alias") = []
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_apply("aggregate($count as)"sv);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains("empty"s));
+                    }
+                    require_true(threw);
+                };
+
+                then("parse_apply rejects $count used as a with-method") = []
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_apply("aggregate(amount with $count as Total)"sv);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains("Unsupported"s));
+                    }
+                    require_true(threw);
+                };
+            };
+        };
     };
 
     scenario("any matches an element inside an array, [yardb]") = []

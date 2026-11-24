@@ -20,6 +20,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **`$apply` `$count` aggregate** | `GET /orders?$apply=aggregate($count as Total)` and `groupby((status),aggregate($count as Count))` count instances, including rows with no numeric field. An empty set is `[{"Total":0}]`. The alias cannot be `_id`; bad syntax is 422. See [odata.md](odata.md) |
 | **`$expand` via unique secondary** | Besides `{singular}_id` → related `_id`, `$expand=singular` resolves `{singular}_{UniqueKey}` against a key listed in that collection's `unique` index config (e.g. `customer_UID` → `customers.UID`). Primary wins when `{singular}_id` is present; non-unique secondaries are not used. See [odata.md](odata.md) and [programs.md](programs.md#odata-query-parameters) |
 
 ### HTTP

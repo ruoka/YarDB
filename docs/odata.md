@@ -17,7 +17,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$batch` | `POST /$batch` atomicity groups, independent writes, GET reads outside a group, and `dependsOn`; see [programs.md](programs.md#atomic-batch-post-batch) |
 | `$expand` | `{singular}_id` → plural collection `_id`; else `{singular}_{UniqueKey}` → a unique secondary key on that collection |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
-| `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field))`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`. `groupby((field))` returns one row per distinct value of that top-level field |
+| `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field))`, `groupby((field),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`, and `aggregate($count as Alias)`. `groupby((field))` returns one row per distinct value of that top-level field |
 
 ### `$filter`
 
@@ -49,7 +49,6 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 | Feature | Example | Status |
 |---------|---------|--------|
 | Multi-key `$apply` groupby | `groupby((country,status),aggregate(...))` | Planned |
-| `$count` aggregate | `aggregate($count as Total)` | Planned |
 
 ### Later
 
@@ -73,12 +72,15 @@ Tracked here and in [development.md](development.md#development-roadmap). Order 
 - `$apply` does **not** compose with `$expand`, `$select`, `$orderby`, `$top`, `$skip`, or `$count` (rejected with **422**).
 - Response for aggregate/groupby is a JSON **array** of group objects, e.g. `[{"status":"active","Total":42},…]` or `[{"type":"sss.match"},{"type":"sss.settle"}]`.
 - Group keys and compute operands are top-level fields only (no `Customer/Country` yet).
-- Aggregate methods: `sum`, `average`, `min`, `max`. Compute ops: `add`, `sub`, `mul`, `div`.
-- Compute/aggregate aliases cannot be `_id` (**422**). `filter(...)` / `compute(...)` / `aggregate(...)` / `groupby(...)` require a balanced closing `)` with no trailing junk.
+- Aggregate methods: `sum`, `average`, `min`, `max`, and `$count`. Compute ops: `add`, `sub`, `mul`, `div`.
+- `$count` counts instances, not a property: `aggregate($count as Total)` and `groupby((field),aggregate($count as Count))`. Every input row counts, including a row that omits a property or holds a non-numeric value. An empty whole-set aggregate is `[{"Total":0}]`. A groupby of an empty set is `[]`. `amount with $count` is not this form.
+- Compute/aggregate aliases cannot be `_id` (**422**). `filter(...)` / `compute(...)` / `aggregate(...)` / `groupby(...)` require a balanced closing `)` with no trailing junk. `aggregate($count)` without `as <alias>` is **422**.
 
 ```bash
 curl -s "http://127.0.0.1:2112/tasks?\$apply=groupby((type))"
 curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((status),aggregate(amount%20with%20sum%20as%20Total))"
+curl -s "http://127.0.0.1:2112/orders?\$apply=aggregate(\$count%20as%20Total)"
+curl -s "http://127.0.0.1:2112/orders?\$apply=groupby((status),aggregate(\$count%20as%20Count))"
 curl -s "http://127.0.0.1:2112/orders?\$apply=filter(status%20eq%20'active')/groupby((country),aggregate(amount%20with%20sum%20as%20Total))"
 curl -s "http://127.0.0.1:2112/lines?\$compute=Price%20mul%20Qty%20as%20LineTotal&\$select=LineTotal"
 ```

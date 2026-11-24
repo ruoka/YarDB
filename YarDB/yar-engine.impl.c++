@@ -2263,8 +2263,10 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         metadata metadata_record{};
     };
 
-    // Update and replace still mark the prior record updated after the commit.
-    // Delete does not: it appends its own record and leaves earlier bytes alone.
+    // Update and replace mark the prior record updated after the commit.
+    // A delete that stays appended leaves earlier bytes alone. A delete that a
+    // later request in this group cancels is recorded here so the superseded
+    // row is marked updated, the same as a normal update.
     struct prior_mark
     {
         position_type position;
@@ -2274,6 +2276,12 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
     {
         std::string collection;
         std::int64_t id = 0;
+        // The row this delete supersedes. A later recreate in the group drops
+        // the delete and marks that row updated, the same as a normal update.
+        // prior_position is an on-disk record. append_index is a version this
+        // group has not written yet.
+        std::optional<position_type> prior_position;
+        std::optional<std::size_t> append_index;
     };
 
     struct item_plan
@@ -2365,12 +2373,21 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
             // A later create or upsert in this group puts the id back. Drop the
-            // delete so it is not appended after the new version; reopen would
-            // otherwise hide the document the group just wrote.
-            std::erase_if(pending_deletes, [&](const appended_delete& item)
+            // delete so it is not appended after the new version, and mark the
+            // superseded row updated so $deltaToken does not keep emitting it.
+            for(auto pending = pending_deletes.begin(); pending != pending_deletes.end();)
             {
-                return item.collection == request.collection and item.id == id;
-            });
+                if(pending->collection != request.collection or pending->id != id)
+                {
+                    ++pending;
+                    continue;
+                }
+                if(pending->append_index.has_value())
+                    appends[*pending->append_index].mark_updated = true;
+                else if(pending->prior_position.has_value())
+                    priors.push_back({*pending->prior_position});
+                pending = pending_deletes.erase(pending);
+            }
             auto* log = undo.log(request.collection);
             auto& collection_index = undo[request.collection];
             // A negative position until the group is written. -1 stays "no
@@ -2442,7 +2459,14 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
                 return std::unexpected{fail(
                     index, db_error_code::precondition_failed, "Write preconditions were not met"s)};
 
-            pending_deletes.push_back({request.collection, id});
+            auto tombstone = appended_delete{};
+            tombstone.collection = request.collection;
+            tombstone.id = id;
+            if(current.append_index.has_value())
+                tombstone.append_index = *current.append_index;
+            else if(current.metadata_record.position >= 0)
+                tombstone.prior_position = static_cast<position_type>(current.metadata_record.position);
+            pending_deletes.push_back(std::move(tombstone));
             undo[request.collection].erase(current.document, undo.log(request.collection));
             live_appends.erase({request.collection, id});
             remember(batch_effect::deleted, current.document, std::nullopt);

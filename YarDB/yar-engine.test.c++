@@ -2347,21 +2347,40 @@ auto test_set()
                 auto removed_post = false;
                 auto removed_put = false;
                 auto removed_dropped = false;
+                auto saw_old_post = false;
+                auto saw_old_put = false;
+                auto saw_new_post = false;
+                auto saw_new_put = false;
                 for(const auto& change : feed->changes)
                 {
-                    if(not change.removed)
+                    if(change.removed)
+                    {
+                        const auto id = static_cast<xson::integer_type>(change.document["_id"s]);
+                        if(id == post_id)
+                            removed_post = true;
+                        if(id == put_id)
+                            removed_put = true;
+                        if(id == dropped_id)
+                            removed_dropped = true;
                         continue;
-                    const auto id = static_cast<xson::integer_type>(change.document["_id"s]);
-                    if(id == post_id)
-                        removed_post = true;
-                    if(id == put_id)
-                        removed_put = true;
-                    if(id == dropped_id)
-                        removed_dropped = true;
+                    }
+                    const auto name = static_cast<string>(change.document["name"s]);
+                    if(name == "old-post"s)
+                        saw_old_post = true;
+                    if(name == "old-put"s)
+                        saw_old_put = true;
+                    if(name == "new-post"s)
+                        saw_new_post = true;
+                    if(name == "new-put"s)
+                        saw_new_put = true;
                 }
                 require_false(removed_post);
                 require_false(removed_put);
                 require_true(removed_dropped);
+                require_false(saw_old_post);
+                require_false(saw_old_put);
+                require_true(saw_new_post);
+                require_true(saw_new_put);
             }
 
             auto saw_delete = false;

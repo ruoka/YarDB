@@ -258,11 +258,14 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$apply`** — slash-separated transform pipeline:
   - Examples:
     - `GET /orders?$apply=groupby((status),aggregate(amount with sum as Total))`
+    - `GET /orders?$apply=groupby((country,status),aggregate(amount with sum as Total))`
+    - `GET /orders?$apply=groupby((country,status))`
     - `GET /orders?$apply=filter(status eq 'active')/groupby((country),aggregate(amount with sum as Total))`
     - `GET /lines?$apply=compute(Price mul Qty as LineTotal)/aggregate(LineTotal with sum as Revenue)`
     - `GET /orders?$apply=aggregate($count as Total)`
-    - `GET /orders?$apply=groupby((status),aggregate($count as Count))`
-  - Steps: `filter(...)`, `compute(...)`, `groupby((field),aggregate(...))`, `aggregate(...)`
+    - `GET /orders?$apply=groupby((country,status),aggregate($count as Count))`
+  - Steps: `filter(...)`, `compute(...)`, `groupby((field,...))`, `groupby((field,...),aggregate(...))`, `aggregate(...)`
+  - Several names in the group list form one tuple. A missing grouping property is JSON `null` in that column. An empty set is `[]`
   - Aggregate methods: `sum`, `average`, `min`, `max`, and `$count` (`aggregate($count as Alias)` counts every instance; an empty set is `0`)
   - Optional sibling `$filter` runs after `$apply` (aggregate aliases are visible); pre-aggregation narrowing uses pipeline `filter(...)`
   - Not combined with `$top` / `$skip` / `$orderby` / `$select` / `$expand` / `$count` / `$compute` (422)

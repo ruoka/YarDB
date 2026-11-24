@@ -20,6 +20,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
+| **`$apply` multi-key groupby** | `GET /orders?$apply=groupby((country,status),aggregate(amount with sum as Total))` and `groupby((country,status))` group by the tuple of top-level fields. Methods are `sum` / `average` / `min` / `max` and `$count`. A missing property is `null` in that column. An object or array value is 422. An empty set is `[]`. The alias cannot be `_id`. See [odata.md](odata.md) |
 | **`$apply` `$count` aggregate** | `GET /orders?$apply=aggregate($count as Total)` and `groupby((status),aggregate($count as Count))` count instances, including rows with no numeric field. An empty set is `[{"Total":0}]`. The alias cannot be `_id`; bad syntax is 422. See [odata.md](odata.md) |
 | **`$expand` via unique secondary** | Besides `{singular}_id` → related `_id`, `$expand=singular` resolves `{singular}_{UniqueKey}` against a key listed in that collection's `unique` index config (e.g. `customer_UID` → `customers.UID`). Primary wins when `{singular}_id` is present; non-unique secondaries are not used. See [odata.md](odata.md) and [programs.md](programs.md#odata-query-parameters) |
 

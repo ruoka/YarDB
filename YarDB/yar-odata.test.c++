@@ -3184,6 +3184,485 @@ auto register_odata_tests()
         };
     };
 
+    scenario("$apply multi-key groupby, [yardb]") = []
+    {
+        given("A groupby((country,status),aggregate(...)) expression") = []
+        {
+            when("Parsing a two-field group list") = []
+            {
+                const auto pipeline = parse_apply(
+                    "groupby((country,status),aggregate(amount with sum as Total))"sv);
+
+                then("Both fields and the sum aggregate are extracted") = [pipeline]
+                {
+                    require_eq(pipeline.steps.size(), 1u);
+                    const auto& query = pipeline.steps[0].aggregate;
+                    require_eq(query.group_fields.size(), 2u);
+                    require_eq(query.group_fields[0], "country"s);
+                    require_eq(query.group_fields[1], "status"s);
+                    require_eq(query.aggregates.size(), 1u);
+                    require_eq(query.aggregates[0].field, "amount"s);
+                    require_eq(query.aggregates[0].alias, "Total"s);
+                    require_eq(
+                        static_cast<int>(query.aggregates[0].method),
+                        static_cast<int>(aggregate_method::sum));
+                };
+            };
+
+            when("Parsing spaces around the group names") = []
+            {
+                const auto pipeline = parse_apply(
+                    "groupby(( country , status ),aggregate($count as Count))"sv);
+
+                then("The names are trimmed and the method is count") = [pipeline]
+                {
+                    const auto& query = pipeline.steps[0].aggregate;
+                    require_eq(query.group_fields.size(), 2u);
+                    require_eq(query.group_fields[0], "country"s);
+                    require_eq(query.group_fields[1], "status"s);
+                    require_true(query.aggregates[0].field.empty());
+                    require_eq(query.aggregates[0].alias, "Count"s);
+                    require_eq(
+                        static_cast<int>(query.aggregates[0].method),
+                        static_cast<int>(aggregate_method::count));
+                };
+            };
+
+            when("Parsing three grouping properties and no aggregate") = []
+            {
+                const auto pipeline = parse_apply("groupby((country,status,channel))"sv);
+
+                then("The group list is kept and there is no aggregate") = [pipeline]
+                {
+                    const auto& query = pipeline.steps[0].aggregate;
+                    require_eq(query.group_fields.size(), 3u);
+                    require_eq(query.group_fields[0], "country"s);
+                    require_eq(query.group_fields[1], "status"s);
+                    require_eq(query.group_fields[2], "channel"s);
+                    require_true(query.aggregates.empty());
+                };
+            };
+        };
+
+        given("Documents with country, status, and amount") = []
+        {
+            auto label = [](const object& value) -> string
+            {
+                if(value.is_null())
+                    return "null"s;
+                if(value.is_boolean())
+                    return static_cast<bool>(value) ? "true"s : "false"s;
+                if(value.is_string())
+                    return value.get<string>();
+                if(value.is_integer())
+                    return std::to_string(static_cast<integer_type>(value));
+                return std::to_string(static_cast<double>(static_cast<number_type>(value)));
+            };
+
+            when("Applying a two-field groupby sum") = [=]
+            {
+                auto docs = object{object::array{
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 5}},
+                    object{{"country"s, "FI"s}, {"status"s, "pending"s}, {"amount"s, 7}},
+                    object{{"country"s, "SE"s}, {"status"s, "active"s}, {"amount"s, 3}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((country,status),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("Each country and status pair has its own Total") = [=]
+                {
+                    require_true(result.is_array());
+                    auto totals = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        require_eq(row.size(), 3u);
+                        require_false(row.has("_id"s));
+                        const auto key = label(row["country"s]) + "|"s + label(row["status"s]);
+                        totals[key] = static_cast<integer_type>(row["Total"s]);
+                    }
+                    require_eq(totals.size(), 3u);
+                    require_eq(totals["FI|active"s], 15);
+                    require_eq(totals["FI|pending"s], 7);
+                    require_eq(totals["SE|active"s], 3);
+                };
+            };
+
+            when("A grouping property is missing or JSON null") = [=]
+            {
+                auto explicit_null = object{{"status"s, "active"s}, {"amount"s, 4}};
+                explicit_null["country"s] = nullptr;
+                auto docs = object{object::array{
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"status"s, "active"s}, {"amount"s, 1}},
+                    explicit_null,
+                    object{{"country"s, "FI"s}, {"amount"s, 8}},
+                    object{{"amount"s, 2}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((country,status),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("Each null column is its own group and null matches missing") = [=]
+                {
+                    auto totals = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        const auto key = label(row["country"s]) + "|"s + label(row["status"s]);
+                        totals[key] = static_cast<integer_type>(row["Total"s]);
+                    }
+                    require_eq(totals.size(), 4u);
+                    require_eq(totals["FI|active"s], 10);
+                    require_eq(totals["null|active"s], 5);
+                    require_eq(totals["FI|null"s], 8);
+                    require_eq(totals["null|null"s], 2);
+                };
+            };
+
+            when("One key mixes integer and floating JSON numbers") = [=]
+            {
+                auto docs = object{object::array{
+                    object{
+                        {"region"s, static_cast<integer_type>(1)},
+                        {"status"s, "active"s},
+                        {"amount"s, 100}},
+                    object{{"region"s, 1.0}, {"status"s, "active"s}, {"amount"s, 50}},
+                    object{
+                        {"region"s, static_cast<integer_type>(1)},
+                        {"status"s, "pending"s},
+                        {"amount"s, 7}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((region,status),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("1 and 1.0 share a group only when the other key matches") = [=]
+                {
+                    auto totals = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        const auto key = label(row["region"s]) + "|"s + label(row["status"s]);
+                        totals[key] = static_cast<integer_type>(row["Total"s]);
+                    }
+                    require_eq(totals.size(), 2u);
+                    require_eq(totals["1|active"s], 150);
+                    require_eq(totals["1|pending"s], 7);
+                };
+            };
+
+            when("Applying min, max, and average on the same pairs") = [=]
+            {
+                auto docs = object{object::array{
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 4}},
+                    object{{"country"s, "SE"s}, {"status"s, "active"s}, {"amount"s, 3}},
+                }};
+                const auto min_query = parse_apply(
+                    "groupby((country,status),aggregate(amount with min as Floor))"sv);
+                const auto max_query = parse_apply(
+                    "groupby((country,status),aggregate(amount with max as Peak))"sv);
+                const auto avg_query = parse_apply(
+                    "groupby((country,status),aggregate(amount with average as Avg))"sv);
+                const auto floors = apply_aggregation(docs, min_query.steps[0].aggregate);
+                const auto peaks = apply_aggregation(docs, max_query.steps[0].aggregate);
+                const auto avgs = apply_aggregation(docs, avg_query.steps[0].aggregate);
+
+                then("Each method reduces the pair, not a single field") = [=]
+                {
+                    auto floor_of = std::map<string, integer_type>{};
+                    auto peak_of = std::map<string, integer_type>{};
+                    auto avg_of = std::map<string, integer_type>{};
+                    for(const auto& row : floors.get<object::array>())
+                        floor_of[label(row["country"s])] = static_cast<integer_type>(row["Floor"s]);
+                    for(const auto& row : peaks.get<object::array>())
+                        peak_of[label(row["country"s])] = static_cast<integer_type>(row["Peak"s]);
+                    for(const auto& row : avgs.get<object::array>())
+                        avg_of[label(row["country"s])] = static_cast<integer_type>(row["Avg"s]);
+                    require_eq(floor_of["FI"s], 4);
+                    require_eq(peak_of["FI"s], 10);
+                    require_eq(avg_of["FI"s], 7);
+                    require_eq(floor_of["SE"s], 3);
+                    require_eq(peak_of["SE"s], 3);
+                    require_eq(avg_of["SE"s], 3);
+                };
+            };
+
+            when("Counting instances the numeric aggregates would skip") = [=]
+            {
+                auto docs = object{object::array{
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, "n/a"s}},
+                    object{{"country"s, "FI"s}, {"status"s, "pending"s}, {"amount"s, 1}},
+                    object{{"status"s, "active"s}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((country,status),aggregate($count as Count))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("Every row in the pair counts, including a null column") = [=]
+                {
+                    auto counts = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        require_true(row["Count"s].is_integer());
+                        const auto key = label(row["country"s]) + "|"s + label(row["status"s]);
+                        counts[key] = static_cast<integer_type>(row["Count"s]);
+                    }
+                    require_eq(counts["FI|active"s], 3);
+                    require_eq(counts["FI|pending"s], 1);
+                    require_eq(counts["null|active"s], 1);
+                };
+            };
+
+            when("Grouping a boolean with a string") = [=]
+            {
+                auto docs = object{object::array{
+                    object{{"flag"s, true}, {"status"s, "active"s}, {"amount"s, 2}},
+                    object{{"flag"s, true}, {"status"s, "active"s}, {"amount"s, 3}},
+                    object{{"flag"s, false}, {"status"s, "active"s}, {"amount"s, 4}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((flag,status),aggregate(amount with sum as Total))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("true and false stay separate groups") = [=]
+                {
+                    auto totals = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                        totals[label(row["flag"s])] = static_cast<integer_type>(row["Total"s]);
+                    require_eq(totals.size(), 2u);
+                    require_eq(totals["true"s], 5);
+                    require_eq(totals["false"s], 4);
+                };
+            };
+
+            when("Grouping three properties by $count") = [=]
+            {
+                auto docs = object{object::array{
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"channel"s, "web"s}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"channel"s, "web"s}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"channel"s, "store"s}},
+                }};
+                const auto pipeline = parse_apply(
+                    "groupby((country,status,channel),aggregate($count as Count))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("The third property splits the pair") = [=]
+                {
+                    auto counts = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        require_eq(row.size(), 4u);
+                        const auto key = label(row["country"s]) + "|"s
+                            + label(row["status"s]) + "|"s + label(row["channel"s]);
+                        counts[key] = static_cast<integer_type>(row["Count"s]);
+                    }
+                    require_eq(counts["FI|active|web"s], 2);
+                    require_eq(counts["FI|active|store"s], 1);
+                };
+            };
+
+            when("Omitting the aggregate") = [=]
+            {
+                auto docs = object{object::array{
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 10}},
+                    object{{"country"s, "FI"s}, {"status"s, "active"s}, {"amount"s, 5}},
+                    object{{"country"s, "SE"s}, {"status"s, "pending"s}, {"amount"s, 1}},
+                }};
+                const auto pipeline = parse_apply("groupby((country,status))"sv);
+                const auto result = apply_aggregation(docs, pipeline.steps[0].aggregate);
+
+                then("Each distinct tuple is one row of only those fields") = [=]
+                {
+                    require_eq(result.get<object::array>().size(), 2u);
+                    auto seen = std::map<string, int>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        require_eq(row.size(), 2u);
+                        require_true(row.has("country"s));
+                        require_true(row.has("status"s));
+                        require_false(row.has("amount"s));
+                        require_false(row.has("_id"s));
+                        seen[label(row["country"s]) + "|"s + label(row["status"s])] += 1;
+                    }
+                    require_eq(seen["FI|active"s], 1);
+                    require_eq(seen["SE|pending"s], 1);
+                };
+            };
+
+            when("The input set is empty") = []
+            {
+                auto docs = object{object::array{}};
+                const auto grouped = parse_apply(
+                    "groupby((country,status),aggregate($count as Count))"sv);
+                const auto distinct = parse_apply("groupby((country,status))"sv);
+                const auto grouped_result = apply_aggregation(docs, grouped.steps[0].aggregate);
+                const auto distinct_result = apply_aggregation(docs, distinct.steps[0].aggregate);
+
+                then("Both forms return an empty array") = [=]
+                {
+                    require_eq(grouped_result.get<object::array>().size(), 0u);
+                    require_eq(distinct_result.get<object::array>().size(), 0u);
+                };
+            };
+
+            when("An object or array is any grouping property") = []
+            {
+                auto object_key = object{object::array{
+                    object{
+                        {"country"s, "FI"s},
+                        {"status"s, object{{"code"s, "active"s}}},
+                        {"amount"s, 10}},
+                    object{
+                        {"country"s, "FI"s},
+                        {"status"s, object{{"code"s, "pending"s}}},
+                        {"amount"s, 4}},
+                }};
+                auto array_key = object{object::array{
+                    object{
+                        {"country"s, "FI"s},
+                        {"tags"s, object{object::array{object{"a"s}}}},
+                        {"amount"s, 10}},
+                }};
+                const auto object_query = parse_apply(
+                    "groupby((country,status),aggregate(amount with sum as Total))"sv);
+                const auto array_query = parse_apply(
+                    "groupby((country,tags),aggregate(amount with sum as Total))"sv);
+
+                then("The second key is rejected rather than merged") = [=]
+                {
+                    auto object_threw = false;
+                    try
+                    {
+                        std::ignore = apply_aggregation(
+                            object_key, object_query.steps[0].aggregate);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        object_threw = true;
+                        require_true(std::string_view{e.what()}.contains("primitive"sv));
+                    }
+                    require_true(object_threw);
+
+                    auto array_threw = false;
+                    try
+                    {
+                        std::ignore = apply_aggregation(
+                            array_key, array_query.steps[0].aggregate);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        array_threw = true;
+                        require_true(std::string_view{e.what()}.contains("array"sv));
+                    }
+                    require_true(array_threw);
+                };
+            };
+        };
+
+        given("A filter then a multi-key groupby") = []
+        {
+            when("Executing filter(status eq 'active')/groupby((country,channel))") = []
+            {
+                auto docs = object{object::array{
+                    object{
+                        {"status"s, "active"s},
+                        {"country"s, "FI"s},
+                        {"channel"s, "web"s},
+                        {"amount"s, 10}},
+                    object{
+                        {"status"s, "active"s},
+                        {"country"s, "FI"s},
+                        {"channel"s, "web"s},
+                        {"amount"s, 5}},
+                    object{
+                        {"status"s, "pending"s},
+                        {"country"s, "FI"s},
+                        {"channel"s, "web"s},
+                        {"amount"s, 100}},
+                    object{
+                        {"status"s, "active"s},
+                        {"country"s, "SE"s},
+                        {"channel"s, "store"s},
+                        {"amount"s, 7}},
+                }};
+                const auto pipeline = parse_apply(
+                    "filter(status eq 'active')/groupby((country,channel),aggregate(amount with sum as Total))"sv);
+                const auto result = execute_apply_pipeline(docs, pipeline);
+
+                then("Pending rows are dropped before the tuple is grouped") = [result]
+                {
+                    auto totals = std::map<string, integer_type>{};
+                    for(const auto& row : result.get<object::array>())
+                    {
+                        const auto key = row["country"s].get<string>()
+                            + "|"s + row["channel"s].get<string>();
+                        totals[key] = static_cast<integer_type>(row["Total"s]);
+                    }
+                    require_eq(totals.size(), 2u);
+                    require_eq(totals["FI|web"s], 15);
+                    require_eq(totals["SE|store"s], 7);
+                };
+            };
+        };
+
+        given("A malformed multi-key groupby") = []
+        {
+            when("The group list or what follows it is not allowed") = []
+            {
+                auto rejects = [](std::string_view expr, std::string_view snippet)
+                {
+                    auto threw = false;
+                    try
+                    {
+                        std::ignore = parse_apply(expr);
+                    }
+                    catch(const std::invalid_argument& e)
+                    {
+                        threw = true;
+                        require_true(std::string{e.what()}.contains(std::string{snippet}));
+                    }
+                    require_true(threw);
+                };
+
+                then("An empty, repeated, or nested name is rejected") = [=]
+                {
+                    rejects("groupby(())"sv, "empty"sv);
+                    rejects("groupby((,))"sv, "empty"sv);
+                    rejects("groupby((country,))"sv, "empty"sv);
+                    rejects("groupby((,country))"sv, "empty"sv);
+                    rejects("groupby((country,country))"sv, "more than once"sv);
+                    rejects("groupby((Customer/Country,status))"sv, "nested"sv);
+                };
+
+                then("The aggregate alias cannot be _id") = [=]
+                {
+                    rejects(
+                        "groupby((country,status),aggregate($count as _id))"sv,
+                        "_id"sv);
+                    rejects(
+                        "groupby((country,status),aggregate(amount with sum as _id))"sv,
+                        "_id"sv);
+                };
+
+                then("A transformation after the group list is rejected") = [=]
+                {
+                    rejects(
+                        "groupby((country,status),filter(status eq 'active'))"sv,
+                        "transformation"sv);
+                    rejects(
+                        "groupby((country,status))/aggregate(amount with sum as Total)"sv,
+                        "final"sv);
+                    rejects(
+                        "groupby((country,status),aggregate(amount with sum as Total))/filter(Total gt 1)"sv,
+                        "final"sv);
+                };
+            };
+        };
+    };
+
     scenario("$apply filter/compute pipeline and $compute, [yardb]") = []
     {
         given("A filter(...)/groupby(...) expression") = []

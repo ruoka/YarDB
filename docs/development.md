@@ -264,7 +264,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 #### 0. 📊 OData query surface
 - **Checklist**: [odata.md](odata.md) — supported today vs pipeline
 - **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/`any`/`all`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`; `tolower`/`toupper`; `indexof`/`substring`/`length`/`year`/`month`/`day`)
-- **`$search`**: ✅ shipped — one phrase, matched like `contains` on any string value (nested objects and arrays included; keys and non-strings are not). AND with `$filter`. Empty `$search` is 422. Same point in the query as `$filter`, including after `$apply`
+- **`$search`**: ✅ shipped — one phrase, matched like case-sensitive `contains` on string values at any depth (nested objects and arrays included; keys are not searched). AND with `$filter`. Empty `$search` is 422. Same point in the query as `$filter`, including after `$apply`
 - **`$apply` groupby/aggregate**: ✅ shipped — `groupby((field,...))` / `aggregate`, including multi-key `groupby((country,status),aggregate(...))`; pipeline `filter(...)/compute(...)/groupby(...)`; methods `sum`/`average`/`min`/`max` and `$count` (`aggregate($count as Alias)`)
 - **`$compute`**: ✅ shipped — `Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div`); not combinable with `$apply`
 - **`$expand`**: ✅ shipped — `{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin`. `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`. An unknown option or a bad `$select` is 422

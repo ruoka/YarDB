@@ -19,8 +19,14 @@ Today each open database file still has a single writer (exclusive `.pid` lock).
 YarDB is a C++23 application that implements:
 
 - **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
-- **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter` (`eq`, `ne`, `gt`, `ge`, `lt`, `le`, `not`, `and`, `or`, `in`, `any`, `all`, `startswith`, `contains`, `endswith`, `tolower`, `toupper`, `indexof`, `substring`, `length`, `year`, `month`, `day`), `$search` (case-sensitive `contains` of string values at any depth; keys are not searched; AND with `$filter`; empty is 422), `$select`, `$count`, `$expand` (`{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin` when that key is unique; `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`), and `$deltaToken` (append-only delete records; the token is a file offset). Checklist: [docs/odata.md](docs/odata.md)
-- **MCP server**: Native HTTP+SSE MCP on `yardb` (`GET /_sse`, via `http::mcp` in net4cpp). Python `tools/yardb_mcp*.py` kept as reference/oracle
+- **OData Querying**:
+  - Query options: `$top`, `$skip`, `$orderby`, `$filter`, `$search`, `$select`, `$count`, `$expand`, `$deltaToken`
+  - `$filter` operators and functions: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `not`, `and`, `or`, `in`, `any`, `all`, `startswith`, `contains`, `endswith`, `tolower`, `toupper`, `indexof`, `substring`, `length`, `year`, `month`, `day`
+  - `$search`: case-sensitive `contains` of string values at any depth; keys are not searched; AND with `$filter`; empty is 422
+  - `$expand`: `{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin` when that key is unique; `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`
+  - `$deltaToken`: append-only delete records; the token is a file offset
+  - Checklist: [docs/odata.md](docs/odata.md)
+- **MCP server**: Native HTTP+SSE on `yardb` (`GET /_sse`, via `http::mcp` in net4cpp), with Python scripts `tools/yardb_mcp*.py` as reference
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
 - **Last-Modified Support**: Timestamp-based conditional requests for cache validation
@@ -37,7 +43,7 @@ YarDB is a C++23 application that implements:
 - ✅ OData query parameters and metadata support
 - ✅ Content negotiation (Accept header, OData metadata levels)
 - ✅ Standard HTTP headers (Location, Content-Location, ETag, Last-Modified)
-- ✅ MCP stdio server for agent/IDE tooling (`tools/yardb_mcp.py`, Cursor config in `.cursor/mcp.json`)
+- ✅ Native HTTP+SSE on `yardb` for agent/IDE tooling, with Python scripts `tools/yardb_mcp*.py` as reference (Cursor config in `.cursor/mcp.json`)
 
 ### Technical Excellence
 - **Native C++ Build System**: Uses [tester](https://github.com/ruoka/tester) (C++ Builder), a native C++ build system designed for modern C++ projects
@@ -142,7 +148,7 @@ Export FSON records as JSONL (`yarexport`, including `--live` for current docs o
 ### MCP server - Agent / IDE bridge
 
 Native MCP HTTP+SSE is built into `yardb` (default on; `--no-mcp` to disable). Python
-`tools/yardb_mcp*.py` remain as a reference/oracle. See [programs.md](docs/programs.md#mcp-bridge---cursor--agent-client).
+`tools/yardb_mcp*.py` remain as a reference/oracle. See [programs.md](docs/programs.md#mcp---cursor--agent-client).
 
 | Transport | Entry | Notes |
 |-----------|-------|-------|
@@ -173,7 +179,7 @@ The project uses git submodules for dependencies:
 - `cryptic`: Cryptographic functions ([`v3.0.2`](https://github.com/ruoka/cryptic/releases/tag/v3.0.2)+)
 - `tester`: Testing framework ([`v3.1.0`](https://github.com/ruoka/tester/releases/tag/v3.1.0))
 
-**Versioning:** YarDB [`v2.0.0`](https://github.com/ruoka/YarDB/releases/tag/v2.0.0); SemVer per repo; product majors ≠ dependency majors. Nested `deps/tester` copies move when cryptic, net, and xson do — see [`docs/versioning.md`](docs/versioning.md).
+**Versioning:** YarDB [`v2.1.0`](https://github.com/ruoka/YarDB/releases/tag/v2.1.0); SemVer per repo; product majors ≠ dependency majors. Nested `deps/tester` copies move when cryptic, net, and xson do — see [`docs/versioning.md`](docs/versioning.md).
 
 **Note**: The `std` module is built from libc++ source (provided by Clang 21+), not from a submodule. `tools/CB.sh` sources shared bootstrap logic from `deps/tester/tools/CB.sh.core`.
 

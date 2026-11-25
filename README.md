@@ -18,7 +18,10 @@ Today each open database file still has a single writer (exclusive `.pid` lock).
 
 YarDB is a C++23 application that implements:
 
-- **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
+- **Document storage**: FSON-encoded binary storage (FAST-encoded with minimal metadata)
+- **JSON over HTTP**: JSON-encoded objects over HTTP with content negotiation
+- **CRUD**: Full Create, Read, Update, Delete operations via REST endpoints
+- **REST status codes and errors**: HTTP/1.1 status codes, structured errors, and standard response headers
 - **OData Querying**:
   - Query options: `$top`, `$skip`, `$orderby`, `$filter`, `$search`, `$select`, `$count`, `$expand`, `$deltaToken`
   - `$filter` operators and functions: `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `not`, `and`, `or`, `in`, `any`, `all`, `startswith`, `contains`, `endswith`, `tolower`, `toupper`, `indexof`, `substring`, `length`, `year`, `month`, `day`
@@ -26,13 +29,8 @@ YarDB is a C++23 application that implements:
   - `$expand`: `{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin` when that key is unique; `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`
   - `$deltaToken`: append-only delete records; the token is a file offset
   - Checklist: [docs/odata.md](docs/odata.md)
+- **ETag, conditional requests, and Last-Modified**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control; complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers; timestamp-based conditional requests for cache validation
 - **MCP server**: Native HTTP+SSE on `yardb` (`GET /_sse`, via `http::mcp` in net4cpp), with Python scripts `tools/yardb_mcp*.py` as reference
-- **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
-- **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
-- **Last-Modified Support**: Timestamp-based conditional requests for cache validation
-- **Document Storage**: FSON-encoded binary storage (FAST-encoded with minimal metadata)
-- **JSON Transport**: JSON-encoded objects over HTTP with content negotiation
-- **CRUD Operations**: Full Create, Read, Update, Delete operations via REST endpoints
 
 ## Features
 

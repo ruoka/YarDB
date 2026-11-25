@@ -5044,6 +5044,109 @@ auto register_odata_tests()
         };
     };
 
+    scenario("$search matches string values the way contains does, [yardb]") = []
+    {
+        given("Instruments with nested strings, keys, and non-strings") = []
+        {
+            auto docs = object{object::array{
+                object{
+                    {"_id"s, 1ll},
+                    {"name"s, "Euro Bond"s},
+                    {"kind"s, "FixedIncome"s},
+                    {"currency"s, "EUR"s},
+                    {"qty"s, 42ll},
+                    {"tags"s, {"gov"s, "EUR"s}},
+                    {"issuer"s, object{{"title"s, "Bond House"s}}},
+                    {"lines"s, object{object::array{
+                        object{{"isin"s, "FI0009000681"s}}
+                    }}}
+                },
+                object{
+                    {"_id"s, 2ll},
+                    {"name"s, "bond fund"s},
+                    {"kind"s, "Equity"s},
+                    {"currency"s, "USD"s}
+                },
+                object{
+                    {"_id"s, 3ll},
+                    {"name"s, "Cash"s},
+                    {"Bond"s, "ticker"s},
+                    {"qty"s, 42ll},
+                    {"active"s, true}
+                },
+                object{
+                    {"_id"s, 4ll},
+                    {"name"s, "Bill"s},
+                    {"code"s, 100ll},
+                    {"@odata.etag"s, "Bond"s}
+                }
+            }};
+
+            when("The phrase is Bond") = [docs]
+            {
+                then("Keeps a document when any string value contains it") = [docs]
+                {
+                    const auto phrase = parse_search("Bond"sv);
+                    require_eq(phrase, "Bond"s);
+
+                    const auto result = filter_documents_by_search(docs, phrase);
+                    const auto& items = result.get<object::array>();
+                    require_eq(items.size(), 1u);
+                    require_eq(items[0]["name"s].get<string>(), "Euro Bond"s);
+                    require_true(document_matches_search(items[0], "FI0009000681"sv));
+                    require_true(document_matches_search(items[0], "EUR"sv));
+                    require_true(document_matches_search(items[0], "Bond House"sv));
+                };
+            };
+
+            when("The phrase differs by case, or only a key or non-string would match") = [docs]
+            {
+                then("Those documents stay out, the same way contains would") = [docs]
+                {
+                    const auto& items = docs.get<object::array>();
+                    require_false(document_matches_search(items[0], "bond"sv));
+                    require_true(document_matches_search(items[1], "bond"sv));
+                    require_false(document_matches_search(items[1], "Bond"sv));
+                    require_false(document_matches_search(items[2], "Bond"sv));
+                    require_true(document_matches_search(items[2], "ticker"sv));
+                    require_true(document_matches_search(items[2], "Cash"sv));
+                    require_false(document_matches_search(items[2], "42"sv));
+                    require_false(document_matches_search(items[2], "true"sv));
+                    require_false(document_matches_search(items[3], "100"sv));
+                    require_false(document_matches_search(items[3], "Bond"sv));
+                    require_false(document_matches_search(items[3], "{"sv));
+                    require_false(document_matches_search(items[2], "active"sv));
+                };
+            };
+
+            when("Search is combined with a filter") = [docs]
+            {
+                then("A document must match both") = [docs]
+                {
+                    const auto euros = filter_by_parsed(docs, parse_filter("currency eq 'EUR'"sv));
+                    const auto both = filter_documents_by_search(euros, parse_search("Bond"sv));
+                    require_eq(both.get<object::array>().size(), 1u);
+                    require_eq(both.get<object::array>()[0]["name"s].get<string>(), "Euro Bond"s);
+
+                    const auto dollars = filter_by_parsed(docs, parse_filter("currency eq 'USD'"sv));
+                    const auto none = filter_documents_by_search(dollars, "Bond"sv);
+                    require_eq(none.get<object::array>().size(), 0u);
+                };
+            };
+
+            when("The phrase is empty") = []
+            {
+                then("Parsing is rejected") = []
+                {
+                    require_throws_as<std::invalid_argument>([]
+                    {
+                        std::ignore = parse_search(""sv);
+                    });
+                };
+            };
+        };
+    };
+
     return true;
 }
 

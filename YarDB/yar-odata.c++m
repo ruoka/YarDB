@@ -2486,6 +2486,71 @@ inline auto apply_string_filters(const xson::object& documents, const std::vecto
             | std::ranges::to<xson::object::array>()};
 }
 
+// $search is one literal phrase. Matching is contains() on each string value:
+// case-sensitive, no wildcards. The walk visits nested objects and arrays.
+// Object keys are not text, and numbers, booleans, nulls, and timestamps are
+// not converted to text. @odata.* annotations are server metadata, not fields.
+export inline std::string parse_search(std::string_view text)
+{
+    if(text.empty())
+        throw std::invalid_argument{"$search cannot be empty"};
+    return std::string{text};
+}
+
+inline bool value_contains_phrase(const xson::object& value, std::string_view phrase)
+{
+    if(value.is_string())
+    {
+        const auto& text = value.get<std::string>();
+        return text.contains(phrase);
+    }
+
+    if(value.is_array())
+    {
+        return std::ranges::any_of(
+            value.get<xson::object::array>(),
+            [&](const xson::object& item)
+            {
+                return value_contains_phrase(item, phrase);
+            });
+    }
+
+    if(value.is_object())
+    {
+        return std::ranges::any_of(
+            value.get<xson::object::map>(),
+            [&](const auto& field)
+            {
+                if(field.first.starts_with("@odata."sv))
+                    return false;
+                return value_contains_phrase(field.second, phrase);
+            });
+    }
+
+    return false;
+}
+
+export inline bool document_matches_search(const xson::object& document, std::string_view phrase)
+{
+    return value_contains_phrase(document, phrase);
+}
+
+export inline xson::object filter_documents_by_search(
+    const xson::object& documents,
+    std::string_view phrase)
+{
+    if(not documents.is_array())
+        return documents;
+
+    return xson::object{
+        documents.get<xson::object::array>()
+            | std::views::filter([&](const xson::object& document)
+            {
+                return document_matches_search(document, phrase);
+            })
+            | std::ranges::to<xson::object::array>()};
+}
+
 // A lambda scope. owner is the instance that owns the collection being tested.
 // bindings are in-scope lambda variables; the innermost one wins, and a
 // variable hides a property of the same name.
@@ -3685,6 +3750,7 @@ export inline std::string skiptoken_next_header(
         query += query_escape(params.at(name));
     };
     append("$filter"sv);
+    append("$search"sv);
     append("$orderby"sv);
     append("$desc"sv);
     append("$top"sv);
@@ -3708,6 +3774,20 @@ export inline void omit_rows_through_keyset(
     {
         return not yar::db::after_orderby_keyset(document, keys, values);
     });
+}
+
+// Reapply $orderby / $skip / $top after a post-filter such as $search.
+// $after stays on selector; the engine does not consume it once $orderby is gone.
+export inline xson::object apply_query_paging(
+    xson::object documents,
+    const query_paging& paging,
+    const xson::object& selector)
+{
+    if(not paging.orderby.empty())
+        yar::db::apply_orderby(documents, paging.orderby);
+    if(not paging.orderby.empty() and selector.has("$after"s))
+        omit_rows_through_keyset(documents, paging.orderby, selector["$after"s]);
+    return apply_top_skip(std::move(documents), paging.skip, paging.top);
 }
 
 // --- $apply / $compute -------------------------------------------------------

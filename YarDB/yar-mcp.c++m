@@ -177,6 +177,21 @@ inline ::http::mcp::tool_result call_tool(
                 yar::http::odata::set_orderby_selector(selector, orderby);
             }
 
+            auto search_phrase = std::optional<std::string>{};
+            if(params.contains("$search"s))
+                search_phrase = yar::http::odata::parse_search(params.at("$search"s));
+
+            // $search is a post-filter. Strip paging so $top is not applied first.
+            auto search_paging = std::optional<yar::http::odata::query_paging>{};
+            if(search_phrase)
+            {
+                const auto primary_desc = selector.has("$desc"s)
+                    and yar::db::orderby_keys(selector).empty();
+                search_paging = yar::http::odata::extract_and_strip_paging(selector);
+                if(primary_desc)
+                    selector["$desc"s] = true;
+            }
+
             auto documents = xson::object{};
             if(params.contains("$filter"s))
             {
@@ -187,6 +202,15 @@ inline ::http::mcp::tool_result call_tool(
             else
             {
                 engine.read(collection, selector, documents);
+            }
+            if(search_phrase)
+            {
+                documents = yar::http::odata::filter_documents_by_search(documents, *search_phrase);
+                if(search_paging)
+                {
+                    documents = yar::http::odata::apply_query_paging(
+                        std::move(documents), *search_paging, selector);
+                }
             }
             return json_text_result(documents);
         }

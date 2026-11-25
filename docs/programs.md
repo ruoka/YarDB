@@ -167,7 +167,7 @@ YarDB supports conditional HTTP requests for efficient caching and optimistic lo
 {"requests":[{"id":"1","method":"POST","url":"orders","headers":{"If-Match":"\"12\""},"body":{"name":"Ada"},"atomicityGroup":"g1"}]}
 ```
 
-`GET` is an individual request and stays outside any `atomicityGroup`. A `GET` that carries `atomicityGroup`, or any body other than JSON `null`, is `422` and the batch applies nothing. The URL is a document (`/transactions/42`) or a collection read with the same query options as a standalone `GET` (`$filter`, `$select`, `$top`, `$skip`, `$orderby`, `$count`, `$expand`, `$compute`, `$apply`). The read uses that standalone path, so the individual status, headers, and body match it. The outer HTTP status stays `200`. `dependsOn` applies to a `GET` as well: when a dependency failed, the `GET` is not executed and its response is `424`. A `GET` does not take the group's write lock and does not append a log record. A later write group in the same batch still sees the store as those reads left it.
+`GET` is an individual request and stays outside any `atomicityGroup`. A `GET` that carries `atomicityGroup`, or any body other than JSON `null`, is `422` and the batch applies nothing. The URL is a document (`/transactions/42`) or a collection read with the same query options as a standalone `GET` (`$filter`, `$search`, `$select`, `$top`, `$skip`, `$orderby`, `$count`, `$expand`, `$compute`, `$apply`). The read uses that standalone path, so the individual status, headers, and body match it. The outer HTTP status stays `200`. `dependsOn` applies to a `GET` as well: when a dependency failed, the `GET` is not executed and its response is `424`. A `GET` does not take the group's write lock and does not append a log record. A later write group in the same batch still sees the store as those reads left it.
 
 Several known rows are several short reads, not one `UID in (...)` list. The 8192-character `$filter` guard is unchanged. One batch can read two documents by equality:
 
@@ -219,13 +219,13 @@ YarDB implements OData-compliant query parameters for advanced querying:
 - **`$skip=n`** - Skip number of results (pagination). A deep page still walks every row it skips. A request that uses only `$skip` is unchanged
   - Example: `GET /users?$skip=20`
 
-- **`$skiptoken`** - Resume a later `$top` page after the last row already returned. The body stays a JSON array. When another row exists, the response has `Link: </collection?$skiptoken=...>; rel="next"`. The client follows that URL as-is. The link keeps `$filter`, `$orderby`, `$top`, and `$select`, and drops `$skip`. The token is opaque base64url and is a keyset, not a count of rows. With no `$orderby` the key is the last row's `_id` and the next read starts at the next primary key (`$desc=true` walks that order backward). With `$orderby` the key is the last row's sort values plus `_id`, and the next page is the rows strictly after that tuple. `$skip` together with `$skiptoken` is 422. A malformed token, or a token from a different sort, is 422. Omitting `$top` returns every match and no next link
+- **`$skiptoken`** - Resume a later `$top` page after the last row already returned. The body stays a JSON array. When another row exists, the response has `Link: </collection?$skiptoken=...>; rel="next"`. The client follows that URL as-is. The link keeps `$filter`, `$search`, `$orderby`, `$top`, and `$select`, and drops `$skip`. The token is opaque base64url and is a keyset, not a count of rows. With no `$orderby` the key is the last row's `_id` and the next read starts at the next primary key (`$desc=true` walks that order backward). With `$orderby` the key is the last row's sort values plus `_id`, and the next page is the rows strictly after that tuple. `$skip` together with `$skiptoken` is 422. A malformed token, or a token from a different sort, is 422. Omitting `$top` returns every match and no next link
   - Example: `GET /users?$top=10`, then `GET` the `Link` header URL
 
 - **`$deltaToken`** - Changes for this collection since a cursor into the append-only file. The body is a JSON object, not an array: `{"value":[...],"deltaToken":"<next>"}`. `value` lists each new or updated document in file order, and each delete as `{"_id":1,"@removed":{"reason":"deleted"}}`. The delete entry comes from a delete record appended by `DELETE` (or a `$batch` delete), not from an in-place status byte. `deltaToken` is the file offset to send on the next call; pass it back as `$deltaToken=<token>`. A missing value (`?$deltaToken`) or an empty one (`?$deltaToken=`) reads from the start and still returns a token. A token that is not the start of a record, or is past the end of the file, is `400` with message `Unknown $deltaToken`. Combining `$deltaToken` with any other query option is `422`. The cursor is an offset in the shared data file, so a write to another collection advances it without adding a row here
   - Example: `GET /orders?$deltaToken=`, then `GET /orders?$deltaToken=18432`
 
-- **`$orderby=field [asc|desc], ...`** - Sort by up to 8 top-level fields. Each field has its own direction; a missing direction is ascending. Applied after `$filter`, before `$skip`/`$top`. A missing or null value sorts after a present one, then `_id` ascending breaks a remaining tie.
+- **`$orderby=field [asc|desc], ...`** - Sort by up to 8 top-level fields. Each field has its own direction; a missing direction is ascending. Applied after `$filter` and `$search`, before `$skip`/`$top`. A missing or null value sorts after a present one, then `_id` ascending breaks a remaining tie.
   - Examples: `GET /users?$orderby=country,age desc`, `GET /trades?$orderby=settlementDate,tradeDate,creationDateTime,UID`
 
 - **`$filter=expression`** - Filter documents
@@ -240,23 +240,30 @@ YarDB implements OData-compliant query parameters for advanced querying:
   - Example: `GET /users?$filter=status ne 'deleted'`, `GET /users?$filter=not%20contains(email,'@example')`, `GET /users?$filter=startswith(name,'A')` (requires `name` indexed), `GET /trades?$filter=year(tradeDate)%20eq%202026`
   - Indexed primitive types remain distinct (`1`, `1.0`, `"1"`, and `true` are separate keys); numeric ranges use numeric ordering
 
+- **`$search=phrase`** - Keep documents whose string values contain the phrase
+  - The phrase is one literal substring, matched the same way `contains` matches: case-sensitive, no wildcards. `GET /instruments?$search=Bond` keeps a document when `Bond` occurs in any string value
+  - Nested objects and arrays are scanned. Object keys are not. Numbers, booleans, nulls, and timestamps are not turned into text, and `@odata.*` annotations are not searched
+  - AND with `$filter`. Empty `$search` is 422
+  - Runs at the same point as `$filter`: after `$compute` and `$apply`, before `$orderby` / `$skip` / `$top` / `$expand` / `$select`. `$count=true` counts the same rows. The `$skiptoken` link keeps `$search`
+  - Example: `GET /instruments?$search=Bond`, `GET /instruments?$search=Bond&$filter=currency%20eq%20'EUR'`
+
 - **`$select=field1,field2`** - Project specific fields
   - Example: `GET /users?$select=name,email`
   - Note: `_id` field is always included
 
 - **`$count=true`** - Return count of matching documents instead of items
   - Returns a JSON number in the response body (e.g. `42`)
-  - Works with `$filter` (including `or`, `ne`, and string functions)
+  - Works with `$filter` (including `or`, `ne`, and string functions) and `$search`
   - Counts the posting intersection without reading a document when every term of the filter is `_id` or an indexed top-level field bounded by `$eq`/`$gt`/`$gte`/`$lt`/`$lte` and every term joined the intersection, and when it is equality on exactly the fields of a compound key. Otherwise it reads the rows the intersection leaves and applies `document.match`
   - When the filter also names `_id` with `$gt`/`$gte`/`$lt`/`$lte` beside an indexed field, each posting list is trimmed to that `_id` range before the intersection, so the read visits no row outside it. `$orderby=_id` alone, ascending or descending, streams with `$top` like an unordered primary walk, and its `$skiptoken` resumes after the last `_id`
   - Example: `GET /users?$count=true`, `GET /users?$count=true&$filter=age%20gt%2025`
 
 - **`$expand=relatedEntity`** - Nest related documents using the relationship convention: navigation name is singular snake_case; related collection is the plural. Prefer field `{singular}_id` → related `_id`. Otherwise, for each unique secondary key `U` on the related collection (`PUT`/`PATCH /_db/...` `unique`), field `{singular}_{U}` (e.g. `customer_UID` → `customers.UID`, `instrument_isin` → `instruments.isin`) looks up that unique key. Non-unique secondaries are not used. Missing FK fields leave the document unchanged; a present but unusable FK, or a missing target, nests `null`. Applied before `$select`. Multiple navigations: comma-separated. A navigation may take `$select`: `GET /orders?$expand=customer($select=name)`, `GET /holdings?$expand=instrument($select=symbol)`, or `GET /holdings?$expand=instrument($select=name,isin)`. The nested object keeps those properties, and `_id` when `_id` is not listed. A named property that is absent is omitted. Options inside the parentheses are separated by `;`. Any option other than `$select` is 422, including `$expand=instrument($isin=isin)` (that is not a join key). An empty `$select`, a nested path, or a field name that is not a top-level identifier is 422.
 
-- **`$compute`** — project arithmetic aliases before `$filter` / `$select` / paging (OData evaluation order):
+- **`$compute`** — project arithmetic aliases before `$filter` / `$search` / `$select` / paging (OData evaluation order):
   - Example: `GET /lines?$compute=Price mul Qty as LineTotal&$filter=LineTotal gt 10&$select=LineTotal`
   - Operators: `add`, `sub`, `mul`, `div` (top-level numeric fields)
-  - Works with `$count=true` (count after compute + optional `$filter` on aliases)
+  - Works with `$count=true` (count after compute + optional `$filter` / `$search` on the rows)
   - Not combined with `$apply` (422); use `compute(...)` inside `$apply` instead
 
 - **`$apply`** — slash-separated transform pipeline:
@@ -271,7 +278,7 @@ YarDB implements OData-compliant query parameters for advanced querying:
   - Steps: `filter(...)`, `compute(...)`, `groupby((field,...))`, `groupby((field,...),aggregate(...))`, `aggregate(...)`
   - Several names in the group list form one tuple. A missing grouping property is JSON `null` in that column. An empty set is `[]`
   - Aggregate methods: `sum`, `average`, `min`, `max`, and `$count` (`aggregate($count as Alias)` counts every instance; an empty set is `0`)
-  - Optional sibling `$filter` runs after `$apply` (aggregate aliases are visible); pre-aggregation narrowing uses pipeline `filter(...)`
+  - Optional sibling `$filter` runs after `$apply` (aggregate aliases are visible); pre-aggregation narrowing uses pipeline `filter(...)`. Sibling `$search` runs at that same point and is AND-ed with `$filter`
   - Not combined with `$top` / `$skip` / `$orderby` / `$select` / `$expand` / `$count` / `$compute` (422)
   - Full supported-vs-pipeline list: [odata.md](odata.md)
 
@@ -422,7 +429,7 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 - `PUT /collection/id` - Replace document by ID (JSON body follows)
 - `PATCH /collection/id` - Update an existing document (`404` if missing; JSON body follows)
 - `GET /collection/{id}` - Read document by ID
-- `GET /collection?...` - Read collection with OData query parameters (`$top`, `$skip`, `$skiptoken`, `$orderby`, `$filter`, `$select`, `$count=true`, `$expand`, `$compute`, `$apply`, `$deltaToken`)
+- `GET /collection?...` - Read collection with OData query parameters (`$top`, `$skip`, `$skiptoken`, `$orderby`, `$filter`, `$search`, `$select`, `$count=true`, `$expand`, `$compute`, `$apply`, `$deltaToken`)
 - `HEAD /collection/{id}` - Read headers only (no response body)
 - `DELETE /collection/id` - Delete document by ID (appends a delete record; does not rewrite the earlier document)
 

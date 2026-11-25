@@ -263,12 +263,12 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 0. 📊 OData query surface
 - **Checklist**: [odata.md](odata.md) — supported today vs pipeline
-- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/`any`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`; `tolower`/`toupper`; `indexof`/`substring`/`length`/`year`/`month`/`day`). `all` is not supported
+- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/`any`/`all`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`; `tolower`/`toupper`; `indexof`/`substring`/`length`/`year`/`month`/`day`)
 - **`$apply` groupby/aggregate**: ✅ shipped — `groupby((field,...))` / `aggregate`, including multi-key `groupby((country,status),aggregate(...))`; pipeline `filter(...)/compute(...)/groupby(...)`; methods `sum`/`average`/`min`/`max` and `$count` (`aggregate($count as Alias)`)
 - **`$compute`**: ✅ shipped — `Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div`); not combinable with `$apply`
 - **`$expand`**: ✅ shipped — `{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin`. `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`. An unknown option or a bad `$select` is 422
 - **`$deltaToken`**: ✅ shipped — `GET /collection?$deltaToken=` reads from a file offset. Deletes are append-only records. Other query options on the same request are 422
-- **Next**: nested `$expand` and multi-valued refs. `all` stays later
+- **Next**: nested `$expand` and multi-valued refs
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL

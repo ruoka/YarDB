@@ -4444,6 +4444,247 @@ auto register_odata_tests()
         };
     };
 
+    scenario("all matches every element inside an array, [yardb]") = []
+    {
+        const auto line_filter = "lines/all(l: l/qty gt 0)"sv;
+
+        const auto every = json::parse(R"({"_id":1,"lines":[{"qty":1},{"qty":2}]})"s);
+        const auto one_zero = json::parse(R"({"_id":2,"lines":[{"qty":5},{"qty":0}]})"s);
+        const auto empty_lines = json::parse(R"({"_id":3,"lines":[]})"s);
+        const auto missing_lines = json::parse(R"({"_id":4,"note":"none"})"s);
+        const auto lines_object = json::parse(R"({"_id":5,"lines":{"qty":3}})"s);
+
+        given("Orders with a lines array") = [=]
+        {
+            when("Every qty is positive, one is zero, the array is empty, missing, or not an array") = [=]
+            {
+                then("all keeps the full match and the empty array") = [=]
+                {
+                    const auto docs = object{object::array{
+                        every, one_zero, empty_lines, missing_lines, lines_object}};
+                    const auto matched = filter_documents_by_parsed(docs, parse_filter(line_filter));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 3);
+                };
+            };
+
+            when("The call is written without a space after the colon") = [=]
+            {
+                then("lines/all(l:l/qty gt 0) matches the same rows") = [=]
+                {
+                    const auto docs = object{object::array{every, one_zero, empty_lines}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("lines/all(l:l/qty gt 0)"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 3);
+                };
+            };
+
+            when("all is negated, combined, or nested") = [=]
+            {
+                then("not all keeps a partial miss and a missing array, not an empty one") = [=]
+                {
+                    const auto docs = object{object::array{
+                        every, one_zero, empty_lines, missing_lines, lines_object}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter(("not "s + std::string{line_filter})));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 3u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 2);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 4);
+                    check_eq(static_cast<integer_type>(rows[2]["_id"s]), 5);
+                };
+
+                then("or status eq keeps either side") = [=]
+                {
+                    auto kept = json::parse(R"({"_id":6,"status":"open","lines":[{"qty":0}]})"s);
+                    const auto docs = object{object::array{one_zero, kept, every}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter(("status eq 'open' or "s + std::string{line_filter})));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 6);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 1);
+                };
+
+                then("and status eq keeps only the open full match") = [=]
+                {
+                    auto open_miss = json::parse(R"({"_id":7,"status":"open","lines":[{"qty":0}]})"s);
+                    auto open_hit = json::parse(R"({"_id":8,"status":"open","lines":[{"qty":4}]})"s);
+                    const auto docs = object{object::array{every, open_miss, open_hit}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter(("status eq 'open' and "s + std::string{line_filter})));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 8);
+                };
+
+                then("a nested all requires every movement of every option") = [=]
+                {
+                    const auto hit = json::parse(
+                        R"({"_id":1,"options":[{"securitiesMovements":[{"qty":1},{"qty":2}]},{"securitiesMovements":[{"qty":3}]}]})");
+                    const auto miss = json::parse(
+                        R"({"_id":2,"options":[{"securitiesMovements":[{"qty":1},{"qty":0}]}]})");
+                    const auto empty_options = json::parse(R"({"_id":3,"options":[]})"s);
+                    const auto empty_inner = json::parse(
+                        R"({"_id":4,"options":[{"securitiesMovements":[]}]})"s);
+                    const auto docs = object{object::array{hit, miss, empty_options, empty_inner}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter(
+                            "options/all(o: o/securitiesMovements/all(m: m/qty gt 0))"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 3u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 3);
+                    check_eq(static_cast<integer_type>(rows[2]["_id"s]), 4);
+                };
+
+                then("any of an all keeps an option whose lines all match") = [=]
+                {
+                    const auto hit = json::parse(
+                        R"({"_id":1,"options":[{"lines":[{"qty":0}]},{"lines":[{"qty":2},{"qty":3}]}]})");
+                    const auto miss = json::parse(
+                        R"({"_id":2,"options":[{"lines":[{"qty":2},{"qty":0}]}]})");
+                    const auto docs = object{object::array{hit, miss}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs,
+                        parse_filter("options/any(o: o/lines/all(l: l/qty gt 0))"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                };
+            };
+        };
+
+        given("all() and a primitive array") = []
+        {
+            when("The member itself is compared") = []
+            {
+                then("tags/all(t: t eq 'red') needs every string") = []
+                {
+                    const auto docs = object{object::array{
+                        json::parse(R"({"_id":1,"tags":["red","red"]})"s),
+                        json::parse(R"({"_id":2,"tags":["red","blue"]})"s),
+                        json::parse(R"({"_id":3,"tags":[]})"s),
+                        json::parse(R"({"_id":4})"s),
+                        json::parse(R"({"_id":5,"tags":"red"})"s)
+                    }};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("tags/all(t: t eq 'red')"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 2u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                    check_eq(static_cast<integer_type>(rows[1]["_id"s]), 3);
+                };
+
+                then("a predicate and still requires both comparisons") = []
+                {
+                    const auto docs = object{object::array{
+                        json::parse(R"({"_id":1,"lines":[{"qty":1},{"qty":9}]})"s),
+                        json::parse(R"({"_id":2,"lines":[{"qty":1},{"qty":10}]})"s)
+                    }};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("lines/all(l: l/qty gt 0 and l/qty lt 10)"sv));
+                    const auto& rows = matched.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 1);
+                };
+            };
+
+            when("The lambda variable hides a property of the same name") = []
+            {
+                then("l/qty is the member") = []
+                {
+                    const auto hidden = json::parse(
+                        R"({"_id":1,"l":{"qty":0},"lines":[{"qty":4}]})"s);
+                    const auto docs = object{object::array{hidden}};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("lines/all(l: l/qty gt 0)"sv));
+                    require_eq(matched.get<object::array>().size(), 1u);
+                };
+            };
+        };
+
+        given("all is applied before $top on a stored collection") = []
+        {
+            const auto test_file = "./odata_all_top_test.db"s;
+
+            when("The match is not in the first unfiltered page") = [test_file]
+            {
+                then("$top keeps the match") = [test_file]
+                {
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                    auto engine = yar::db::engine{test_file};
+                    auto miss = json::parse(R"({"lines":[{"qty":0}]})"s);
+                    auto hit = json::parse(R"({"lines":[{"qty":2},{"qty":3}]})"s);
+                    require_true(engine.create("orders"s, miss).has_value());
+                    require_true(engine.create("orders"s, hit).has_value());
+
+                    auto selector = object{{"$top"s, 1ll}};
+                    const auto docs = read_with_parsed_filter(
+                        engine,
+                        "orders"s,
+                        selector,
+                        parse_filter("lines/all(l: l/qty gt 0)"sv));
+                    const auto& rows = docs.get<object::array>();
+                    require_eq(rows.size(), 1u);
+                    check_eq(static_cast<integer_type>(rows[0]["_id"s]), 2);
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+
+        given("A malformed all") = []
+        {
+            when("The lambda is nested nine deep, the colon is missing, or the call is bare") = []
+            {
+                then("Parsing is rejected") = []
+                {
+                    auto ninth = "v eq 1"s;
+                    for(auto level = 0; level < 9; ++level)
+                        ninth = "f/all(v: " + ninth + ")";
+                    require_throws_as<std::invalid_argument>([&]
+                    {
+                        std::ignore = parse_filter(ninth);
+                    });
+                    require_throws_as<std::invalid_argument>([]
+                    {
+                        std::ignore = parse_filter("lines/all(l l/qty gt 0)"sv);
+                    });
+                    require_throws_as<std::invalid_argument>([]
+                    {
+                        std::ignore = parse_filter("lines/all()"sv);
+                    });
+                    require_throws_as<std::invalid_argument>([]
+                    {
+                        std::ignore = parse_filter("all(l: l/qty gt 0)"sv);
+                    });
+
+                    auto message = ""s;
+                    try
+                    {
+                        std::ignore = parse_filter("lines/all()"sv);
+                    }
+                    catch(const std::invalid_argument& error)
+                    {
+                        message = error.what();
+                    }
+                    require_true(message.starts_with("all "sv));
+                };
+            };
+        };
+    };
+
     scenario("tolower and toupper fold ASCII case, [yardb]") = []
     {
         given("Names whose case changes in the middle") = []

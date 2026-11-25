@@ -418,14 +418,23 @@ export struct string_filter
 
 export struct parsed_filter;
 
-// One any() / any(var: expr) post-filter. The predicate is parsed once and
-// shared across AND/OR copies. negated flips under `not` without cloning it.
+// any() is the non-empty test. all requires a lambda; an empty array is true.
+export enum class lambda_kind
+{
+    any,
+    all
+};
+
+// One any() / any(var: expr) or all(var: expr) post-filter. The predicate is
+// parsed once and shared across AND/OR copies. negated flips under `not`
+// without cloning it.
 export struct any_filter
 {
     std::string collection;
     std::string variable;
     bool bare = false;
     bool negated = false;
+    lambda_kind kind = lambda_kind::any;
     std::shared_ptr<parsed_filter> predicate;
 
     any_filter() = default;
@@ -478,9 +487,9 @@ export inline constexpr std::size_t max_filter_or_branches = 64;
 export inline constexpr std::size_t max_filter_not_depth = 64;
 export inline constexpr std::size_t max_filter_expression_length = 8192;
 
-// Nested any(var: expr) levels. Eight is accepted; the ninth is rejected.
-// any is not rewritten into per-element OR branches, so this cap is separate
-// from max_filter_or_branches.
+// Nested any(var: expr) / all(var: expr) levels. Eight is accepted; the ninth
+// is rejected. Lambdas are not rewritten into per-element branches, so this
+// cap is separate from max_filter_or_branches.
 export inline constexpr std::size_t max_lambda_depth = 8;
 
 inline void ensure_filter_or_branch_budget(std::size_t branch_count)
@@ -1049,8 +1058,19 @@ inline bool is_lambda_variable(std::string_view name)
     });
 }
 
-// Index of `/any(` at parenthesis depth 0, outside quotes. `/any()` is included.
-inline std::optional<std::size_t> find_any_operator(std::string_view expr)
+// Index of `/any(` or `/all(` at parenthesis depth 0, outside quotes.
+struct lambda_operator
+{
+    std::size_t index = 0;
+    lambda_kind kind = lambda_kind::any;
+};
+
+inline std::string_view lambda_kind_name(lambda_kind kind)
+{
+    return kind == lambda_kind::all ? "all"sv : "any"sv;
+}
+
+inline std::optional<lambda_operator> find_lambda_operator(std::string_view expr)
 {
     auto in_quote = false;
     auto quote_char = char{'\0'};
@@ -1091,12 +1111,14 @@ inline std::optional<std::size_t> find_any_operator(std::string_view expr)
         if(depth != 0)
             continue;
         if(expr.substr(i).starts_with("/any("sv))
-            return i;
+            return lambda_operator{i, lambda_kind::any};
+        if(expr.substr(i).starts_with("/all("sv))
+            return lambda_operator{i, lambda_kind::all};
     }
     return std::nullopt;
 }
 
-inline std::size_t matching_paren(std::string_view text, std::size_t open)
+inline std::size_t matching_paren(std::string_view text, std::size_t open, std::string_view name)
 {
     auto in_quote = false;
     auto quote_char = char{'\0'};
@@ -1131,37 +1153,45 @@ inline std::size_t matching_paren(std::string_view text, std::size_t open)
                 return i;
         }
     }
-    throw std::invalid_argument{"any expression is malformed"};
+    throw std::invalid_argument{std::string{name} + " expression is malformed"};
 }
 
-// nullopt when expr is not an any-call. Throws for a malformed any.
+// nullopt when expr is not an any/all call. Throws for a malformed call.
 inline std::optional<any_filter> try_parse_any_filter(
     std::string_view expr,
     std::size_t not_depth,
     std::size_t lambda_depth)
 {
-    const auto bare_call = expr.starts_with("any("sv);
-    const auto slash = find_any_operator(expr);
-    if(not slash and not bare_call)
+    const auto bare_any = expr.starts_with("any("sv);
+    const auto bare_all = expr.starts_with("all("sv);
+    const auto slash = find_lambda_operator(expr);
+    if(not slash and not bare_any and not bare_all)
         return std::nullopt;
-    if(not slash)
-        throw std::invalid_argument{"any requires a collection path"};
 
-    const auto path = utils::trim(expr.substr(0, *slash));
+    const auto kind = slash ? slash->kind : (bare_all ? lambda_kind::all : lambda_kind::any);
+    const auto name = lambda_kind_name(kind);
+    if(not slash)
+        throw std::invalid_argument{std::string{name} + " requires a collection path"};
+
+    const auto path = utils::trim(expr.substr(0, slash->index));
     if(path.empty())
-        throw std::invalid_argument{"any requires a collection path"};
+        throw std::invalid_argument{std::string{name} + " requires a collection path"};
     std::ignore = split_property_path(path);
 
-    const auto open = *slash + std::string_view{"/any"}.size();
-    const auto close = matching_paren(expr, open);
+    // "/any" and "/all" are the same length, so open is the '('.
+    const auto open = slash->index + std::string_view{"/any"}.size();
+    const auto close = matching_paren(expr, open, name);
     if(not utils::trim(expr.substr(close + 1)).empty())
-        throw std::invalid_argument{"any expression is malformed"};
+        throw std::invalid_argument{std::string{name} + " expression is malformed"};
 
     auto filter = any_filter{};
     filter.collection = std::string{path};
+    filter.kind = kind;
     const auto inner = utils::trim(expr.substr(open + 1, close - open - 1));
     if(inner.empty())
     {
+        if(kind == lambda_kind::all)
+            throw std::invalid_argument{"all requires a lambda expression"};
         filter.bare = true;
         return filter;
     }
@@ -1169,16 +1199,16 @@ inline std::optional<any_filter> try_parse_any_filter(
     const auto colon = find_outside_quotes(inner, ":"sv);
     if(not colon)
         throw std::invalid_argument{
-            "any requires a colon between the lambda variable and the expression"};
+            std::string{name} + " requires a colon between the lambda variable and the expression"};
 
     const auto variable = utils::trim(inner.substr(0, *colon));
     const auto predicate = utils::trim(inner.substr(*colon + 1));
     if(variable.empty())
-        throw std::invalid_argument{"any lambda variable cannot be empty"};
+        throw std::invalid_argument{std::string{name} + " lambda variable cannot be empty"};
     if(not is_lambda_variable(variable) or predicate.empty())
-        throw std::invalid_argument{"any expression is malformed"};
+        throw std::invalid_argument{std::string{name} + " expression is malformed"};
     if(lambda_depth >= max_lambda_depth)
-        throw std::invalid_argument{"any supports at most "s
+        throw std::invalid_argument{std::string{name} + " supports at most "s
             + std::to_string(max_lambda_depth) + " nested lambdas"};
 
     filter.variable = std::string{variable};
@@ -2428,6 +2458,8 @@ inline bool parsed_matches(const eval_scope& scope, const parsed_filter& filter)
     return branch_matches_in_scope(scope, branch);
 }
 
+// any: one element, or a non-empty array when the call is bare. all: every
+// element, and an empty array is true. A missing path or a non-array is false.
 inline bool any_matches(const eval_scope& scope, const any_filter& filter)
 {
     const auto located = locate_path(scope, filter.collection);
@@ -2436,18 +2468,23 @@ inline bool any_matches(const eval_scope& scope, const any_filter& filter)
     if(value != nullptr and value->is_array())
     {
         const auto& items = value->get<xson::object::array>();
-        if(filter.bare)
+        const auto element_matches = [&](const xson::object& member)
+        {
+            auto inner = scope;
+            inner.owner = located.owner;
+            inner.bindings.push_back({filter.variable, &member});
+            return parsed_matches(inner, *filter.predicate);
+        };
+
+        if(filter.kind == lambda_kind::all)
+        {
+            if(filter.predicate)
+                matched = std::ranges::all_of(items, element_matches);
+        }
+        else if(filter.bare)
             matched = not items.empty();
         else if(filter.predicate)
-        {
-            matched = std::ranges::any_of(items, [&](const xson::object& member)
-            {
-                auto inner = scope;
-                inner.owner = located.owner;
-                inner.bindings.push_back({filter.variable, &member});
-                return parsed_matches(inner, *filter.predicate);
-            });
-        }
+            matched = std::ranges::any_of(items, element_matches);
     }
     return filter.negated ? not matched : matched;
 }
@@ -2745,7 +2782,7 @@ export inline auto read_with_parsed_filter(
     lower_startswith_filters(indexed_keys, query_selector, string_filters);
 
     // Post-filter functions (contains/endswith/non-indexed startswith),
-    // negated comparison atoms, and any() run before $top/$skip/$orderby.
+    // negated comparison atoms, and any()/all() run before $top/$skip/$orderby.
     // Otherwise paging is applied to the unfiltered scan and matching rows
     // outside the window are silently dropped.
     if(not string_filters.empty()

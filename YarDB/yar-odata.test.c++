@@ -2140,9 +2140,50 @@ auto register_odata_tests()
                 then("Comma-separated snake_case names are kept") = []
                 {
                     const auto navs = parse_expand_navigations("customer, product"sv);
-                    require_eq(navs.size(), 2u);
-                    check_eq(navs[0], "customer"s);
-                    check_eq(navs[1], "product"s);
+                    require_true(navs.has_value());
+                    require_eq(navs->size(), 2u);
+                    check_eq(navs->at(0).name, "customer"s);
+                    require_false(navs->at(0).select.has_value());
+                    check_eq(navs->at(1).name, "product"s);
+                    require_false(navs->at(1).select.has_value());
+                };
+
+                then("Nested $select names the kept properties") = []
+                {
+                    const auto navs = parse_expand_navigations(
+                        "customer($select=name),instrument($select=name,isin)"sv);
+                    require_true(navs.has_value());
+                    require_eq(navs->size(), 2u);
+                    check_eq(navs->at(0).name, "customer"s);
+                    require_true(navs->at(0).select.has_value());
+                    require_eq(navs->at(0).select->size(), 1u);
+                    check_eq(navs->at(0).select->at(0), "name"s);
+                    check_eq(navs->at(1).name, "instrument"s);
+                    require_true(navs->at(1).select.has_value());
+                    require_eq(navs->at(1).select->size(), 2u);
+                    check_eq(navs->at(1).select->at(0), "name"s);
+                    check_eq(navs->at(1).select->at(1), "isin"s);
+                };
+
+                then("An unknown option or a bad $select is rejected") = []
+                {
+                    const auto join_key = parse_expand_navigations("instrument($isin=isin)"sv);
+                    require_false(join_key.has_value());
+                    check_true(join_key.error().contains("not supported"sv));
+
+                    const auto unknown = parse_expand_navigations("customer($top=1)"sv);
+                    require_false(unknown.has_value());
+
+                    const auto empty_select = parse_expand_navigations("customer($select=)"sv);
+                    require_false(empty_select.has_value());
+                    check_true(empty_select.error().contains("$select"sv));
+
+                    const auto nested = parse_expand_navigations("customer($select=name/city)"sv);
+                    require_false(nested.has_value());
+                    check_true(nested.error().contains("top-level"sv));
+
+                    const auto trailing = parse_expand_navigations("customer($select=name,)"sv);
+                    require_false(trailing.has_value());
                 };
             };
         };
@@ -2635,6 +2676,168 @@ auto register_odata_tests()
                     const auto& doc = expanded.get<xson::object::array>()[0];
                     require_true(doc.has("customer_code"s));
                     require_false(doc.has("customer"s));
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+        };
+    };
+
+    scenario("apply_expand $select keeps named properties and _id, [yardb]") = []
+    {
+        given("Orders that reference a customer and an instrument") = []
+        {
+            const auto test_file = "./odata_expand_select_test.db"s;
+
+            when("Expanding with $select on each navigation") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto customer = xson::object{
+                    {"name"s, "Ada"s},
+                    {"city"s, "Turku"s},
+                    {"isin"s, "FI0009000681"s}
+                };
+                require_true(engine.create("customers"s, customer).has_value());
+                const auto customer_id = static_cast<xson::integer_type>(customer["_id"s]);
+
+                auto instrument = xson::object{
+                    {"isin"s, "FI0009000681"s},
+                    {"name"s, "Nokia"s},
+                    {"venue"s, "XHEL"s}
+                };
+                require_true(engine.create("instruments"s, instrument).has_value());
+                const auto instrument_id = static_cast<xson::integer_type>(instrument["_id"s]);
+
+                auto order = xson::object{
+                    {"customer_id"s, customer_id},
+                    {"instrument_id"s, instrument_id},
+                    {"qty"s, 10}
+                };
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(
+                    documents,
+                    "customer($select=name),instrument($select=isin)"sv,
+                    "orders"s,
+                    engine);
+                const auto both = apply_expand(
+                    documents,
+                    "customer($select=name,isin)"sv,
+                    "orders"s,
+                    engine);
+
+                then("Each nested document keeps _id and the named properties") = [
+                    expanded, both, customer_id, instrument_id, test_file]
+                {
+                    require_true(expanded.is_array());
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc["customer"s].is_object());
+                    check_eq(static_cast<xson::integer_type>(doc["customer"s]["_id"s]), customer_id);
+                    check_eq(static_cast<std::string>(doc["customer"s]["name"s]), "Ada"s);
+                    require_false(doc["customer"s].has("city"s));
+                    require_false(doc["customer"s].has("isin"s));
+
+                    require_true(doc["instrument"s].is_object());
+                    check_eq(static_cast<xson::integer_type>(doc["instrument"s]["_id"s]), instrument_id);
+                    check_eq(static_cast<std::string>(doc["instrument"s]["isin"s]), "FI0009000681"s);
+                    require_false(doc["instrument"s].has("name"s));
+                    require_false(doc["instrument"s].has("venue"s));
+                    check_eq(static_cast<xson::integer_type>(doc["qty"s]), 10);
+
+                    const auto& selected = both.get<xson::object::array>()[0]["customer"s];
+                    check_eq(static_cast<std::string>(selected["name"s]), "Ada"s);
+                    check_eq(static_cast<std::string>(selected["isin"s]), "FI0009000681"s);
+                    require_true(selected.has("_id"s));
+                    require_false(selected.has("city"s));
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("The related document is missing") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                auto order = xson::object{{"customer_id"s, 999999ll}, {"qty"s, 1}};
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(
+                    documents, "customer($select=name)"sv, "orders"s, engine);
+
+                then("The navigation is null") = [expanded, test_file]
+                {
+                    const auto& doc = expanded.get<xson::object::array>()[0];
+                    require_true(doc["customer"s].is_null());
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("$select is used with a unique secondary key") = [test_file]
+            {
+                std::remove(test_file.c_str());
+                std::remove((test_file + ".pid").c_str());
+
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index("instruments"s, {"isin"s}, {"isin"s}).has_value());
+
+                auto instrument = xson::object{
+                    {"isin"s, "FI0009000681"s},
+                    {"name"s, "Nokia"s}
+                };
+                require_true(engine.create("instruments"s, instrument).has_value());
+                const auto instrument_id = static_cast<xson::integer_type>(instrument["_id"s]);
+
+                auto order = xson::object{{"instrument_isin"s, "FI0009000681"s}, {"qty"s, 2}};
+                require_true(engine.create("orders"s, order).has_value());
+
+                auto documents = xson::object{};
+                require_true(engine.read("orders"s, xson::object{}, documents));
+                const auto expanded = apply_expand(
+                    documents, "instrument($select=isin)"sv, "orders"s, engine);
+
+                then("The nested instrument keeps _id and isin") = [expanded, instrument_id, test_file]
+                {
+                    const auto& nested = expanded.get<xson::object::array>()[0]["instrument"s];
+                    require_true(nested.is_object());
+                    check_eq(static_cast<xson::integer_type>(nested["_id"s]), instrument_id);
+                    check_eq(static_cast<std::string>(nested["isin"s]), "FI0009000681"s);
+                    require_false(nested.has("name"s));
+
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+                };
+            };
+
+            when("The expand option is not $select") = [test_file]
+            {
+                then("apply_expand rejects it") = [test_file]
+                {
+                    std::remove(test_file.c_str());
+                    std::remove((test_file + ".pid").c_str());
+
+                    auto engine = yar::db::engine{test_file};
+                    auto documents = xson::object{xson::object::array{}};
+                    require_throws_as<std::invalid_argument>([&] {
+                        std::ignore = apply_expand(
+                            documents, "instrument($isin=isin)"sv, "orders"s, engine);
+                    });
+                    require_throws_as<std::invalid_argument>([&] {
+                        std::ignore = apply_expand(
+                            documents, "customer($select=)"sv, "orders"s, engine);
+                    });
 
                     std::remove(test_file.c_str());
                     std::remove((test_file + ".pid").c_str());

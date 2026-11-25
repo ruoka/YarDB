@@ -6913,6 +6913,127 @@ auto test_set()
     require_eq(static_cast<string>(error["message"s]), "Document not found"s);
     };
 
+    test_case("$deltaToken returns changes and a cursor, [yardb]") = []
+    {
+        const auto test_file = "./httpd_delta_token_test.db";
+        const auto setup = fixture{test_file};
+
+        auto [post_status, post_reason, post_headers, post_body] = make_request(
+            setup.port(), "POST"s, "/feed"s, R"({"name":"ada"})"s);
+        require_eq(post_status, "201"s);
+        (void)post_reason;
+        (void)post_headers;
+        const auto created = json::parse(post_body);
+        const auto id = static_cast<xson::integer_type>(created["_id"s]);
+
+        auto [plain_status, plain_reason, plain_headers, plain_body] = make_request(
+            setup.port(), "GET"s, "/feed"s, ""s);
+        require_eq(plain_status, "200"s);
+        (void)plain_reason;
+        (void)plain_headers;
+        require_true(json::parse(plain_body).is_array());
+
+        auto [start_status, start_reason, start_headers, start_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken="s, ""s);
+        require_eq(start_status, "200"s);
+        require_eq(start_reason, "OK"s);
+        (void)start_headers;
+        const auto start = json::parse(start_body);
+        require_eq(start["value"s].get<object::array>().size(), 1u);
+        require_eq(static_cast<string>(start["value"s][0]["name"s]), "ada"s);
+        const auto token = static_cast<string>(start["deltaToken"s]);
+        require_false(token.empty());
+
+        auto [bare_status, bare_reason, bare_headers, bare_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken"s, ""s);
+        require_eq(bare_status, "200"s);
+        (void)bare_reason;
+        (void)bare_headers;
+        const auto bare = json::parse(bare_body);
+        require_eq(static_cast<string>(bare["deltaToken"s]), token);
+        require_eq(bare["value"s].get<object::array>().size(), 1u);
+
+        auto [idle_status, idle_reason, idle_headers, idle_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken="s + token, ""s);
+        require_eq(idle_status, "200"s);
+        (void)idle_reason;
+        (void)idle_headers;
+        const auto idle = json::parse(idle_body);
+        require_true(idle["value"s].get<object::array>().empty());
+        require_eq(static_cast<string>(idle["deltaToken"s]), token);
+
+        auto [second_status, second_reason, second_headers, second_body] = make_request(
+            setup.port(), "POST"s, "/feed"s, R"({"name":"bea"})"s);
+        require_eq(second_status, "201"s);
+        (void)second_reason;
+        (void)second_headers;
+        (void)second_body;
+
+        auto [next_status, next_reason, next_headers, next_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken="s + token, ""s);
+        require_eq(next_status, "200"s);
+        (void)next_reason;
+        (void)next_headers;
+        const auto next = json::parse(next_body);
+        require_eq(next["value"s].get<object::array>().size(), 1u);
+        require_eq(static_cast<string>(next["value"s][0]["name"s]), "bea"s);
+        const auto after_create = static_cast<string>(next["deltaToken"s]);
+
+        auto [patch_status, patch_reason, patch_headers, patch_body] = make_request(
+            setup.port(), "PATCH"s, "/feed/"s + std::to_string(id), R"({"name":"ada2"})"s);
+        require_eq(patch_status, "200"s);
+        (void)patch_reason;
+        (void)patch_headers;
+        (void)patch_body;
+
+        auto [delete_status, delete_reason, delete_headers, delete_body] = make_request(
+            setup.port(), "DELETE"s, "/feed/"s + std::to_string(id), ""s);
+        require_eq(delete_status, "204"s);
+        (void)delete_reason;
+        (void)delete_headers;
+        (void)delete_body;
+
+        auto [changed_status, changed_reason, changed_headers, changed_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken="s + after_create, ""s);
+        require_eq(changed_status, "200"s);
+        (void)changed_reason;
+        (void)changed_headers;
+        const auto changed = json::parse(changed_body);
+        require_eq(changed["value"s].get<object::array>().size(), 2u);
+        require_eq(static_cast<string>(changed["value"s][0]["name"s]), "ada2"s);
+        require_eq(static_cast<xson::integer_type>(changed["value"s][0]["_id"s]), id);
+        require_eq(static_cast<xson::integer_type>(changed["value"s][1]["_id"s]), id);
+        require_eq(static_cast<string>(changed["value"s][1]["@removed"s]["reason"s]), "deleted"s);
+
+        auto [live_status, live_reason, live_headers, live_body] = make_request(
+            setup.port(), "GET"s, "/feed/"s + std::to_string(id), ""s);
+        require_eq(live_status, "404"s);
+        (void)live_reason;
+        (void)live_headers;
+        (void)live_body;
+
+        auto [bad_status, bad_reason, bad_headers, bad_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken=nope"s, ""s);
+        require_eq(bad_status, "400"s);
+        require_eq(bad_reason, "Bad Request"s);
+        (void)bad_headers;
+        require_eq(static_cast<string>(json::parse(bad_body)["message"s]), "Unknown $deltaToken"s);
+
+        auto [offset_status, offset_reason, offset_headers, offset_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken=1"s, ""s);
+        require_eq(offset_status, "400"s);
+        (void)offset_reason;
+        (void)offset_headers;
+        require_eq(static_cast<string>(json::parse(offset_body)["message"s]), "Unknown $deltaToken"s);
+
+        auto [mixed_status, mixed_reason, mixed_headers, mixed_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken=&$top=1"s, ""s);
+        require_eq(mixed_status, "422"s);
+        (void)mixed_reason;
+        (void)mixed_headers;
+        (void)mixed_body;
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

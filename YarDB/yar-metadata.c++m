@@ -21,7 +21,7 @@ struct metadata
     enum action : char {
         created = 'C',  // Document was created
         updated = 'U',  // Document was updated (old version)
-        deleted = 'D',  // Document was deleted
+        deleted = 'D',  // Appended delete record, or an older in-place tombstone
         group_begin = 'B',  // Start of an atomic group; not a document
         group_commit = 'M'  // Commit of an atomic group; body lists tombstones
     };

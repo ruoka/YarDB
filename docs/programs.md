@@ -102,7 +102,7 @@ Once running, `yardb` provides the following REST endpoints:
 - `GET /{collection}/{id}/history` - Versions of that live document, newest first. Each row is `timestamp` (when that version was written), `status` (the record's metadata action: `created` on the live version, `updated` on a superseded one) and `document` (the stored body). A missing id is `404`, the same as `GET /{collection}/{id}`
 - `PUT /{collection}/{id}` - Replace document by ID (upsert: creates if not exists, updates if exists)
 - `PATCH /{collection}/{id}` - Partially update an existing document (`404` if missing; does not create)
-- `DELETE /{collection}/{id}` - Delete document by ID
+- `DELETE /{collection}/{id}` - Delete document by ID. Appends a delete record at the end of the file (collection, `_id`, status `deleted`) and does not rewrite the earlier document. A later `GET` of that id is `404`
 - `HEAD /{collection}` - Get collection headers (same as GET but no body)
 - `HEAD /{collection}/{id}` - Get document headers (same as GET but no body)
 - `GET /$metadata` - OData 4.01 JSON CSDL service metadata
@@ -177,9 +177,9 @@ Several known rows are several short reads, not one `UID in (...)` list. The 819
 
 Requests in one group must be adjacent in `requests`. Each group is committed on its own, in order. A later group that fails does not roll back an earlier group in the same POST. Inside a group the allowed methods are `POST`, `PUT`, `PATCH`, and `DELETE` on collection documents (`/collection` or `/collection/id`).
 
-The engine holds `m_rwlock` for the whole group, so a reader never observes a half-applied group. It appends a `group_begin` record, then one `created` record per new document version, then a `group_commit` record whose body lists prior file positions to mark `updated` or `deleted`. Those status bytes are written only after the commit record is flushed. Priors stay live on disk until that commit is durable, so a crash cannot drop the previous row.
+The engine holds `m_rwlock` for the whole group, so a reader never observes a half-applied group. It appends a `group_begin` record, then one `created` record per new document version, then one delete record per `DELETE` (collection, `_id`, status `deleted`), then a `group_commit` record. The commit body lists prior file positions to mark `updated`. Those updated status bytes are written only after the commit record is flushed. A delete does not rewrite the earlier document. Priors stay live on disk until that commit is durable, so a crash cannot drop the previous row. A crash that loses the commit record truncates the whole group, including its delete records.
 
-Reopen keeps the existing torn-tail trim, then discards a group that has no commit record by truncating at `group_begin`. If a commit record is durable but its tombstones did not finish, reopen applies the listed positions before indexing. Two `created` rows for one `_id` are still healed by the dual-live rule (the later row wins, the earlier status becomes `updated`).
+Reopen keeps the existing torn-tail trim, then discards a group that has no commit record by truncating at `group_begin`. If a commit record is durable but its updated status bytes did not finish, reopen applies the listed positions before indexing. A delete record in a committed group hides that `_id` even when the earlier document is still status `created`. Older files may still list delete positions in a commit record; reopen applies those in-place tombstones before indexing. Two `created` rows for one `_id` are still healed by the dual-live rule (the later row wins, the earlier status becomes `updated`).
 
 Each successful create, replace, or update returns that document's ETag (the new record's file position), the same value a single write would return. `DELETE` is `204` with no ETag. `If-Match` / `If-None-Match` / `If-Unmodified-Since` are evaluated against the version visible at that step in the group, before any byte is appended. One failure fails the group and nothing in it is applied. `dependsOn` orders requests and skips a request whose dependency failed; it does not copy that request's new ETag into a later `If-Match`. `If-Match` of a specific ETag still does not observe a successor written earlier in the same group. `If-Match: *` still means the document must already exist.
 
@@ -221,6 +221,9 @@ YarDB implements OData-compliant query parameters for advanced querying:
 
 - **`$skiptoken`** - Resume a later `$top` page after the last row already returned. The body stays a JSON array. When another row exists, the response has `Link: </collection?$skiptoken=...>; rel="next"`. The client follows that URL as-is. The link keeps `$filter`, `$orderby`, `$top`, and `$select`, and drops `$skip`. The token is opaque base64url and is a keyset, not a count of rows. With no `$orderby` the key is the last row's `_id` and the next read starts at the next primary key (`$desc=true` walks that order backward). With `$orderby` the key is the last row's sort values plus `_id`, and the next page is the rows strictly after that tuple. `$skip` together with `$skiptoken` is 422. A malformed token, or a token from a different sort, is 422. Omitting `$top` returns every match and no next link
   - Example: `GET /users?$top=10`, then `GET` the `Link` header URL
+
+- **`$deltaToken`** - Changes for this collection since a cursor into the append-only file. The body is a JSON object, not an array: `{"value":[...],"deltaToken":"<next>"}`. `value` lists each new or updated document in file order, and each delete as `{"_id":1,"@removed":{"reason":"deleted"}}`. The delete entry comes from a delete record appended by `DELETE` (or a `$batch` delete), not from an in-place status byte. `deltaToken` is the file offset to send on the next call; pass it back as `$deltaToken=<token>`. A missing value (`?$deltaToken`) or an empty one (`?$deltaToken=`) reads from the start and still returns a token. A token that is not the start of a record, or is past the end of the file, is `400` with message `Unknown $deltaToken`. Combining `$deltaToken` with any other query option is `422`. The cursor is an offset in the shared data file, so a write to another collection advances it without adding a row here
+  - Example: `GET /orders?$deltaToken=`, then `GET /orders?$deltaToken=18432`
 
 - **`$orderby=field [asc|desc], ...`** - Sort by up to 8 top-level fields. Each field has its own direction; a missing direction is ascending. Applied after `$filter`, before `$skip`/`$top`. A missing or null value sorts after a present one, then `_id` ascending breaks a remaining tie.
   - Examples: `GET /users?$orderby=country,age desc`, `GET /trades?$orderby=settlementDate,tradeDate,creationDateTime,UID`
@@ -418,9 +421,9 @@ Once connected, enter an HTTP method and path on one line. For `POST`/`PUT`/`PAT
 - `PUT /collection/id` - Replace document by ID (JSON body follows)
 - `PATCH /collection/id` - Update an existing document (`404` if missing; JSON body follows)
 - `GET /collection/{id}` - Read document by ID
-- `GET /collection?...` - Read collection with OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count=true`)
+- `GET /collection?...` - Read collection with OData query parameters (`$top`, `$skip`, `$orderby`, `$filter`, `$select`, `$count=true`, `$deltaToken`)
 - `HEAD /collection/{id}` - Read headers only (no response body)
-- `DELETE /collection/id` - Delete document by ID
+- `DELETE /collection/id` - Delete document by ID (appends a delete record; does not rewrite the earlier document)
 
 #### Administrative Commands
 
@@ -667,6 +670,7 @@ yarexport [--help] [--file=<name>] [--live]
 
 **Full export** (default) includes:
 - `collection`, `status`, `timestamp`, `position`, `previous`, `document`
+- A delete is a record at the end of the file with `status` `deleted` and `document` `{"_id": ...}`. The earlier document is still in the file with its original bytes. `--live` omits that history and does not emit the deleted id
 
 **Live export** (`--live`) includes:
 - `collection`, `document` (current versions only, including live `_db` index configs)

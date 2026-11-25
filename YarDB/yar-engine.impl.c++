@@ -189,6 +189,15 @@ bool is_known_status(yar::db::metadata::action status)
         or is_group_marker(status);
 }
 
+// A delete record carries _id and no other fields. Drop that primary key.
+// Secondary postings for the id are removed by finish_load().
+void erase_deleted_document(yar::db::index& index, const yar::db::object& document)
+{
+    if(not document.has("_id"s) or not document["_id"s].is_integer())
+        return;
+    index.erase(document);
+}
+
 // Replay tombstones named by a durable group_commit. Idempotent: rewriting an
 // already-updated or already-deleted status byte is a no-op. Runs before
 // indexing so a crash between the commit record and the status bytes cannot
@@ -667,7 +676,16 @@ void yar::db::engine::populate_indexes()
         if(is_group_marker(metadata.status))
             continue;
 
-        if(metadata.status == metadata::deleted or metadata.status == metadata::updated)
+        // An appended delete record names the _id and does not rewrite the
+        // earlier document. Hide that id. An older in-place tombstone is
+        // already status deleted and was never loaded.
+        if(metadata.status == metadata::deleted)
+        {
+            erase_deleted_document(m_index[metadata.collection], document);
+            continue;
+        }
+
+        if(metadata.status == metadata::updated)
             continue;
 
         auto& index = m_index[metadata.collection];
@@ -719,9 +737,14 @@ yar::db::db_result<> yar::db::engine::reindex()
 
         auto& rebuilt_index = rebuilt[metadata.collection];
         rebuilt_index.update(document);
+        if(metadata.status == metadata::deleted)
+        {
+            erase_deleted_document(rebuilt_index, document);
+            continue;
+        }
         // Rebuilds must not mutate durable statuses; reopen already heals
         // dual-live rows. finish_load() keeps the later version in memory.
-        if(metadata.status != metadata::deleted and metadata.status != metadata::updated)
+        if(metadata.status != metadata::updated)
             rebuilt_index.load(document, metadata.position);
     }
     m_storage.clear();
@@ -1703,73 +1726,68 @@ yar::db::db_result<std::size_t> yar::db::engine::destroy(
     for(const auto& document : documents.get<yar::db::object::array>())
         staged_index.erase(document, log);
 
-    // Same failbit discipline as multi-update append: do not clear() away a
-    // mid-loop status write failure. Otherwise a later successful seekp/write
-    // masks the error, flush succeeds, and we publish a full delete while some
-    // rows remain status=created — they resurrect on reopen.
-    for(const auto position : positions)
+    for(const auto& document : documents.get<yar::db::object::array>())
+    {
+        if(not document.has("_id"s) or not document["_id"s].is_integer())
+            return std::unexpected{db_error(
+                db_error_code::corrupt_storage,
+                db_operation::destroy,
+                "Cannot append a delete record without an integer _id"s)};
+    }
+
+    // Append one small record per delete at the end. Do not seek back to the
+    // earlier document: its bytes stay as they were. Reopen hides the id when
+    // it reads this record. Same failbit discipline as a multi-update append:
+    // do not clear() away a mid-loop write failure, or a later record would
+    // mask it and we would publish a delete the file does not contain.
+    m_storage.clear();
+    m_storage.seekp(0, m_storage.end);
+    for(const auto& document : documents.get<yar::db::object::array>())
     {
         if(m_storage.fail())
             break;
 
-        m_storage.clear();
-        m_storage.seekp(position, m_storage.beg);
-        m_storage << yar::db::deleted;
-        if(m_storage.fail())
-            break;
+        auto metadata_record = yar::db::metadata{yar::db::metadata::deleted};
+        metadata_record.collection = std::string{collection};
+        auto marker = yar::db::object{{"_id"s, document["_id"s]}};
+        m_storage << metadata_record << marker;
     }
     m_storage.flush();
     if(m_storage.fail())
     {
-        // Delete markers were flushed. If undo cannot restore created, durable
-        // tombstones remain and reopen would drop the docs while we reported
-        // failure — commit the staged index so API and disk agree. Re-assert
-        // deleted markers in case a partial restore revived some rows.
+        // Nothing before original_size was rewritten. Truncating the tail
+        // undoes the append. If the tail cannot be truncated and every delete
+        // record is complete, reopen will hide those ids — publish the index.
         const auto rolled_back = rollback(
             m_storage,
             m_db,
             original_size,
-            positions);
-        if(rolled_back == rollback_result::status_restore_failed)
+            {});
+        if(rolled_back == rollback_result::truncate_failed
+            and complete_appended_records(
+                m_storage,
+                m_db,
+                original_size,
+                positions.size()))
         {
-            for(const auto position : positions)
-            {
-                if(m_storage.fail())
-                    break;
-
-                m_storage.clear();
-                m_storage.seekp(position, m_storage.beg);
-                m_storage << yar::db::deleted;
-                if(m_storage.fail())
-                    break;
-            }
-            m_storage.flush();
-            if(m_storage.fail())
-            {
-                // Cannot prove every row is tombstoned. Refuse further writes;
-                // still keep the index edits so durable deletes are not served live.
-                m_writable = false;
-                undo.commit();
-                return std::unexpected{db_error(
-                    db_error_code::rollback_failure,
-                    db_operation::destroy,
-                    "Delete markers could not be fully re-asserted after a failed status restore"s)};
-            }
             undo.commit();
             return positions.size();
         }
         if(rolled_back != rollback_result::ok)
         {
+            // The tail may already contain complete delete records. Keep the
+            // index edits so those ids are not served, and refuse further writes.
             m_writable = false;
+            undo.commit();
             return std::unexpected{db_error(
                 db_error_code::rollback_failure,
                 db_operation::destroy,
-                "Delete failed and changed statuses could not be restored"s)};
+                "Delete append failed and could not be rolled back"s)};
         }
         return std::unexpected{db_error(
             db_error_code::io_failure,
             db_operation::destroy,
-            "Failed to mark documents as deleted"s)};
+            "Failed to append delete records"s)};
     }
 
     undo.commit();
@@ -2242,14 +2260,28 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         std::string collection;
         object document;
         bool mark_updated = false;
-        bool mark_deleted = false;
         metadata metadata_record{};
     };
 
+    // Update and replace mark the prior record updated after the commit.
+    // A delete that stays appended leaves earlier bytes alone. A delete that a
+    // later request in this group cancels is recorded here so the superseded
+    // row is marked updated, the same as a normal update.
     struct prior_mark
     {
         position_type position;
-        bool deleted = false;
+    };
+
+    struct appended_delete
+    {
+        std::string collection;
+        std::int64_t id = 0;
+        // The row this delete supersedes. A later recreate in the group drops
+        // the delete and marks that row updated, the same as a normal update.
+        // prior_position is an on-disk record. append_index is a version this
+        // group has not written yet.
+        std::optional<position_type> prior_position;
+        std::optional<std::size_t> append_index;
     };
 
     struct item_plan
@@ -2271,6 +2303,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
     auto undo = write_undo{m_index};
     auto appends = std::vector<planned_append>{};
     auto priors = std::vector<prior_mark>{};
+    auto pending_deletes = std::vector<appended_delete>{};
     auto plans = std::vector<item_plan>{};
     auto live_appends = std::flat_map<std::pair<std::string, std::int64_t>, std::size_t>{};
     plans.reserve(requests.size());
@@ -2339,6 +2372,22 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         const auto queue_append = [&](object document, batch_effect effect, const object* prior = nullptr)
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
+            // A later create or upsert in this group puts the id back. Drop the
+            // delete so it is not appended after the new version, and mark the
+            // superseded row updated so $deltaToken does not keep emitting it.
+            for(auto pending = pending_deletes.begin(); pending != pending_deletes.end();)
+            {
+                if(pending->collection != request.collection or pending->id != id)
+                {
+                    ++pending;
+                    continue;
+                }
+                if(pending->append_index.has_value())
+                    appends[*pending->append_index].mark_updated = true;
+                else if(pending->prior_position.has_value())
+                    priors.push_back({*pending->prior_position});
+                pending = pending_deletes.erase(pending);
+            }
             auto* log = undo.log(request.collection);
             auto& collection_index = undo[request.collection];
             // A negative position until the group is written. -1 stays "no
@@ -2350,7 +2399,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             else
                 collection_index.insert(document, placeholder, log);
             const auto slot = appends.size();
-            appends.push_back({request.collection, document, false, false, {}});
+            appends.push_back({request.collection, document, false, {}});
             live_appends[{request.collection, id}] = slot;
             remember(effect, std::move(document), slot);
         };
@@ -2410,11 +2459,14 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
                 return std::unexpected{fail(
                     index, db_error_code::precondition_failed, "Write preconditions were not met"s)};
 
+            auto tombstone = appended_delete{};
+            tombstone.collection = request.collection;
+            tombstone.id = id;
             if(current.append_index.has_value())
-                appends[*current.append_index].mark_deleted = true;
-            else
-                priors.push_back({current.metadata_record.position, true});
-
+                tombstone.append_index = *current.append_index;
+            else if(current.metadata_record.position >= 0)
+                tombstone.prior_position = static_cast<position_type>(current.metadata_record.position);
+            pending_deletes.push_back(std::move(tombstone));
             undo[request.collection].erase(current.document, undo.log(request.collection));
             live_appends.erase({request.collection, id});
             remember(batch_effect::deleted, current.document, std::nullopt);
@@ -2470,7 +2522,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             if(current.append_index.has_value())
                 appends[*current.append_index].mark_updated = true;
             else
-                priors.push_back({current.metadata_record.position, false});
+                priors.push_back({current.metadata_record.position});
 
             undo[request.collection].update(document, undo.log(request.collection));
             if(const auto clash = undo[request.collection].conflicts_with(document))
@@ -2515,6 +2567,24 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             writes_ok = false;
     }
 
+    for(const auto& item : pending_deletes)
+    {
+        if(not writes_ok or m_storage.fail())
+        {
+            writes_ok = false;
+            break;
+        }
+
+        m_storage.clear();
+        m_storage.seekp(0, m_storage.end);
+        auto metadata_record = metadata{metadata::deleted};
+        metadata_record.collection = item.collection;
+        auto marker = object{{"_id"s, static_cast<xson::integer_type>(item.id)}};
+        m_storage << metadata_record << marker;
+        if(m_storage.fail())
+            writes_ok = false;
+    }
+
     auto commit_written = false;
     if(writes_ok)
     {
@@ -2526,12 +2596,10 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
                 object{static_cast<xson::integer_type>(position)});
         };
         for(const auto& prior : priors)
-            push_position(prior.deleted ? deleted : updated, prior.position);
+            push_position(updated, prior.position);
         for(const auto& item : appends)
         {
-            if(item.mark_deleted)
-                push_position(deleted, item.metadata_record.position);
-            else if(item.mark_updated)
+            if(item.mark_updated)
                 push_position(updated, item.metadata_record.position);
         }
 
@@ -2551,7 +2619,7 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
     if(not writes_ok or m_storage.fail())
     {
         const auto rolled_back = rollback(m_storage, m_db, original_size, {});
-        const auto full_count = appends.size() + 2;
+        const auto full_count = appends.size() + pending_deletes.size() + 2;
         if(rolled_back == rollback_result::truncate_failed
             and commit_written
             and complete_appended_records(m_storage, m_db, original_size, full_count))
@@ -2595,12 +2663,10 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
     };
 
     for(const auto& prior : priors)
-        mark_status(prior.position, prior.deleted ? metadata::deleted : metadata::updated);
+        mark_status(prior.position, metadata::updated);
     for(const auto& item : appends)
     {
-        if(item.mark_deleted)
-            mark_status(item.metadata_record.position, metadata::deleted);
-        else if(item.mark_updated)
+        if(item.mark_updated)
             mark_status(item.metadata_record.position, metadata::updated);
     }
     m_storage.flush();
@@ -2608,12 +2674,10 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
     {
         m_storage.clear();
         for(const auto& prior : priors)
-            mark_status(prior.position, prior.deleted ? metadata::deleted : metadata::updated);
+            mark_status(prior.position, metadata::updated);
         for(const auto& item : appends)
         {
-            if(item.mark_deleted)
-                mark_status(item.metadata_record.position, metadata::deleted);
-            else if(item.mark_updated)
+            if(item.mark_updated)
                 mark_status(item.metadata_record.position, metadata::updated);
         }
         m_storage.flush();
@@ -2644,4 +2708,114 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         items.push_back(std::move(item));
     }
     return items;
+}
+
+yar::db::db_result<yar::db::delta_feed> yar::db::engine::delta(
+    std::string_view collection,
+    std::int64_t since)
+{
+    using xson::fson::operator >>;
+
+    auto lock = std::shared_lock{m_rwlock};
+    if(since < 0)
+        return std::unexpected{db_error(
+            db_error_code::invalid_argument,
+            db_operation::read,
+            "Unknown $deltaToken"s)};
+
+    auto size_error = std::error_code{};
+    const auto file_size = std::filesystem::file_size(m_db, size_error);
+    if(size_error)
+        return std::unexpected{db_error(
+            db_error_code::io_failure,
+            db_operation::read,
+            "Failed to determine database size: "s + size_error.message())};
+
+    if(static_cast<std::uintmax_t>(since) > file_size)
+        return std::unexpected{db_error(
+            db_error_code::invalid_argument,
+            db_operation::read,
+            "Unknown $deltaToken"s)};
+
+    auto reader = open_reader();
+    auto feed = delta_feed{};
+    auto cursor = std::streamoff{0};
+    auto landed = since == 0;
+    const auto unknown = []
+    {
+        return std::unexpected{db_error(
+            db_error_code::invalid_argument,
+            db_operation::read,
+            "Unknown $deltaToken"s)};
+    };
+    const auto corrupt = []
+    {
+        return std::unexpected{db_error(
+            db_error_code::corrupt_storage,
+            db_operation::read,
+            "Failed to read a stored record"s)};
+    };
+
+    while(reader.peek() != std::char_traits<char>::eof())
+    {
+        const auto start = reader.tellg();
+        if(start < 0)
+            return corrupt();
+
+        const auto start_offset = static_cast<std::uintmax_t>(start);
+        if(start_offset == static_cast<std::uintmax_t>(since))
+            landed = true;
+        else if(not landed and start_offset > static_cast<std::uintmax_t>(since))
+            return unknown();
+
+        auto metadata = yar::db::metadata{};
+        auto document = object{};
+        try
+        {
+            reader >> metadata >> document;
+        }
+        catch(const std::runtime_error&)
+        {
+            return corrupt();
+        }
+        if(reader.fail())
+            return corrupt();
+
+        cursor = reader.tellg();
+        if(cursor <= start)
+            return corrupt();
+
+        if(not landed or metadata.collection != collection or is_group_marker(metadata.status))
+            continue;
+        if(metadata.status == metadata::updated)
+            continue;
+
+        if(metadata.status == metadata::deleted)
+        {
+            if(not document.has("_id"s) or not document["_id"s].is_integer())
+                continue;
+            auto change = delta_change{};
+            change.removed = true;
+            change.document = object{{"_id"s, document["_id"s]}};
+            feed.changes.push_back(std::move(change));
+            continue;
+        }
+
+        if(metadata.status != metadata::created)
+            continue;
+
+        auto change = delta_change{};
+        change.document = std::move(document);
+        feed.changes.push_back(std::move(change));
+    }
+
+    if(not landed)
+    {
+        if(static_cast<std::uintmax_t>(since) != file_size
+            or static_cast<std::uintmax_t>(cursor) != file_size)
+            return unknown();
+    }
+
+    feed.token = static_cast<std::int64_t>(cursor);
+    return feed;
 }

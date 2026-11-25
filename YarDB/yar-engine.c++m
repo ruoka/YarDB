@@ -46,12 +46,31 @@ struct document_revision
 
 // One stored version of a document, newest first when history() fills a vector.
 // status is the record's metadata action: created on the live version, updated
-// on a superseded one, deleted on a destroyed one. at is when that version was written.
+// on a superseded one. at is when that version was written. A delete does not
+// rewrite that chain; it appends its own record, and history() only walks a
+// document that is still live.
 struct history_entry
 {
     object document;
     std::chrono::system_clock::time_point at{};
     std::string status;
+};
+
+// One change at or after a delta cursor, in file order. removed is a delete
+// record (document holds _id). Otherwise document is a created or updated
+// version appended after the cursor.
+struct delta_change
+{
+    object document;
+    bool removed = false;
+};
+
+// changes are the records for one collection. token is the file offset a later
+// call passes to read only what was appended after this feed.
+struct delta_feed
+{
+    std::vector<delta_change> changes;
+    std::int64_t token = 0;
 };
 
 // One document write inside an atomic group. create is POST; replace is PUT;
@@ -178,6 +197,12 @@ public:
         const object& selector,
         object& documents,
         write_preconditions preconditions = {});
+
+    // Records for collection that start at file offset since. since is 0 for
+    // the beginning of the file. The returned token is the offset of the next
+    // byte after the records this call observed. An offset that is not 0, the
+    // current end, or the start of a record is invalid_argument.
+    db_result<delta_feed> delta(std::string_view collection, std::int64_t since);
 
     bool history(std::string_view collection, const object& selector, object& documents);
 

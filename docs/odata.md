@@ -18,6 +18,7 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$expand` | `{singular}_id` → plural collection `_id`; else `{singular}_{UniqueKey}` → a unique secondary key on that collection |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
 | `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field,...))`, `groupby((field,...),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`, and `aggregate($count as Alias)`. `groupby` returns one row per distinct tuple of those top-level fields, including `groupby((country,status),aggregate(...))` |
+| `$deltaToken` | Changes since a cursor: new and updated documents, plus deleted ids. The body is `{"value":[...],"deltaToken":"..."}`. A missing or empty token reads from the start and still returns a token. An unknown token is 400. The token is a file offset. Not combined with other query options |
 
 ### `$filter`
 
@@ -56,7 +57,6 @@ No items. The next larger query feature is deeper `$expand`, under Later.
 | `$search` | `$search=wireless` |
 | `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
 | Richer string/date functions | `indexof`, `year(...)` |
-| Delta queries | `$deltaToken` |
 | Bound actions / functions | `POST /users(1)/Default.ResetPassword` |
 | XML CSDL `$metadata` | Beyond JSON CSDL |
 

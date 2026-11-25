@@ -1621,6 +1621,106 @@ private:
             // Parse OData query parameters
             auto params = parse_query_params(uri);
 
+            // $deltaToken is its own read. A missing value, or an empty one,
+            // starts at the beginning of the file and still returns a token.
+            // parse_query_params drops a key with no '=', so scan the raw query.
+            auto delta_requested = false;
+            auto delta_value = ""s;
+            auto other_query = false;
+            const auto query = static_cast<std::string_view>(uri.query);
+            if(not query.empty())
+            {
+                for(const auto part : query | std::views::split('&'))
+                {
+                    const auto segment = std::string_view{part};
+                    if(segment.empty())
+                        continue;
+
+                    const auto eq_pos = segment.find('=');
+                    const auto raw_key = eq_pos == std::string_view::npos
+                        ? segment
+                        : segment.substr(0, eq_pos);
+                    const auto raw_value = eq_pos == std::string_view::npos
+                        ? std::string_view{}
+                        : segment.substr(eq_pos + 1);
+                    const auto key = net::url_decode(std::string{utils::trim(raw_key)});
+                    if(key == "$deltaToken"s)
+                    {
+                        delta_requested = true;
+                        delta_value = net::url_decode(std::string{utils::trim(raw_value)});
+                        continue;
+                    }
+                    other_query = true;
+                }
+            }
+
+            if(delta_requested)
+            {
+                if(other_query)
+                {
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        "$deltaToken cannot be combined with other query options"sv);
+                }
+
+                const auto collection_name = validate_collection_name(uri.path[1]);
+                auto since = std::int64_t{0};
+                if(not delta_value.empty())
+                {
+                    auto value = std::int64_t{0};
+                    const auto* begin = delta_value.data();
+                    const auto* end = begin + static_cast<std::ptrdiff_t>(delta_value.size());
+                    const auto parsed = std::from_chars(begin, end, value);
+                    if(parsed.ec != std::errc{} or parsed.ptr != end or value < 0)
+                    {
+                        return ::http::make_error_response(
+                            status_bad_request,
+                            "Bad Request"sv,
+                            "Unknown $deltaToken"sv);
+                    }
+                    since = value;
+                }
+
+                const auto feed = m_engine.delta(collection_name, since);
+                if(not feed)
+                {
+                    if(feed.error().code == yar::db::db_error_code::invalid_argument)
+                    {
+                        return ::http::make_error_response(
+                            status_bad_request,
+                            "Bad Request"sv,
+                            feed.error().message);
+                    }
+                    return database_error_response(feed.error(), collection_name);
+                }
+
+                auto value = xson::object{xson::object::array{}};
+                for(const auto& change : feed->changes)
+                {
+                    if(change.removed)
+                    {
+                        value += xson::object{
+                            {"_id"s, change.document["_id"s]},
+                            {"@removed"s, xson::object{{"reason"s, "deleted"s}}}
+                        };
+                    }
+                    else
+                    {
+                        value += change.document;
+                    }
+                }
+
+                auto body = xson::object{
+                    {"value"s, std::move(value)},
+                    {"deltaToken"s, std::to_string(feed->token)}
+                };
+                return ::http::make_response(
+                    ::http::status_ok,
+                    xson::json::stringify(body),
+                    std::optional<::http::headers>{});
+            }
+
             // Handle $apply (filter/compute/groupby pipeline) before $count.
             // `$apply=…&$count=true` must not short-circuit to a bare document count.
             if(params.contains("$apply"s))

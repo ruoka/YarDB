@@ -2421,6 +2421,74 @@ auto test_set()
         };
     };
 
+    test_case("group writes keep the history chain, [yardb]") = []
+    {
+        const auto test_file = "./engine_group_history_chain_test.db";
+        const auto setup = fixture{test_file};
+        constexpr auto collection = "grouped_history"s;
+        auto id = xson::integer_type{0};
+        {
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "v1"s}};
+            require_true(engine.create(collection, original).has_value());
+            id = original["_id"s];
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            auto patch = yar::db::batch_request{};
+            patch.method = yar::db::batch_method::update;
+            patch.collection = collection;
+            patch.id = id;
+            patch.body = object{{"name"s, "v2"s}};
+            requests.push_back(std::move(patch));
+
+            auto replaced = yar::db::batch_request{};
+            replaced.method = yar::db::batch_method::replace;
+            replaced.collection = collection;
+            replaced.id = id;
+            replaced.body = object{{"name"s, "v3"s}};
+            requests.push_back(std::move(replaced));
+            require_true(engine.apply_group(requests).has_value());
+
+            auto history = object{};
+            require_true(engine.history(collection, object{{"_id"s, id}}, history));
+            require_eq(history.size(), 3u);
+            require_eq(history[0]["name"s].get<string>(), "v3"s);
+            require_eq(history[1]["name"s].get<string>(), "v2"s);
+            require_eq(history[2]["name"s].get<string>(), "v1"s);
+        }
+
+        {
+            auto engine = yar::db::engine{test_file};
+            auto history = object{};
+            require_true(engine.history(collection, object{{"_id"s, id}}, history));
+            require_eq(history.size(), 3u);
+            require_eq(history[0]["name"s].get<string>(), "v3"s);
+            require_eq(history[2]["name"s].get<string>(), "v1"s);
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            auto drop = yar::db::batch_request{};
+            drop.method = yar::db::batch_method::destroy;
+            drop.collection = collection;
+            drop.id = id;
+            requests.push_back(std::move(drop));
+
+            auto recreated = yar::db::batch_request{};
+            recreated.method = yar::db::batch_method::create;
+            recreated.collection = collection;
+            recreated.body = object{{"_id"s, id}, {"name"s, "v4"s}};
+            requests.push_back(std::move(recreated));
+            require_true(engine.apply_group(requests).has_value());
+
+            history = object{};
+            require_true(engine.history(collection, object{{"_id"s, id}}, history));
+            require_eq(history.size(), 4u);
+            require_eq(history[0]["name"s].get<string>(), "v4"s);
+            require_eq(history[1]["name"s].get<string>(), "v3"s);
+            require_eq(history[2]["name"s].get<string>(), "v2"s);
+            require_eq(history[3]["name"s].get<string>(), "v1"s);
+        }
+    };
+
     return true;
 }
 

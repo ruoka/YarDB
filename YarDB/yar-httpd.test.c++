@@ -6624,6 +6624,110 @@ auto test_set()
         };
     };
 
+    test_case("OData all lambda filters an array, [yardb]") = []
+    {
+        auto setup = std::make_shared<fixture>("./httpd_all_test.db");
+        const auto order_query = "/orders?$filter=lines/all(l:%20l/qty%20gt%200)"s;
+
+        section("GET all returns orders whose every line has a positive qty, and an empty array") = [setup, order_query]
+        {
+            const auto rows = std::array{
+                R"({"lines":[{"qty":1},{"qty":2}]})"s,
+                R"({"lines":[{"qty":5},{"qty":0}]})"s,
+                R"({"lines":[]})"s,
+                R"({"note":"none"})"s,
+                R"({"lines":{"qty":3}})"s
+            };
+            for(const auto& body : rows)
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/orders"s, body);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, order_query, ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            const auto parsed = json::parse(response_body);
+            const auto& items = parsed.get<object::array>();
+            require_eq(items.size(), 2u);
+            require_eq(static_cast<xson::integer_type>(items[0]["_id"s]), 1);
+            require_eq(static_cast<xson::integer_type>(items[1]["_id"s]), 3);
+            require_eq(items[0]["lines"s].get<object::array>().size(), 2u);
+            require_eq(items[1]["lines"s].get<object::array>().size(), 0u);
+        };
+
+        section("GET all with $top applies the filter before the page") = [setup]
+        {
+            auto [miss_status, miss_reason, miss_headers, miss_body] = make_request(
+                setup->port(), "POST"s, "/paged"s, R"({"lines":[{"qty":0}]})"s);
+            require_eq(miss_status, "201"s);
+            (void)miss_reason;
+            (void)miss_headers;
+            (void)miss_body;
+            auto [hit_status, hit_reason, hit_headers, hit_body] = make_request(
+                setup->port(), "POST"s, "/paged"s, R"({"lines":[{"qty":2}]})"s);
+            require_eq(hit_status, "201"s);
+            (void)hit_reason;
+            (void)hit_headers;
+            (void)hit_body;
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/paged?$filter=lines/all(l:%20l/qty%20gt%200)&$top=1"s,
+                ""s);
+            require_eq(status, "200"s);
+            (void)reason;
+            (void)headers;
+            const auto parsed = json::parse(response_body);
+            const auto& items = parsed.get<object::array>();
+            require_eq(items.size(), 1u);
+            require_eq(static_cast<xson::integer_type>(items[0]["lines"s][0]["qty"s]), 2);
+        };
+
+        section("GET all without a colon returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/orders?$filter=lines/all(l%20l/qty%20gt%200)"s,
+                ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("all") != string::npos);
+        };
+
+        section("GET a bare all returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/orders?$filter=lines/all()"s, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().starts_with("all "s));
+        };
+
+        section("GET a ninth nested all returns 422") = [setup]
+        {
+            auto ninth = "v%20eq%201"s;
+            for(auto level = 0; level < 9; ++level)
+                ninth = "f/all(v:%20" + ninth + ")";
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/orders?$filter="s + ninth, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            require_true(json::parse(body)["message"s].get<string>().find("all") != string::npos);
+        };
+    };
+
     test_case("OData skiptoken resumes the next page, [yardb]") = []
     {
         auto setup = std::make_shared<fixture>("./httpd_skiptoken_test.db");

@@ -1623,40 +1623,9 @@ private:
 
             // $deltaToken is its own read. A missing value, or an empty one,
             // starts at the beginning of the file and still returns a token.
-            // parse_query_params drops a key with no '=', so scan the raw query.
-            auto delta_requested = false;
-            auto delta_value = ""s;
-            auto other_query = false;
-            const auto query = static_cast<std::string_view>(uri.query);
-            if(not query.empty())
+            if(params.contains("$deltaToken"s))
             {
-                for(const auto part : query | std::views::split('&'))
-                {
-                    const auto segment = std::string_view{part};
-                    if(segment.empty())
-                        continue;
-
-                    const auto eq_pos = segment.find('=');
-                    const auto raw_key = eq_pos == std::string_view::npos
-                        ? segment
-                        : segment.substr(0, eq_pos);
-                    const auto raw_value = eq_pos == std::string_view::npos
-                        ? std::string_view{}
-                        : segment.substr(eq_pos + 1);
-                    const auto key = net::url_decode(std::string{utils::trim(raw_key)});
-                    if(key == "$deltaToken"s)
-                    {
-                        delta_requested = true;
-                        delta_value = net::url_decode(std::string{utils::trim(raw_value)});
-                        continue;
-                    }
-                    other_query = true;
-                }
-            }
-
-            if(delta_requested)
-            {
-                if(other_query)
+                if(params.size() != 1)
                 {
                     return ::http::make_error_response(
                         status_unprocessable_entity,
@@ -1664,6 +1633,7 @@ private:
                         "$deltaToken cannot be combined with other query options"sv);
                 }
 
+                const auto delta_value = params.at("$deltaToken"s);
                 const auto collection_name = validate_collection_name(uri.path[1]);
                 auto since = std::int64_t{0};
                 if(not delta_value.empty())

@@ -7349,6 +7349,15 @@ auto test_set()
         (void)mixed_reason;
         (void)mixed_headers;
         (void)mixed_body;
+
+        auto [bare_mixed_status, bare_mixed_reason, bare_mixed_headers, bare_mixed_body] = make_request(
+            setup.port(), "GET"s, "/feed?$deltaToken&$top=1"s, ""s);
+        require_eq(bare_mixed_status, "422"s);
+        (void)bare_mixed_reason;
+        (void)bare_mixed_headers;
+        require_eq(
+            static_cast<string>(json::parse(bare_mixed_body)["message"s]),
+            "$deltaToken cannot be combined with other query options"s);
     };
 
     // Note: Server runs in infinite loop, so we can't cleanly stop it

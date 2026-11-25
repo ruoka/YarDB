@@ -263,11 +263,12 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 0. 📊 OData query surface
 - **Checklist**: [odata.md](odata.md) — supported today vs pipeline
-- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`; `indexof`/`substring`/`length`/`year`/`month`/`day`)
+- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/`any`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`; `tolower`/`toupper`; `indexof`/`substring`/`length`/`year`/`month`/`day`). `all` is not supported
 - **`$apply` groupby/aggregate**: ✅ shipped — `groupby((field,...))` / `aggregate`, including multi-key `groupby((country,status),aggregate(...))`; pipeline `filter(...)/compute(...)/groupby(...)`; methods `sum`/`average`/`min`/`max` and `$count` (`aggregate($count as Alias)`)
 - **`$compute`**: ✅ shipped — `Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div`); not combinable with `$apply`
-- **`$expand` nested `$select`**: ✅ shipped — `$expand=customer($select=name)` and `$expand=instrument($select=isin)`; `_id` is kept; an unknown option or a bad `$select` is 422
-- **Next**: nested `$expand` and multi-valued refs
+- **`$expand`**: ✅ shipped — `{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin`. `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`. An unknown option or a bad `$select` is 422
+- **`$deltaToken`**: ✅ shipped — `GET /collection?$deltaToken=` reads from a file offset. Deletes are append-only records. Other query options on the same request are 422
+- **Next**: nested `$expand` and multi-valued refs. `all` stays later
 
 #### 1. 🔐 Security & Authentication System
 - **Priority**: CRITICAL
@@ -326,7 +327,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### Data Management & Operations
 - **Compaction**: ✅ **IMPLEMENTED** (offline) — `yarexport --live` + `yarimport` rewrite current documents only
-- **Change feed**: Deferred. A store-level `GET /_changes` feed is not planned while consumers want domain events, which services already serve from their own append-only collections. Revisit for replication and change data capture.
+- **Change feed**: Collection `$deltaToken` is shipped (the token is a file offset; deletes are append-only records). A store-level `GET /_changes` feed is not planned while consumers want domain events, which services already serve from their own append-only collections. Revisit for replication and change data capture.
 - **Backup/Restore**: Point-in-time recovery, incremental backups
 - **Data Migration**: Schema evolution, migration tools
 - **Advanced Indexing**: Compound indexes, full-text search

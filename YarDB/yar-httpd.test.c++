@@ -1803,6 +1803,110 @@ auto test_set()
             require_true(found_expanded);
         };
 
+        section("GET with $expand($select) keeps named properties and _id") = [setup]
+        {
+            auto [c_status, c_reason, c_headers, c_body] = make_request(
+                setup->port(), "POST"s, "/customers"s,
+                R"({"name":"Ada Select","city":"Turku","isin":"FI0009000681"})"s
+            );
+            require_eq(c_status, "201"s);
+            const auto customer = json::parse(c_body);
+            const auto customer_id = static_cast<xson::integer_type>(customer["_id"s]);
+
+            auto [i_status, i_reason, i_headers, i_body] = make_request(
+                setup->port(), "POST"s, "/instruments"s,
+                R"({"isin":"FI0009000681","name":"Nokia","venue":"XHEL"})"s
+            );
+            require_eq(i_status, "201"s);
+            const auto instrument = json::parse(i_body);
+            const auto instrument_id = static_cast<xson::integer_type>(instrument["_id"s]);
+
+            auto holding = R"({"customer_id":)"s + std::to_string(customer_id)
+                + R"(,"instrument_id":)"s + std::to_string(instrument_id)
+                + R"(,"qty":10})"s;
+            auto [b_status, b_reason, b_headers, b_body] = make_request(
+                setup->port(), "POST"s, "/holdings"s, holding
+            );
+            require_eq(b_status, "201"s);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s,
+                "/holdings?$expand=customer($select=name),instrument($select=isin)"s,
+                ""s
+            );
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            auto found = false;
+            for(const auto& item : documents.get<object::array>())
+            {
+                if(not item.has("customer_id"s))
+                    continue;
+                if(static_cast<xson::integer_type>(item["customer_id"s]) != customer_id)
+                    continue;
+                require_true(item["customer"s].is_object());
+                require_eq(static_cast<xson::integer_type>(item["customer"s]["_id"s]), customer_id);
+                require_eq(static_cast<string>(item["customer"s]["name"s]), "Ada Select"s);
+                require_false(item["customer"s].has("city"s));
+                require_false(item["customer"s].has("isin"s));
+                require_true(item["instrument"s].is_object());
+                require_eq(static_cast<xson::integer_type>(item["instrument"s]["_id"s]), instrument_id);
+                require_eq(static_cast<string>(item["instrument"s]["isin"s]), "FI0009000681"s);
+                require_false(item["instrument"s].has("name"s));
+                require_false(item["instrument"s].has("venue"s));
+                found = true;
+            }
+            require_true(found);
+
+            auto [both_status, both_reason, both_headers, both_body] = make_request(
+                setup->port(), "GET"s,
+                "/holdings?$expand=instrument($select=name,isin)"s,
+                ""s
+            );
+            require_eq(both_status, "200"s);
+            auto both_docs = json::parse(both_body);
+            auto found_both = false;
+            for(const auto& item : both_docs.get<object::array>())
+            {
+                if(not item.has("instrument_id"s))
+                    continue;
+                if(static_cast<xson::integer_type>(item["instrument_id"s]) != instrument_id)
+                    continue;
+                require_eq(static_cast<string>(item["instrument"s]["name"s]), "Nokia"s);
+                require_eq(static_cast<string>(item["instrument"s]["isin"s]), "FI0009000681"s);
+                require_true(item["instrument"s].has("_id"s));
+                require_false(item["instrument"s].has("venue"s));
+                found_both = true;
+            }
+            require_true(found_both);
+        };
+
+        section("GET with an unknown $expand option or a bad $select returns 422") = [setup]
+        {
+            auto [join_status, join_reason, join_headers, join_body] = make_request(
+                setup->port(), "GET"s,
+                "/holdings?$expand=instrument($isin=isin)"s,
+                ""s
+            );
+            require_eq(join_status, "422"s);
+            require_eq(join_reason, "Unprocessable Entity"s);
+            auto join_error = json::parse(join_body);
+            require_eq(join_error["error"s].get<string>(), "Unprocessable Entity"s);
+            require_true(join_error["message"s].get<string>().find("not supported"s) != string::npos);
+
+            auto [select_status, select_reason, select_headers, select_body] = make_request(
+                setup->port(), "GET"s,
+                "/holdings?$expand=customer($select=)"s,
+                ""s
+            );
+            require_eq(select_status, "422"s);
+            require_eq(select_reason, "Unprocessable Entity"s);
+            auto select_error = json::parse(select_body);
+            require_true(select_error["message"s].get<string>().find("$select"s) != string::npos);
+        };
+
         section("GET with invalid $filter returns 400 Bad Request") = [setup]
         {
             // Invalid filter expression

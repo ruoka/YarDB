@@ -2273,6 +2273,10 @@ export inline auto read_with_parsed_filter(
 //   (primitive value; non-unique secondaries are never used). Primary wins when
 //   {singular}_id is present. Missing FK fields leave the document unchanged;
 //   a present but unusable FK nests null under the navigation name.
+// - one option: $expand=customer($select=name) or $expand=instrument($select=name,isin).
+//   The nested object keeps those properties, and _id when it is not listed.
+//   Any other option, including $expand=instrument($isin=isin), is rejected.
+//   That form is not a join key.
 //
 // Singularize: trailing "ies" → "y"; else strip a single trailing "s" (not "ss").
 // Pluralize: consonant+"y" → "ies"; else append "s".
@@ -2308,13 +2312,147 @@ inline auto is_expand_navigation_name(std::string_view name)
     });
 }
 
-inline auto parse_expand_navigations(std::string_view expand_value)
+inline auto is_expand_select_field(std::string_view name)
 {
-    return split_outside_quotes(expand_value, ","sv)
-        | std::views::transform([](const auto part) { return utils::trim(part); })
-        | std::views::filter(is_expand_navigation_name)
-        | std::views::transform([](const auto name) { return std::string{name}; })
-        | std::ranges::to<std::vector<std::string>>();
+    const auto first = name.front();
+    if(not ((first >= 'A' and first <= 'Z') or (first >= 'a' and first <= 'z') or first == '_'))
+        return false;
+
+    return std::ranges::all_of(name, [](char c)
+    {
+        return (c >= 'A' and c <= 'Z')
+            or (c >= 'a' and c <= 'z')
+            or (c >= '0' and c <= '9')
+            or c == '_';
+    });
+}
+
+// One $expand item. select is absent when the nested document is kept whole.
+struct expand_navigation
+{
+    std::string name;
+    std::optional<std::vector<std::string>> select;
+};
+
+inline std::expected<std::vector<std::string>, std::string>
+parse_expand_select_list(std::string_view list)
+{
+    auto fields = std::vector<std::string>{};
+    auto start = std::size_t{0};
+    for(auto index = std::size_t{0}; index <= list.size(); ++index)
+    {
+        if(index != list.size() and list[index] != ',')
+            continue;
+
+        const auto field = utils::trim(list.substr(start, index - start));
+        start = index + 1;
+        if(field.empty())
+            return std::unexpected{"$expand $select field name cannot be empty"s};
+        if(field.contains('/'))
+            return std::unexpected{"$expand $select field must be top-level"s};
+        if(field.size() > static_cast<std::size_t>(yar::db::max_field_name_length))
+            return std::unexpected{"$expand $select field name too long (max "s
+                + std::to_string(yar::db::max_field_name_length) + " chars)"s};
+        if(not is_expand_select_field(field))
+            return std::unexpected{"$expand $select field name is invalid"s};
+        if(fields.size() >= static_cast<std::size_t>(yar::db::max_query_fields))
+            return std::unexpected{"$expand $select supports at most "s
+                + std::to_string(yar::db::max_query_fields) + " fields"s};
+
+        if(std::ranges::find(fields, field) == fields.end())
+            fields.emplace_back(field);
+    }
+
+    return fields;
+}
+
+// nullopt: a bare token that is not a navigation name (ignored, as before).
+// unexpected: a parenthesized item that is not a single $select option.
+inline std::expected<std::optional<expand_navigation>, std::string>
+parse_expand_navigation(std::string_view item)
+{
+    const auto open = item.find('(');
+    if(open == std::string_view::npos)
+    {
+        if(not is_expand_navigation_name(item))
+            return std::optional<expand_navigation>{};
+
+        return expand_navigation{std::string{item}, std::nullopt};
+    }
+
+    if(not item.ends_with(')')
+        or item.find('(', open + 1) != std::string_view::npos
+        or item.rfind(')') != item.size() - 1)
+        return std::unexpected{"$expand value is malformed"s};
+
+    const auto name = utils::trim(item.substr(0, open));
+    if(not is_expand_navigation_name(name))
+        return std::unexpected{"$expand navigation name is invalid"s};
+
+    const auto inner = utils::trim(item.substr(open + 1, item.size() - open - 2));
+    if(inner.empty())
+        return std::unexpected{"$expand option is not supported"s};
+
+    auto select = std::optional<std::vector<std::string>>{};
+    for(const auto option : split_outside_quotes(inner, ";"sv))
+    {
+        const auto eq = option.find('=');
+        if(eq == std::string_view::npos)
+            return std::unexpected{"$expand option is not supported"s};
+
+        const auto key = utils::trim(option.substr(0, eq));
+        const auto value = utils::trim(option.substr(eq + 1));
+        // $select is the only expand option. $expand=instrument($isin=isin)
+        // is not a join key and is rejected here.
+        if(key != "$select"sv or select.has_value())
+            return std::unexpected{"$expand option is not supported"s};
+
+        auto fields = parse_expand_select_list(value);
+        if(not fields)
+            return std::unexpected{std::move(fields.error())};
+
+        select = std::move(*fields);
+    }
+
+    if(not select)
+        return std::unexpected{"$expand option is not supported"s};
+
+    return expand_navigation{std::string{name}, std::move(select)};
+}
+
+inline std::expected<std::vector<expand_navigation>, std::string>
+parse_expand_navigations(std::string_view expand_value)
+{
+    auto navigations = std::vector<expand_navigation>{};
+    for(const auto part : split_outside_quotes_and_parens(expand_value, ","sv))
+    {
+        auto parsed = parse_expand_navigation(part);
+        if(not parsed)
+            return std::unexpected{std::move(parsed.error())};
+        if(parsed->has_value())
+            navigations.push_back(std::move(**parsed));
+    }
+
+    return navigations;
+}
+
+inline auto project_expanded_document(
+    const xson::object& related,
+    const std::vector<std::string>& fields)
+{
+    auto projected = xson::object{};
+    if(related.has("_id"s))
+        projected["_id"s] = related["_id"s];
+
+    for(const auto& field : fields)
+    {
+        if(field == "_id"s)
+            continue;
+        if(related.has(field))
+            projected[field] = related[field];
+    }
+
+    return projected;
 }
 
 inline void nest_expanded_document(
@@ -2322,6 +2460,7 @@ inline void nest_expanded_document(
     std::string_view navigation,
     std::string_view related_collection,
     const xson::object& selector,
+    const std::optional<std::vector<std::string>>& select,
     yar::db::engine& engine)
 {
     auto related_docs = xson::object{};
@@ -2332,20 +2471,27 @@ inline void nest_expanded_document(
         return;
     }
 
-    document[std::string{navigation}] = related_docs.get<xson::object::array>()[0];
+    auto related = related_docs.get<xson::object::array>()[0];
+    if(select.has_value() and related.is_object())
+        related = project_expanded_document(related, *select);
+
+    document[std::string{navigation}] = related;
 }
 
-inline void expand_document(xson::object& document, std::string_view navigation, yar::db::engine& engine)
+inline void expand_document(
+    xson::object& document,
+    const expand_navigation& navigation,
+    yar::db::engine& engine)
 {
-    const auto related_collection = pluralize_collection_name(navigation);
-    const auto primary_field = std::string{navigation} + "_id";
+    const auto related_collection = pluralize_collection_name(navigation.name);
+    const auto primary_field = navigation.name + "_id";
 
     if(document.has(primary_field))
     {
         const auto& ref = document[primary_field];
         if(not ref.is_integer())
         {
-            document[std::string{navigation}] = nullptr;
+            document[navigation.name] = nullptr;
             return;
         }
 
@@ -2355,16 +2501,17 @@ inline void expand_document(xson::object& document, std::string_view navigation,
         }
         catch(const std::invalid_argument&)
         {
-            document[std::string{navigation}] = nullptr;
+            document[navigation.name] = nullptr;
             return;
         }
 
         const xson::integer_type related_id = ref;
         nest_expanded_document(
             document,
-            navigation,
+            navigation.name,
             related_collection,
             xson::object{"_id"s, related_id},
+            navigation.select,
             engine);
         return;
     }
@@ -2380,32 +2527,43 @@ inline void expand_document(xson::object& document, std::string_view navigation,
 
     for(const auto& unique_key : engine.unique_keys(related_collection))
     {
-        const auto ref_field = std::string{navigation} + "_" + unique_key;
+        const auto ref_field = navigation.name + "_" + unique_key;
         if(not document.has(ref_field))
             continue;
 
         const auto& ref = document[ref_field];
         if(not ref.has_value() or ref.is_null())
         {
-            document[std::string{navigation}] = nullptr;
+            document[navigation.name] = nullptr;
             return;
         }
 
         auto selector = xson::object{};
         selector[unique_key] = ref;
-        nest_expanded_document(document, navigation, related_collection, selector, engine);
+        nest_expanded_document(
+            document,
+            navigation.name,
+            related_collection,
+            selector,
+            navigation.select,
+            engine);
         return;
     }
 }
 
 // Apply $expand: {singular}_id → _id, else {singular}_{UniqueKey} → unique secondary.
+// $select on a navigation keeps the named properties and _id.
 inline auto apply_expand(
     const xson::object& documents,
     std::string_view expand_value,
     [[maybe_unused]] const std::string& collection_name,
     yar::db::engine& engine)
 {
-    const auto navigations = parse_expand_navigations(expand_value);
+    const auto parsed = parse_expand_navigations(expand_value);
+    if(not parsed)
+        throw std::invalid_argument{parsed.error()};
+
+    const auto& navigations = *parsed;
     if(navigations.empty())
         return documents;
 

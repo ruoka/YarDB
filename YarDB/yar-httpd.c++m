@@ -2029,7 +2029,18 @@ private:
 
             if(params.contains("$expand"s))
             {
-                document = yar::http::odata::apply_expand(document, params["$expand"s], collection_name, m_engine);
+                try
+                {
+                    document = yar::http::odata::apply_expand(
+                        document, params["$expand"s], collection_name, m_engine);
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        e.what());
+                }
             }
 
             if(params.contains("$select"s))

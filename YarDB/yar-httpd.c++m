@@ -1621,6 +1621,23 @@ private:
             // Parse OData query parameters
             auto params = parse_query_params(uri);
 
+            // Empty $search is a query error on every path, including $apply and $count.
+            auto search_phrase = std::optional<std::string>{};
+            if(params.contains("$search"s))
+            {
+                try
+                {
+                    search_phrase = parse_search(params["$search"s]);
+                }
+                catch(const std::invalid_argument& e)
+                {
+                    return ::http::make_error_response(
+                        status_unprocessable_entity,
+                        "Unprocessable Entity"sv,
+                        e.what());
+                }
+            }
+
             // $deltaToken is its own read. A missing value, or an empty one,
             // starts at the beginning of the file and still returns a token.
             if(params.contains("$deltaToken"s))
@@ -1719,8 +1736,11 @@ private:
                     auto filter = std::optional<yar::http::odata::parsed_filter>{};
                     if(params.contains("$filter"s))
                         filter = yar::http::odata::parse_filter(params["$filter"s]);
-                    const auto document = yar::http::odata::read_with_apply(
+                    auto document = yar::http::odata::read_with_apply(
                         m_engine, collection_name, pipeline, filter);
+                    // Sibling $search runs after $apply, AND-ed with sibling $filter.
+                    if(search_phrase)
+                        document = yar::http::odata::filter_documents_by_search(document, *search_phrase);
                     return ::http::make_response(
                         ::http::status_ok,
                         xson::json::stringify(document),
@@ -1758,6 +1778,11 @@ private:
                             documents = yar::http::odata::filter_documents_by_parsed(
                                 documents, parsed_filter);
                         }
+                        if(search_phrase)
+                        {
+                            documents = yar::http::odata::filter_documents_by_search(
+                                documents, *search_phrase);
+                        }
                         const auto count = documents.is_array()
                             ? documents.get<xson::object::array>().size()
                             : std::size_t{0};
@@ -1774,6 +1799,29 @@ private:
                             e.what());
                     }
                 }
+                if(search_phrase)
+                {
+                    auto documents = xson::object{};
+                    if(params.contains("$filter"s))
+                    {
+                        const auto parsed_filter = yar::http::odata::parse_filter(params["$filter"s]);
+                        documents = yar::http::odata::read_with_parsed_filter(
+                            m_engine, collection_name, count_selector, parsed_filter);
+                    }
+                    else
+                    {
+                        m_engine.read(collection_name, count_selector, documents);
+                    }
+                    documents = yar::http::odata::filter_documents_by_search(documents, *search_phrase);
+                    const auto searched = documents.is_array()
+                        ? documents.get<xson::object::array>().size()
+                        : std::size_t{0};
+                    return ::http::make_response(
+                        ::http::status_ok,
+                        std::to_string(static_cast<long long>(searched)),
+                        std::optional<::http::headers>{});
+                }
+
                 const auto count = [&]()
                 {
                     if(params.contains("$filter"s))
@@ -1891,6 +1939,19 @@ private:
             const auto page_orderby = yar::db::orderby_keys(selector);
             const auto page_descending = page_orderby.empty() and selector.has("$desc"s);
 
+            // $search is a post-filter, like contains(). Paging has to wait until
+            // the phrase has been applied, or $top would keep non-matching rows.
+            // $compute strips paging itself and applies $search with $filter.
+            auto search_paging = std::optional<yar::http::odata::query_paging>{};
+            if(search_phrase and not params.contains("$compute"s))
+            {
+                const auto primary_desc = selector.has("$desc"s)
+                    and yar::db::orderby_keys(selector).empty();
+                search_paging = yar::http::odata::extract_and_strip_paging(selector);
+                if(primary_desc)
+                    selector["$desc"s] = true;
+            }
+
             // $compute must run before $filter/$orderby/$top/$skip (OData evaluation
             // order). Strip paging from the engine selector and defer $filter when
             // compute is present so aliases like LineTotal are visible to $filter.
@@ -1967,6 +2028,8 @@ private:
                         document = yar::http::odata::filter_documents_by_parsed(
                             document, *deferred_filter);
                     }
+                    if(search_phrase)
+                        document = yar::http::odata::filter_documents_by_search(document, *search_phrase);
                     if(compute_paging)
                     {
                         if(not compute_paging->orderby.empty())
@@ -1985,6 +2048,12 @@ private:
                         "Unprocessable Entity"sv,
                         e.what());
                 }
+            }
+            else if(search_paging)
+            {
+                document = yar::http::odata::filter_documents_by_search(document, *search_phrase);
+                document = yar::http::odata::apply_query_paging(
+                    std::move(document), *search_paging, selector);
             }
 
             if(page_limit and *page_limit > 0 and document.is_array())

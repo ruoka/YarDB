@@ -7360,6 +7360,181 @@ auto test_set()
             "$deltaToken cannot be combined with other query options"s);
     };
 
+    test_case("OData $search, [yardb]") = []
+    {
+        const auto test_file = "./httpd_test_odata_search.db";
+        auto setup = std::make_shared<fixture>(test_file);
+
+        const auto post = [](const std::shared_ptr<fixture>& server, const string& path, const string& body)
+        {
+            auto [status, reason, headers, response_body] = make_request(
+                server->port(), "POST"s, path, body);
+            if(status != "201"s)
+            {
+                std::this_thread::sleep_for(100ms);
+                auto [retry_status, retry_reason, retry_headers, retry_body] = make_request(
+                    server->port(), "POST"s, path, body);
+                require_eq(retry_status, "201"s);
+                (void)retry_reason;
+                (void)retry_headers;
+                (void)retry_body;
+            }
+            (void)reason;
+            (void)headers;
+            (void)response_body;
+        };
+
+        section("GET $search=Bond keeps documents whose string values contain the phrase") = [setup, post]
+        {
+            post(setup, "/instruments"s, R"({"name":"Cash","Bond":"ticker","qty":42,"currency":"USD","active":true})"s);
+            post(setup, "/instruments"s, R"({"name":"bond fund","currency":"USD"})"s);
+            post(setup, "/instruments"s, R"({"name":"Euro Bond","currency":"EUR","tags":["gov","EUR"]})"s);
+            post(setup, "/instruments"s, R"({"name":"Bill","code":100,"currency":"EUR"})"s);
+            post(setup, "/instruments"s,
+                R"({"name":"Note","currency":"EUR","issuer":{"title":"Bond House"},"lines":[{"isin":"FI0009000681"}]})"s);
+
+            auto [status, reason, headers, response_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search=Bond"s, ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+
+            auto documents = json::parse(response_body);
+            require_true(documents.is_array());
+            auto names = std::vector<string>{};
+            for(const auto& item : documents.get<object::array>())
+                names.push_back(item["name"s].get<string>());
+            require_eq(names.size(), 2u);
+            require_eq(names[0], "Euro Bond"s);
+            require_eq(names[1], "Note"s);
+
+            auto [count_status, count_reason, count_headers, count_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$count=true&$search=Bond"s, ""s);
+            require_eq(count_status, "200"s);
+            require_eq(count_body, "2"s);
+            (void)count_reason;
+            (void)count_headers;
+
+            auto [lower_status, lower_reason, lower_headers, lower_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search=bond"s, ""s);
+            require_eq(lower_status, "200"s);
+            (void)lower_reason;
+            (void)lower_headers;
+            auto lower = json::parse(lower_body);
+            require_eq(lower.get<object::array>().size(), 1u);
+            require_eq(lower.get<object::array>()[0]["name"s].get<string>(), "bond fund"s);
+
+            auto [number_status, number_reason, number_headers, number_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search=42"s, ""s);
+            require_eq(number_status, "200"s);
+            (void)number_reason;
+            (void)number_headers;
+            require_eq(json::parse(number_body).get<object::array>().size(), 0u);
+
+            auto [code_status, code_reason, code_headers, code_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search=100"s, ""s);
+            require_eq(code_status, "200"s);
+            (void)code_reason;
+            (void)code_headers;
+            require_eq(json::parse(code_body).get<object::array>().size(), 0u);
+
+            auto [value_status, value_reason, value_headers, value_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search=ticker"s, ""s);
+            require_eq(value_status, "200"s);
+            (void)value_reason;
+            (void)value_headers;
+            auto ticker = json::parse(value_body);
+            require_eq(ticker.get<object::array>().size(), 1u);
+            require_eq(ticker.get<object::array>()[0]["name"s].get<string>(), "Cash"s);
+
+            auto [top_status, top_reason, top_headers, top_body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search=Bond&$top=1"s, ""s);
+            require_eq(top_status, "200"s);
+            (void)top_reason;
+            (void)top_headers;
+            auto page = json::parse(top_body);
+            require_eq(page.get<object::array>().size(), 1u);
+            require_eq(page.get<object::array>()[0]["name"s].get<string>(), "Euro Bond"s);
+        };
+
+        section("GET with an empty $search returns 422") = [setup]
+        {
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/instruments?$search="s, ""s);
+            require_eq(status, "422"s);
+            require_eq(reason, "Unprocessable Entity"s);
+            (void)headers;
+            auto error = json::parse(body);
+            require_eq(error["message"s].get<string>(), "$search cannot be empty"s);
+        };
+
+        section("GET $search is AND-ed with $filter") = [setup, post]
+        {
+            post(setup, "/holdings"s, R"({"name":"Cash","currency":"USD","Bond":"ticker"})"s);
+            post(setup, "/holdings"s, R"({"name":"Euro Bond","currency":"EUR"})"s);
+            post(setup, "/holdings"s, R"({"name":"Bill","currency":"EUR","code":100})"s);
+            post(setup, "/holdings"s, R"({"name":"Note","currency":"EUR","issuer":{"title":"Bond House"}})"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/holdings?$search=Bond&$filter=currency%20eq%20'EUR'"s,
+                ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            (void)headers;
+            auto documents = json::parse(body);
+            auto names = std::vector<string>{};
+            for(const auto& item : documents.get<object::array>())
+                names.push_back(item["name"s].get<string>());
+            require_eq(names.size(), 2u);
+            require_eq(names[0], "Euro Bond"s);
+            require_eq(names[1], "Note"s);
+
+            auto [usd_status, usd_reason, usd_headers, usd_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/holdings?$search=Bond&$filter=currency%20eq%20'USD'"s,
+                ""s);
+            require_eq(usd_status, "200"s);
+            (void)usd_reason;
+            (void)usd_headers;
+            require_eq(json::parse(usd_body).get<object::array>().size(), 0u);
+        };
+
+        section("GET $search page link keeps the phrase and skips non-matches") = [setup, post]
+        {
+            post(setup, "/pages"s, R"({"name":"Euro Bond"})"s);
+            post(setup, "/pages"s, R"({"name":"Cash"})"s);
+            post(setup, "/pages"s, R"({"name":"Note","issuer":{"title":"Bond House"}})"s);
+
+            auto [status, reason, headers, body] = make_request(
+                setup->port(), "GET"s, "/pages?$search=Bond&$top=1"s, ""s);
+            require_eq(status, "200"s);
+            require_eq(reason, "OK"s);
+            require_true(headers.contains("link"s));
+            const auto link = headers["link"s];
+            require_true(link.contains("$search=Bond"sv));
+            auto first = json::parse(body);
+            require_eq(first.get<object::array>().size(), 1u);
+            require_eq(first.get<object::array>()[0]["name"s].get<string>(), "Euro Bond"s);
+
+            const auto open = link.find('<');
+            const auto close = link.find('>');
+            require_true(open != string::npos and close != string::npos and close > open);
+            const auto next_path = link.substr(open + 1, close - open - 1);
+
+            auto [next_status, next_reason, next_headers, next_body] = make_request(
+                setup->port(), "GET"s, next_path, ""s);
+            require_eq(next_status, "200"s);
+            (void)next_reason;
+            (void)next_headers;
+            auto second = json::parse(next_body);
+            require_eq(second.get<object::array>().size(), 1u);
+            require_eq(second.get<object::array>()[0]["name"s].get<string>(), "Note"s);
+        };
+    };
+
     // Note: Server runs in infinite loop, so we can't cleanly stop it
     // The test thread will continue running, but this is acceptable for unit tests
     return true;

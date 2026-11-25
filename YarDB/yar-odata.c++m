@@ -1241,7 +1241,7 @@ inline std::size_t matching_call_paren(std::string_view text, std::size_t open, 
 {
     try
     {
-        return matching_paren(text, open);
+        return matching_paren(text, open, name);
     }
     catch(const std::invalid_argument&)
     {

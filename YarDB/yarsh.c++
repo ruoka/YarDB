@@ -43,7 +43,7 @@ OData query parameters:
   $top=n         Limit results (e.g. ?$top=10)
   $skip=n        Skip results (e.g. ?$skip=20)
   $orderby=field Sort (e.g. ?$orderby=age%20desc — URL-encode spaces)
-  $filter=expr   Filter (eq, ne, gt, ge, lt, le, and, or, in, startswith, contains, endswith)
+  $filter=expr   Filter (eq, ne, gt, ge, lt, le, and, or, in, startswith, contains, endswith, indexof, substring, length, year, month, day)
   $select=fields Project fields (e.g. ?$select=name,email)
   $count=true    Return count only (e.g. ?$count=true&$filter=age%20gt%2025)
   $expand=rel    Nest related docs via {singular}_id → plural collection _id

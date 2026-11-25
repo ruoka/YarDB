@@ -1947,7 +1947,13 @@ private:
                     const auto message = std::string_view{e.what()};
                     if(message.starts_with("any "sv)
                         or message.starts_with("tolower "sv)
-                        or message.starts_with("toupper "sv))
+                        or message.starts_with("toupper "sv)
+                        or message.starts_with("indexof "sv)
+                        or message.starts_with("substring "sv)
+                        or message.starts_with("length "sv)
+                        or message.starts_with("year "sv)
+                        or message.starts_with("month "sv)
+                        or message.starts_with("day "sv))
                     {
                         return ::http::make_error_response(
                             status_unprocessable_entity,

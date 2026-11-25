@@ -379,14 +379,41 @@ inline case_comparison resolve_case_comparison(std::string_view left_raw, std::s
     return {right.text, left.text, right.fold};
 }
 
-// String filter function type for post-processing
+// String filter function type for post-processing.
+// Value functions (indexof, substring, length, year, month, day) store the
+// comparison operator in `function` and the call in `computed`. They are
+// post-filters: a missing field or a value the function cannot accept
+// compares false.
 export struct string_filter
 {
-    std::string_view function;  // "startswith", "contains", "endswith", or a folded comparison
+    std::string_view function;  // "startswith", "contains", "endswith", a folded comparison, or a computed comparison
     std::string field;          // Field name (copied; may be nested path)
     std::string value;          // Filter value (owned so OData '' escapes can be unescaped)
     bool negated = false;       // true for `not contains(...)` / `not startswith(...)` / …
     ascii_case field_case = ascii_case::identity;
+    std::string_view computed;
+    std::string argument;       // indexof needle
+    std::int64_t start = 0;     // substring start
+    bool has_length = false;
+    std::int64_t length = 0;    // substring length when has_length
+    xson::object literal;       // comparison literal for a computed call
+
+    string_filter() = default;
+
+    // Keeps existing brace initialization of boolean and folded string filters.
+    string_filter(
+        std::string_view function_in,
+        std::string field_in,
+        std::string value_in,
+        bool negated_in = false,
+        ascii_case field_case_in = ascii_case::identity)
+        : function{function_in}
+        , field{std::move(field_in)}
+        , value{std::move(value_in)}
+        , negated{negated_in}
+        , field_case{field_case_in}
+    {
+    }
 };
 
 export struct parsed_filter;
@@ -1160,6 +1187,232 @@ inline std::optional<any_filter> try_parse_any_filter(
     return filter;
 }
 
+// indexof / substring / length / year / month / day. The message starts with
+// the function name so the collection handler can answer 422.
+inline constexpr std::array value_function_names{
+    "indexof"sv, "substring"sv, "length"sv, "year"sv, "month"sv, "day"sv};
+
+inline std::optional<std::string_view> value_function_name(std::string_view expr)
+{
+    for(const auto name : value_function_names)
+    {
+        if(expr.size() > name.size() and expr.starts_with(name) and expr[name.size()] == '(')
+            return name;
+    }
+    return std::nullopt;
+}
+
+[[noreturn]] inline void reject_value_call(std::string_view name, std::string_view detail)
+{
+    throw std::invalid_argument{std::string{name} + " "s + std::string{detail}};
+}
+
+inline std::size_t matching_call_paren(std::string_view text, std::size_t open, std::string_view name)
+{
+    try
+    {
+        return matching_paren(text, open);
+    }
+    catch(const std::invalid_argument&)
+    {
+        reject_value_call(name, "expression is malformed");
+    }
+}
+
+// Keeps empty pieces so a trailing comma is a bad argument, not a shorter call.
+inline std::vector<std::string_view> split_call_args(std::string_view inner)
+{
+    if(utils::trim(inner).empty())
+        return {};
+
+    auto args = std::vector<std::string_view>{};
+    auto rest = inner;
+    while(true)
+    {
+        const auto comma = find_outside_quotes(rest, ","sv);
+        if(not comma)
+        {
+            args.push_back(utils::trim(rest));
+            break;
+        }
+        args.push_back(utils::trim(rest.substr(0, *comma)));
+        rest.remove_prefix(*comma + 1);
+    }
+    return args;
+}
+
+inline std::string require_call_field(std::string_view name, std::string_view raw)
+{
+    const auto text = utils::trim(raw);
+    if(text.empty()
+        or is_quoted_literal(text)
+        or is_non_string_literal(text)
+        or text.contains('(')
+        or text.contains(')'))
+    {
+        reject_value_call(name, "requires a field");
+    }
+
+    try
+    {
+        std::ignore = split_property_path(text);
+    }
+    catch(const std::invalid_argument&)
+    {
+        reject_value_call(name, "requires a field");
+    }
+    return std::string{text};
+}
+
+inline std::int64_t require_call_integer(std::string_view name, std::string_view raw)
+{
+    const auto text = utils::trim(raw);
+    try
+    {
+        return utils::stoll(text);
+    }
+    catch(const std::invalid_argument&)
+    {
+    }
+    catch(const std::out_of_range&)
+    {
+    }
+    reject_value_call(name, "requires an integer");
+}
+
+inline std::string require_call_string(std::string_view name, std::string_view raw)
+{
+    const auto text = utils::trim(raw);
+    if(not is_quoted_literal(text))
+        reject_value_call(name, "requires a string literal");
+    return strip_quoted_literal(text);
+}
+
+inline xson::object box_primitive(const auto& value)
+{
+    auto boxed = xson::object{};
+    boxed = value;
+    return boxed;
+}
+
+inline xson::object odata_unquoted_literal(std::string_view literal)
+{
+    if(literal == "true"sv)
+        return box_primitive(true);
+    if(literal == "false"sv)
+        return box_primitive(false);
+    if(literal == "null"sv)
+        return box_primitive(nullptr);
+
+    try
+    {
+        return box_primitive(utils::stoll(literal));
+    }
+    catch(const std::invalid_argument&)
+    {
+    }
+
+    auto number = xson::number_type{};
+    const auto* begin = literal.data();
+    const auto* end = begin + literal.size();
+    const auto [ptr, ec] = std::from_chars(begin, end, number);
+    if(ec == std::errc{} and ptr == end)
+        return box_primitive(number);
+
+    return box_primitive(std::string{literal});
+}
+
+inline xson::object value_comparison_literal(
+    std::string_view op,
+    std::string_view value_view,
+    std::string_view expr)
+{
+    const auto quoted = is_quoted_literal(value_view);
+    if(quoted)
+        return box_primitive(strip_quoted_literal(value_view));
+
+    if(value_view.empty())
+    {
+        throw std::invalid_argument{
+            "Filter value cannot be empty in filter expression: "s + std::string{expr}};
+    }
+
+    if(op != "eq"sv and op != "ne"sv)
+    {
+        auto literal = odata_unquoted_literal(value_view);
+        if(not literal.is_number())
+        {
+            throw std::invalid_argument{
+                "Numeric operator '"s + std::string{op}
+                + "' requires numeric value in filter expression: "s + std::string{expr}};
+        }
+        return literal;
+    }
+
+    return odata_unquoted_literal(value_view);
+}
+
+// indexof(field,'text') ge 0, substring(field,start[,length]) eq 'FI',
+// length(field) gt 3, year/month/day(field) eq 2026.
+inline string_filter parse_value_comparison(std::string_view expr)
+{
+    const auto name = *value_function_name(expr);
+    const auto close = matching_call_paren(expr, name.size(), name);
+    const auto args = split_call_args(expr.substr(name.size() + 1, close - name.size() - 1));
+
+    auto filter = string_filter{};
+    filter.computed = name;
+
+    if(name == "indexof"sv)
+    {
+        if(args.size() != 2)
+            reject_value_call(name, "requires two arguments");
+        filter.field = require_call_field(name, args[0]);
+        filter.argument = require_call_string(name, args[1]);
+    }
+    else if(name == "substring"sv)
+    {
+        if(args.size() != 2 and args.size() != 3)
+            reject_value_call(name, "requires two or three arguments");
+        filter.field = require_call_field(name, args[0]);
+        filter.start = require_call_integer(name, args[1]);
+        if(args.size() == 3)
+        {
+            filter.has_length = true;
+            filter.length = require_call_integer(name, args[2]);
+        }
+    }
+    else
+    {
+        if(args.size() != 1)
+            reject_value_call(name, "requires one argument");
+        filter.field = require_call_field(name, args[0]);
+    }
+
+    const auto rest = utils::trim(expr.substr(close + 1));
+    if(rest.empty())
+        reject_value_call(name, "requires a comparison");
+
+    constexpr std::array operators{"ge"sv, "le"sv, "gt"sv, "lt"sv, "ne"sv, "eq"sv};
+    auto op = std::string_view{};
+    auto value_view = std::string_view{};
+    for(const auto token : operators)
+    {
+        if(rest.starts_with(token) and rest.size() > token.size() and rest[token.size()] == ' ')
+        {
+            op = token;
+            value_view = utils::trim(rest.substr(token.size() + 1));
+            break;
+        }
+    }
+    if(op.empty())
+        reject_value_call(name, "expression is malformed");
+
+    filter.function = op;
+    filter.literal = value_comparison_literal(op, value_view, expr);
+    return filter;
+}
+
 // Parse a single leaf $filter expression (no top-level and/or)
 inline filter_clause parse_filter_leaf(
     std::string_view filter_expr,
@@ -1216,6 +1469,15 @@ inline filter_clause parse_filter_leaf(
                 parsed.field_case});
             return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
         }
+    }
+
+    // Value functions are comparisons, not boolean predicates:
+    // indexof(name,'Bond') ge 0, substring(isin,0,2) eq 'FI', length(name) gt 3,
+    // year(tradeDate) eq 2026.
+    if(value_function_name(expr))
+    {
+        string_filters.push_back(parse_value_comparison(expr));
+        return std::make_tuple(selector, string_filters, std::vector<any_filter>{});
     }
     
     // Find operator for comparison expressions
@@ -1749,6 +2011,238 @@ inline bool match_folded_string(std::string_view text, const string_filter& filt
     throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
 }
 
+struct civil_date
+{
+    int year = 0;
+    unsigned month = 0;
+    unsigned day = 0;
+};
+
+inline bool is_ascii_digit(char c)
+{
+    return c >= '0' and c <= '9';
+}
+
+inline std::optional<unsigned> take_fixed_digits(
+    std::string_view text,
+    std::size_t& index,
+    std::size_t width)
+{
+    if(index + width > text.size())
+        return std::nullopt;
+
+    auto value = 0u;
+    for(auto n = std::size_t{0}; n < width; ++n)
+    {
+        if(not is_ascii_digit(text[index + n]))
+            return std::nullopt;
+        value = value * 10u + static_cast<unsigned>(text[index + n] - '0');
+    }
+    index += width;
+    return value;
+}
+
+// YYYY-MM-DD, or that date plus T HH:MM:SS, an optional fraction, and an
+// optional Z or numeric offset. The date part is the calendar date as written.
+inline std::optional<civil_date> civil_date_from_text(std::string_view text)
+{
+    auto index = std::size_t{0};
+    const auto year = take_fixed_digits(text, index, 4);
+    if(not year or index >= text.size() or text[index] != '-')
+        return std::nullopt;
+    ++index;
+    const auto month = take_fixed_digits(text, index, 2);
+    if(not month or index >= text.size() or text[index] != '-')
+        return std::nullopt;
+    ++index;
+    const auto day = take_fixed_digits(text, index, 2);
+    if(not day)
+        return std::nullopt;
+
+    if(index < text.size())
+    {
+        if(text[index] != 'T')
+            return std::nullopt;
+        ++index;
+        const auto hour = take_fixed_digits(text, index, 2);
+        if(not hour or index >= text.size() or text[index] != ':')
+            return std::nullopt;
+        ++index;
+        const auto minute = take_fixed_digits(text, index, 2);
+        if(not minute or index >= text.size() or text[index] != ':')
+            return std::nullopt;
+        ++index;
+        const auto second = take_fixed_digits(text, index, 2);
+        if(not second or *hour > 23u or *minute > 59u or *second > 59u)
+            return std::nullopt;
+
+        if(index < text.size() and text[index] == '.')
+        {
+            ++index;
+            if(index >= text.size() or not is_ascii_digit(text[index]))
+                return std::nullopt;
+            while(index < text.size() and is_ascii_digit(text[index]))
+                ++index;
+        }
+
+        if(index < text.size() and (text[index] == 'Z' or text[index] == 'z'))
+        {
+            ++index;
+        }
+        else if(index < text.size() and (text[index] == '+' or text[index] == '-'))
+        {
+            ++index;
+            const auto offset_hour = take_fixed_digits(text, index, 2);
+            if(not offset_hour or *offset_hour > 23u)
+                return std::nullopt;
+            if(index < text.size() and text[index] == ':')
+                ++index;
+            if(index < text.size())
+            {
+                const auto offset_minute = take_fixed_digits(text, index, 2);
+                if(not offset_minute or *offset_minute > 59u)
+                    return std::nullopt;
+            }
+        }
+
+        if(index != text.size())
+            return std::nullopt;
+    }
+
+    const auto ymd = std::chrono::year{static_cast<int>(*year)}
+        / std::chrono::month{*month}
+        / std::chrono::day{*day};
+    if(not ymd.ok())
+        return std::nullopt;
+    return civil_date{static_cast<int>(*year), *month, *day};
+}
+
+inline std::optional<civil_date> civil_date_of(const xson::object& value)
+{
+    if(value.is_timestamp())
+    {
+        const auto instant = static_cast<xson::timestamp_type>(value);
+        const auto ymd = std::chrono::year_month_day{std::chrono::floor<std::chrono::days>(instant)};
+        if(not ymd.ok())
+            return std::nullopt;
+        return civil_date{
+            static_cast<int>(ymd.year()),
+            static_cast<unsigned>(ymd.month()),
+            static_cast<unsigned>(ymd.day())};
+    }
+
+    if(value.is_string())
+        return civil_date_from_text(value.get<std::string>());
+    return std::nullopt;
+}
+
+inline const xson::object* field_at_path(const xson::object& document, std::string_view path)
+{
+    const auto segments = split_property_path(path);
+    const auto* current = &document;
+    for(std::size_t i = 0; i < segments.size(); ++i)
+    {
+        if(not current->has_objects() or not current->has(segments[i]))
+            return nullptr;
+        const auto& next = (*current)[segments[i]];
+        if(i + 1 == segments.size())
+            return &next;
+        current = &next;
+    }
+    return nullptr;
+}
+
+inline std::optional<xson::object> evaluate_computed(
+    const xson::object* field,
+    const string_filter& filter)
+{
+    if(field == nullptr)
+        return std::nullopt;
+
+    if(filter.computed == "length"sv
+        or filter.computed == "indexof"sv
+        or filter.computed == "substring"sv)
+    {
+        if(not field->is_string())
+            return std::nullopt;
+
+        const auto& text = field->get<std::string>();
+        if(filter.computed == "length"sv)
+            return box_primitive(static_cast<xson::integer_type>(text.size()));
+
+        if(filter.computed == "indexof"sv)
+        {
+            const auto pos = text.find(filter.argument);
+            if(pos == std::string::npos)
+                return box_primitive(xson::integer_type{-1});
+            return box_primitive(static_cast<xson::integer_type>(pos));
+        }
+
+        if(filter.start < 0 or (filter.has_length and filter.length < 0))
+            return std::nullopt;
+        if(filter.start >= static_cast<std::int64_t>(text.size()))
+            return box_primitive(""s);
+        const auto from = static_cast<std::size_t>(filter.start);
+        auto count = text.size() - from;
+        if(filter.has_length)
+            count = std::min(count, static_cast<std::size_t>(filter.length));
+        return box_primitive(text.substr(from, count));
+    }
+
+    const auto date = civil_date_of(*field);
+    if(not date)
+        return std::nullopt;
+    if(filter.computed == "year"sv)
+        return box_primitive(static_cast<xson::integer_type>(date->year));
+    if(filter.computed == "month"sv)
+        return box_primitive(static_cast<xson::integer_type>(date->month));
+    if(filter.computed == "day"sv)
+        return box_primitive(static_cast<xson::integer_type>(date->day));
+    throw std::logic_error{"Unknown computed filter function: "s + std::string{filter.computed}};
+}
+
+inline bool same_comparison_kind(const xson::primitive& left, const xson::primitive& right)
+{
+    const auto numeric = xson::is_numeric_primitive(left) and xson::is_numeric_primitive(right);
+    const auto textual = std::holds_alternative<xson::string_type>(left)
+        and std::holds_alternative<xson::string_type>(right);
+    return numeric or textual;
+}
+
+inline bool compare_computed(const xson::object& produced, const string_filter& filter)
+{
+    if(not produced.has_value() or not filter.literal.has_value())
+        return false;
+
+    const auto& left = produced.get<xson::primitive>();
+    const auto& right = filter.literal.get<xson::primitive>();
+    if(not same_comparison_kind(left, right))
+        return false;
+
+    const auto op = filter.function;
+    if(op == "eq"sv)
+        return xson::primitive_equal(left, right);
+    if(op == "ne"sv)
+        return not xson::primitive_equal(left, right);
+    if(op == "gt"sv)
+        return xson::primitive_less(right, left);
+    if(op == "ge"sv)
+        return xson::primitive_less(right, left) or xson::primitive_equal(left, right);
+    if(op == "lt"sv)
+        return xson::primitive_less(left, right);
+    if(op == "le"sv)
+        return xson::primitive_less(left, right) or xson::primitive_equal(left, right);
+    throw std::logic_error{"Unknown computed filter operator: "s + std::string{op}};
+}
+
+inline bool computed_comparison_matches(const xson::object* field, const string_filter& filter)
+{
+    const auto produced = evaluate_computed(field, filter);
+    if(not produced)
+        return false;
+    return compare_computed(*produced, filter);
+}
+
 // True when a document satisfies every post-filter string function
 inline auto document_matches_string_filters(
     const xson::object& doc,
@@ -1756,6 +2250,12 @@ inline auto document_matches_string_filters(
 {
     return std::ranges::all_of(filters, [&](const string_filter& filter)
     {
+        if(not filter.computed.empty())
+        {
+            const auto matches = computed_comparison_matches(field_at_path(doc, filter.field), filter);
+            return filter.negated ? not matches : matches;
+        }
+
         if(not known_string_predicate(filter.function))
             throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
 
@@ -1870,6 +2370,13 @@ inline bool selector_matches(const eval_scope& scope, const xson::object& select
 
 inline bool string_filter_matches(const eval_scope& scope, const string_filter& filter)
 {
+    if(not filter.computed.empty())
+    {
+        const auto located = locate_path(scope, filter.field);
+        const auto matches = computed_comparison_matches(located.value, filter);
+        return filter.negated ? not matches : matches;
+    }
+
     if(not known_string_predicate(filter.function))
         throw std::logic_error{"Unknown string filter function: "s + std::string{filter.function}};
 

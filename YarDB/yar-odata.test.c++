@@ -4385,6 +4385,221 @@ auto register_odata_tests()
         };
     };
 
+    scenario("indexof, substring, length, year, month, and day compare computed values, [yardb]") = []
+    {
+        given("Bonds, dates, and values that are not strings") = []
+        {
+            const auto matched_names = [](const object& docs, std::string_view expr)
+            {
+                auto names = std::vector<string>{};
+                const auto matched = filter_documents_by_parsed(docs, parse_filter(expr));
+                for(const auto& row : matched.get<object::array>())
+                {
+                    if(row.has("name"s) and row["name"s].is_string())
+                        names.push_back(row["name"s].get<string>());
+                    else
+                        names.push_back(""s);
+                }
+                std::ranges::sort(names);
+                return names;
+            };
+
+            const auto stamp = xson::to_time_point("2026-10-26T15:04:05.123Z");
+            const auto docs = object{object::array{
+                object{
+                    {"name"s, "James Bond"s},
+                    {"isin"s, "FI0009000681"s},
+                    {"tradeDate"s, "2026-10-26"s},
+                    {"party"s, object{{"tradeDate"s, "2026-10-26"s}}}},
+                object{
+                    {"name"s, "Bob"s},
+                    {"isin"s, "US0378331005"s},
+                    {"tradeDate"s, "2025-01-02T00:00:00.000Z"s}},
+                object{
+                    {"name"s, "Ada"s},
+                    {"isin"s, "FI4000297767"s},
+                    {"tradeDate"s, "2026-03-15T08:00:00+02:00"s}},
+                object{
+                    {"name"s, "O'Brien"s},
+                    {"isin"s, ""s},
+                    {"tradeDate"s, stamp}},
+                object{
+                    {"name"s, "Eve"s},
+                    {"isin"s, "DE0000000001"s}},
+                object{
+                    {"name"s, 1},
+                    {"isin"s, 12},
+                    {"tradeDate"s, 2026}},
+                object{{"name"s, "bond"s}, {"tradeDate"s, "2026-02-29"s}},
+                object{{"name"s, ""s}, {"tradeDate"s, "2024-02-29"s}}
+            }};
+
+            when("indexof returns the first match or -1") = [docs, matched_names]
+            {
+                then("ge 0 keeps Bond, eq -1 keeps the others that are strings, and a missing field is not -1") = [docs, matched_names]
+                {
+                    require_eq(matched_names(docs, "indexof(name,'Bond') ge 0"sv), std::vector<string>{"James Bond"s});
+                    require_eq(
+                        matched_names(docs, "indexof(name, 'Bond') eq 6"sv),
+                        std::vector<string>{"James Bond"s});
+                    require_eq(
+                        matched_names(docs, "indexof(name,'bond') ge 0"sv),
+                        std::vector<string>{"bond"s});
+                    require_eq(
+                        matched_names(docs, "indexof(name,'Bond') eq -1"sv),
+                        std::vector<string>{""s, "Ada"s, "Bob"s, "Eve"s, "O'Brien"s, "bond"s});
+                    require_eq(matched_names(docs, "indexof(absent,'Bond') eq -1"sv), std::vector<string>{});
+                    require_eq(
+                        matched_names(docs, "indexof(name, 'O''Brien') eq 0"sv),
+                        std::vector<string>{"O'Brien"s});
+                    require_eq(matched_names(docs, "indexof(name,'') eq 0"sv).size(), 7u);
+
+                    const auto [selector, filters] = parse_and_filter("indexof(name,'Bond') ge 0"sv);
+                    require_true(selector.empty());
+                    require_eq(filters.size(), 1u);
+                    require_eq(filters[0].computed, "indexof"sv);
+                    require_eq(filters[0].function, "ge"sv);
+                    require_eq(filters[0].field, "name"sv);
+                    require_eq(filters[0].argument, "Bond"sv);
+                };
+            };
+
+            when("substring takes a start and an optional length") = [docs, matched_names]
+            {
+                then("A prefix matches, the tail matches, and past the end is empty") = [docs, matched_names]
+                {
+                    require_eq(
+                        matched_names(docs, "substring(isin,0,2) eq 'FI'"sv),
+                        std::vector<string>{"Ada"s, "James Bond"s});
+                    require_eq(
+                        matched_names(docs, "substring(isin, 2) eq '0009000681'"sv),
+                        std::vector<string>{"James Bond"s});
+                    require_eq(
+                        matched_names(docs, "substring(isin,0,2) eq 'FI' and year(tradeDate) eq 2026"sv),
+                        std::vector<string>{"Ada"s, "James Bond"s});
+                    require_eq(matched_names(docs, "substring(isin,20,2) eq ''"sv).size(), 5u);
+                    require_eq(matched_names(docs, "substring(name,0,0) eq ''"sv).size(), 7u);
+                    require_eq(matched_names(docs, "substring(name,-1,1) eq 'J'"sv), std::vector<string>{});
+                    require_eq(matched_names(docs, "not substring(name,-1,1) eq 'J'"sv).size(), docs.get<object::array>().size());
+                    require_eq(matched_names(docs, "substring(isin,0,2) eq 'FI'"sv).size(), 2u);
+                    require_eq(matched_names(docs, "substring(absent,0,2) eq 'FI'"sv), std::vector<string>{});
+                };
+            };
+
+            when("length counts the string") = [docs, matched_names]
+            {
+                then("gt 3 keeps the longer names and a number does not match") = [docs, matched_names]
+                {
+                    require_eq(
+                        matched_names(docs, "length(name) gt 3"sv),
+                        std::vector<string>{"James Bond"s, "O'Brien"s, "bond"s});
+                    require_eq(matched_names(docs, "length(name) eq 3"sv), std::vector<string>{"Ada"s, "Bob"s, "Eve"s});
+                    require_eq(matched_names(docs, "length(name) eq 3.0"sv), std::vector<string>{"Ada"s, "Bob"s, "Eve"s});
+                    require_eq(matched_names(docs, "length(name) eq 0"sv), std::vector<string>{""s});
+                    require_eq(matched_names(docs, "length(name) gt '3'"sv), std::vector<string>{});
+                    require_eq(
+                        matched_names(docs, "not length(name) gt 3"sv).size(),
+                        docs.get<object::array>().size() - 3u);
+                    require_eq(
+                        matched_names(docs, "length(name) gt 3 or name eq 'Bob'"sv),
+                        std::vector<string>{"Bob"s, "James Bond"s, "O'Brien"s, "bond"s});
+
+                    const auto [selector, filters] = parse_and_filter("length(name) gt 3"sv);
+                    require_true(selector.empty());
+                    require_eq(filters[0].computed, "length"sv);
+                    require_eq(filters[0].function, "gt"sv);
+                    require_eq(static_cast<integer_type>(filters[0].literal), 3);
+                };
+            };
+
+            when("year, month, and day read a date or a timestamp") = [docs, matched_names]
+            {
+                then("The calendar date matches and a bad date or a number does not") = [docs, matched_names]
+                {
+                    require_eq(
+                        matched_names(docs, "year(tradeDate) eq 2026"sv),
+                        std::vector<string>{"Ada"s, "James Bond"s, "O'Brien"s});
+                    require_eq(matched_names(docs, "month(tradeDate) eq 10"sv), std::vector<string>{"James Bond"s, "O'Brien"s});
+                    require_eq(matched_names(docs, "day(tradeDate) eq 26"sv), std::vector<string>{"James Bond"s, "O'Brien"s});
+                    require_eq(matched_names(docs, "month(tradeDate) eq 3"sv), std::vector<string>{"Ada"s});
+                    require_eq(matched_names(docs, "day(tradeDate) eq 15"sv), std::vector<string>{"Ada"s});
+                    require_eq(matched_names(docs, "year(tradeDate) eq 2024"sv), std::vector<string>{""s});
+                    require_eq(matched_names(docs, "year(tradeDate) eq 2025"sv), std::vector<string>{"Bob"s});
+                    require_eq(matched_names(docs, "year(party/tradeDate) eq 2026"sv), std::vector<string>{"James Bond"s});
+                    require_eq(matched_names(docs, "year(absent) eq 2026"sv), std::vector<string>{});
+                    require_eq(
+                        matched_names(docs, "not year(tradeDate) eq 2026"sv).size(),
+                        docs.get<object::array>().size() - 3u);
+                    require_eq(matched_names(docs, "year(tradeDate) eq 2026.0"sv).size(), 3u);
+                };
+            };
+        };
+
+        given("A repeated group") = []
+        {
+            when("length is used inside any") = []
+            {
+                then("A member with a long name matches") = []
+                {
+                    const auto docs = object{object::array{
+                        object{{"name"s, "hit"s}, {"items"s, object::array{
+                            object{{"name"s, "Bo"s}},
+                            object{{"name"s, "Bond"s}}}}},
+                        object{{"name"s, "miss"s}, {"items"s, object::array{
+                            object{{"name"s, "Bo"s}}}}}
+                    }};
+                    const auto matched = filter_documents_by_parsed(
+                        docs, parse_filter("items/any(d: length(d/name) gt 3)"sv));
+                    require_eq(matched.get<object::array>().size(), 1u);
+                    require_eq(matched.get<object::array>()[0]["name"s].get<string>(), "hit"s);
+                };
+            };
+        };
+
+        given("A malformed value function") = []
+        {
+            when("The arity, the argument, or the comparison is wrong") = []
+            {
+                then("Parsing is rejected and the message names the function") = []
+                {
+                    const auto rejected = [](std::string_view expr, std::string_view prefix)
+                    {
+                        try
+                        {
+                            std::ignore = parse_filter(expr);
+                            require_true(false);
+                        }
+                        catch(const std::invalid_argument& error)
+                        {
+                            require_true(std::string_view{error.what()}.starts_with(prefix));
+                        }
+                    };
+                    rejected("indexof(name)"sv, "indexof "sv);
+                    rejected("indexof(name,'a','b') ge 0"sv, "indexof "sv);
+                    rejected("indexof(name, Bond) ge 0"sv, "indexof "sv);
+                    rejected("indexof('name','a') ge 0"sv, "indexof "sv);
+                    rejected("indexof(name"sv, "indexof "sv);
+                    rejected("substring(isin)"sv, "substring "sv);
+                    rejected("substring(isin,0,2,3) eq 'FI'"sv, "substring "sv);
+                    rejected("substring(isin,'0',2) eq 'FI'"sv, "substring "sv);
+                    rejected("substring(isin,0.5,2) eq 'FI'"sv, "substring "sv);
+                    rejected("length()"sv, "length "sv);
+                    rejected("length(name,1) gt 3"sv, "length "sv);
+                    rejected("length(name)"sv, "length "sv);
+                    rejected("length('abc') gt 1"sv, "length "sv);
+                    rejected("length(name) gt3"sv, "length "sv);
+                    rejected("year()"sv, "year "sv);
+                    rejected("year(tradeDate,1) eq 2026"sv, "year "sv);
+                    rejected("year(1) eq 2026"sv, "year "sv);
+                    rejected("month()"sv, "month "sv);
+                    rejected("month(tradeDate, 1) eq 1"sv, "month "sv);
+                    rejected("day()"sv, "day "sv);
+                    rejected("day(tradeDate, 1) eq 1"sv, "day "sv);
+                };
+            };
+        };
+    };
+
     return true;
 }
 

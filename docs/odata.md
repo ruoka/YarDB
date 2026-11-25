@@ -32,6 +32,10 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `startswith` | Index-backed on top-level secondary keys (not when negated, and not when the field is wrapped in `tolower` / `toupper`) |
 | `contains` / `endswith` | Post-filter only; comparison stays case-sensitive. `not contains` / `not endswith` supported |
 | `tolower` / `toupper` | ASCII `A-Z` / `a-z` only. Case-insensitive matching is `contains(tolower(field), tolower('text'))` (also `startswith`, `endswith`, and `eq` / `ne` / `gt` / `ge` / `lt` / `le`). A folded field is a post-filter. A folded string literal is a constant, so `startswith(name, tolower('AB'))` can still use the prefix index |
+| `indexof` | `indexof(field,'text')` is the zero-based index of the first match, or `-1`. Post-filter. Example: `indexof(name,'Bond') ge 0`. A missing field or a non-string compares false, including `eq -1` |
+| `substring` | `substring(field,start)` and `substring(field,start,length)`, zero-based. Past the end is `''`. A negative start or length compares false. Example: `substring(isin,0,2) eq 'FI'` |
+| `length` | `length(field)` is the string's length. Example: `length(name) gt 3`. A missing field or a non-string compares false |
+| `year` / `month` / `day` | Calendar part of a date `YYYY-MM-DD`, an ISO-8601 timestamp (the date as written, with `Z` or a numeric offset), or a timestamp value (UTC). Example: `year(tradeDate) eq 2026`. A missing field or any other value compares false. Wrong arity or a non-field argument on these calls is **422** |
 
 ### Metadata & format
 
@@ -56,7 +60,6 @@ No items. The next larger query feature is deeper `$expand`, under Later.
 | Deeper `$expand` | `$expand=customer($select=name)`, nested expand, multi-valued refs (unique-secondary expand via `{singular}_{UniqueKey}` is shipped) |
 | `$search` | `$search=wireless` |
 | `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
-| Richer string/date functions | `indexof`, `year(...)` |
 | Bound actions / functions | `POST /users(1)/Default.ResetPassword` |
 | XML CSDL `$metadata` | Beyond JSON CSDL |
 

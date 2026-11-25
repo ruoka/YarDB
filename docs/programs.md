@@ -236,7 +236,8 @@ YarDB implements OData-compliant query parameters for advanced querying:
   - String functions:
     - `startswith(field, 'prefix')` — index-backed when `field` is a top-level secondary index key; otherwise post-filter. `startswith(tolower(field), 'ab')` is a post-filter
     - `contains(field, 'substring')`, `endswith(field, 'suffix')` — post-filter only, and the comparison stays case-sensitive. Case-insensitive matching is `contains(tolower(field), tolower('text'))`. `toupper` is the inverse. Both fold ASCII `A-Z` and `a-z` only, and either argument may be wrapped. `tolower` / `toupper` may also wrap either side of `eq`, `ne`, `gt`, `ge`, `lt`, and `le`
-  - Example: `GET /users?$filter=status ne 'deleted'`, `GET /users?$filter=not%20contains(email,'@example')`, `GET /users?$filter=startswith(name,'A')` (requires `name` indexed)
+    - `indexof(field,'text')` — zero-based index of the first match, or `-1`. `substring(field,start)` and `substring(field,start,length)` — zero-based; past the end is empty. `length(field)` — the string's length. `year(field)`, `month(field)`, `day(field)` — calendar part of a `YYYY-MM-DD` date, an ISO-8601 timestamp (the date as written), or a timestamp value (UTC). Each is a post-filter used in a comparison: `indexof(name,'Bond') ge 0`, `substring(isin,0,2) eq 'FI'`, `length(name) gt 3`, `year(tradeDate) eq 2026`. A missing field or the wrong type compares false. Bad arity or syntax is 422
+  - Example: `GET /users?$filter=status ne 'deleted'`, `GET /users?$filter=not%20contains(email,'@example')`, `GET /users?$filter=startswith(name,'A')` (requires `name` indexed), `GET /trades?$filter=year(tradeDate)%20eq%202026`
   - Indexed primitive types remain distinct (`1`, `1.0`, `"1"`, and `true` are separate keys); numeric ranges use numeric ordering
 
 - **`$select=field1,field2`** - Project specific fields

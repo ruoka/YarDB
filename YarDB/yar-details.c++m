@@ -713,12 +713,12 @@ inline auto check_if_none_match(const ::http::headers& headers, const std::strin
     return check_etag_precondition(headers, "if-none-match"s, etag, false, true);
 }
 
-// Parse query parameters from URI into a map
+// Parse query parameters from URI into a map.
+// A flag with no '=' is kept: the key is present and the value is empty.
 inline auto parse_query_params(const ::http::uri& uri)
 {
     auto params = std::map<std::string, std::string>{};
-    
-    // Get query string from URI
+
     const auto query_str = static_cast<std::string_view>(uri.query);
     if(query_str.empty())
         return params;
@@ -726,15 +726,23 @@ inline auto parse_query_params(const ::http::uri& uri)
     for(const auto part : query_str | std::views::split('&'))
     {
         const auto segment = std::string_view{part};
-        const auto eq_pos = segment.find('=');
-        if(eq_pos == std::string_view::npos)
+        if(segment.empty())
             continue;
 
-        auto key = utils::trim(segment.substr(0, eq_pos));
-        auto value = utils::trim(segment.substr(eq_pos + 1));
+        const auto eq_pos = segment.find('=');
+        auto raw_key = segment;
+        auto raw_value = std::string_view{};
+        if(eq_pos != std::string_view::npos)
+        {
+            raw_key = segment.substr(0, eq_pos);
+            raw_value = segment.substr(eq_pos + 1);
+        }
 
-        if(not key.empty())
-            params[net::url_decode(key)] = net::url_decode(value);
+        const auto key = utils::trim(raw_key);
+        if(key.empty())
+            continue;
+
+        params[net::url_decode(key)] = net::url_decode(utils::trim(raw_value));
     }
 
     return params;

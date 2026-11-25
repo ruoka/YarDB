@@ -134,6 +134,36 @@ auto register_details_tests()
                 };
             };
         };
+
+        given("A flag with no equals sign") = []
+        {
+            when("Parsing the query") = []
+            {
+                then("Keeps the key with an empty value and keeps valued options") = []
+                {
+                    const auto uri = ::http::uri{"/feed?%24deltaToken&$top=5&$select=name%2Cemail"sv};
+                    const auto params = parse_query_params(uri);
+                    require_eq(params.size(), 3u);
+                    require_eq(params.at("$deltaToken"s), ""s);
+                    require_eq(params.at("$top"s), "5"s);
+                    require_eq(params.at("$select"s), "name,email"s);
+                };
+            };
+        };
+
+        given("An empty $deltaToken value") = []
+        {
+            when("Parsing $deltaToken=") = []
+            {
+                then("Keeps the key with an empty value") = []
+                {
+                    const auto uri = ::http::uri{"/feed?$deltaToken="sv};
+                    const auto params = parse_query_params(uri);
+                    require_eq(params.size(), 1u);
+                    require_eq(params.at("$deltaToken"s), ""s);
+                };
+            };
+        };
     };
 
     scenario("validate_collection_name rejects invalid characters, [yardb]") = []

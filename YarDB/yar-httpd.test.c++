@@ -6970,6 +6970,115 @@ auto test_set()
         };
     };
 
+    test_case("OData indexof, substring, length, year, month, and day filter rows, [yardb]") = []
+    {
+        auto setup = std::make_shared<fixture>("./httpd_filter_functions_test.db");
+
+        const auto names_in = [](const string& body)
+        {
+            auto names = std::vector<string>{};
+            for(const auto& row : json::parse(body).get<object::array>())
+                names.push_back(row["name"s].get<string>());
+            std::ranges::sort(names);
+            return names;
+        };
+
+        section("GET $filter compares indexof, substring, length, and calendar parts") = [setup, names_in]
+        {
+            for(const auto& body : {
+                R"({"name":"James Bond","isin":"FI0009000681","tradeDate":"2026-10-26"})"s,
+                R"({"name":"Bob","isin":"US0378331005","tradeDate":"2025-01-02T00:00:00.000Z"})"s,
+                R"({"name":"Ada","isin":"FI4000297767","tradeDate":"2026-03-15T08:00:00+02:00"})"s})
+            {
+                auto [post_status, post_reason, post_headers, post_body] = make_request(
+                    setup->port(), "POST"s, "/bonds"s, body);
+                require_eq(post_status, "201"s);
+                (void)post_reason;
+                (void)post_headers;
+                (void)post_body;
+            }
+
+            auto [index_status, index_reason, index_headers, index_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/bonds?$filter=indexof(name,'Bond')%20ge%200"s,
+                ""s);
+            require_eq(index_status, "200"s);
+            (void)index_reason;
+            (void)index_headers;
+            require_eq(names_in(index_body), std::vector<string>{"James Bond"s});
+
+            auto [prefix_status, prefix_reason, prefix_headers, prefix_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/bonds?$filter=substring(isin,0,2)%20eq%20'FI'"s,
+                ""s);
+            require_eq(prefix_status, "200"s);
+            (void)prefix_reason;
+            (void)prefix_headers;
+            require_eq(names_in(prefix_body), std::vector<string>{"Ada"s, "James Bond"s});
+
+            auto [length_status, length_reason, length_headers, length_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/bonds?$filter=length(name)%20gt%203"s,
+                ""s);
+            require_eq(length_status, "200"s);
+            (void)length_reason;
+            (void)length_headers;
+            require_eq(names_in(length_body), std::vector<string>{"James Bond"s});
+
+            auto [year_status, year_reason, year_headers, year_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/bonds?$filter=year(tradeDate)%20eq%202026"s,
+                ""s);
+            require_eq(year_status, "200"s);
+            (void)year_reason;
+            (void)year_headers;
+            require_eq(names_in(year_body), std::vector<string>{"Ada"s, "James Bond"s});
+
+            auto [month_status, month_reason, month_headers, month_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/bonds?$filter=month(tradeDate)%20eq%2010"s,
+                ""s);
+            require_eq(month_status, "200"s);
+            (void)month_reason;
+            (void)month_headers;
+            require_eq(names_in(month_body), std::vector<string>{"James Bond"s});
+
+            auto [day_status, day_reason, day_headers, day_body] = make_request(
+                setup->port(),
+                "GET"s,
+                "/bonds?$filter=day(tradeDate)%20eq%2015"s,
+                ""s);
+            require_eq(day_status, "200"s);
+            (void)day_reason;
+            (void)day_headers;
+            require_eq(names_in(day_body), std::vector<string>{"Ada"s});
+        };
+
+        section("GET a value function with bad arity returns 422") = [setup]
+        {
+            for(const auto& path : {
+                "/bonds?$filter=length()"s,
+                "/bonds?$filter=indexof(name)"s,
+                "/bonds?$filter=substring(isin)"s,
+                "/bonds?$filter=year()"s,
+                "/bonds?$filter=month(tradeDate,1)%20eq%201"s,
+                "/bonds?$filter=day(tradeDate,1)%20eq%201"s})
+            {
+                auto [status, reason, headers, body] = make_request(
+                    setup->port(), "GET"s, path, ""s);
+                require_eq(status, "422"s);
+                require_eq(reason, "Unprocessable Entity"s);
+                (void)headers;
+                require_true(json::parse(body).has("message"s));
+            }
+        };
+    };
+
     test_case("GET /{collection}/{id}/history returns versions newest first, [yardb]") = []
     {
     const auto test_file = "./httpd_history_test.db";

@@ -263,7 +263,7 @@ Current shipped work and verification totals are maintained only in [changelog.m
 
 #### 0. 📊 OData query surface
 - **Checklist**: [odata.md](odata.md) — supported today vs pipeline
-- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`)
+- **`$filter`**: ✅ largely complete (`eq`/`ne`/ranges/`not`/`and`/`or`/`in`/nested paths; index-backed `startswith`; post-filter `contains`/`endswith`; `indexof`/`substring`/`length`/`year`/`month`/`day`)
 - **`$apply` groupby/aggregate**: ✅ shipped — `groupby((field,...))` / `aggregate`, including multi-key `groupby((country,status),aggregate(...))`; pipeline `filter(...)/compute(...)/groupby(...)`; methods `sum`/`average`/`min`/`max` and `$count` (`aggregate($count as Alias)`)
 - **`$compute`**: ✅ shipped — `Price mul Qty as LineTotal` (`add`/`sub`/`mul`/`div`); not combinable with `$apply`
 - **`$expand` nested `$select`**: ✅ shipped — `$expand=customer($select=name)` and `$expand=instrument($select=isin)`; `_id` is kept; an unknown option or a bad `$select` is 422

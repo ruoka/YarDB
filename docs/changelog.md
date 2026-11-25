@@ -4,6 +4,8 @@ Shipped features, fixes, and test harness work. **Newest first** within each mon
 
 For planned work see [development.md](development.md#development-roadmap). Historical design evaluations live under [archive/](archive/).
 
+**Current release:** [`v2.1.0`](https://github.com/ruoka/YarDB/releases/tag/v2.1.0).
+
 ---
 
 ## November 2026
@@ -34,7 +36,7 @@ For planned work see [development.md](development.md#development-roadmap). Histo
 
 | Item | Summary |
 |------|---------|
-| **Native MCP under `/_sse`** | `yardb` serves native MCP at `GET /_sse` and JSON-RPC `POST /_messages/`, under the `_` prefix of the admin routes, so `/messages` is a data collection. A client that names `/sse` moves to `/_sse`, which makes this release `v2.0.0`. See [programs.md](programs.md#mcp---cursor--agent-client) |
+| **Native MCP under `/_sse`** | `yardb` serves native MCP at `GET /_sse` and JSON-RPC `POST /_messages/`, under the `_` prefix of the admin routes, so `/messages` is a data collection. A client that names `/sse` moves to `/_sse`. That incompatible path change is why [`v2.0.0`](https://github.com/ruoka/YarDB/releases/tag/v2.0.0) is a major. See [programs.md](programs.md#mcp---cursor--agent-client) |
 | **Hyphenated collection names** | A collection name and its route may contain `-`, for example `/settlement-instructions`. |
 | **`yarproxy` refuses `Transfer-Encoding`** | As `net::http::server` does, `yarproxy` answers `400` to a request with `Transfer-Encoding` before it buffers or fans out, so bytes it framed by `Content-Length` cannot carry a second request to every replica. |
 | **Row `@odata.etag`** | Under `odata=minimalmetadata` or `fullmetadata`, a collection GET names each row's version in `@odata.etag`, stamped under the same lock as the row's body, and a document GET names it as well. It is the value of that document's `ETag` header, so a client that read a page can `PATCH` a row with `If-Match` without reading it again. `$select`, `or` filters and `$batch` GET keep it. Plain JSON is unchanged. See [programs.md](programs.md#2-metadata-in-responses) |

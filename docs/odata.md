@@ -15,10 +15,10 @@ YarDB implements a practical **subset** of OData 4.x for document collections ov
 | `$select` | Projection; `_id` always included |
 | `$count=true` | Returns a JSON number; works with `$filter` |
 | `$batch` | `POST /$batch` atomicity groups, independent writes, GET reads outside a group, and `dependsOn`; see [programs.md](programs.md#atomic-batch-post-batch) |
-| `$expand` | `{singular}_id` → plural collection `_id`; else `{singular}_{UniqueKey}` → a unique secondary key on that collection. `$expand=customer($select=name)` and `$expand=instrument($select=name,isin)` keep those properties on the nested object, and `_id` when it is not listed. An unknown option, including `$expand=instrument($isin=isin)`, or a bad `$select`, is 422 |
+| `$expand` | `{singular}_id` → plural collection `_id`; else `{singular}_{UniqueKey}` such as `instrument_isin` → a unique secondary key on that collection. `$expand=instrument($select=symbol)` and `$expand=customer($select=name)` keep those properties on the nested object, and `_id` when it is not listed. An unknown option, including `$expand=instrument($isin=isin)`, or a bad `$select`, is 422 |
 | `$compute` | `Price mul Qty as LineTotal` (also `add`/`sub`/`div`); top-level numeric fields; runs after expand, before `$filter` / `$select` / paging (aliases usable in `$filter` / `$orderby`) |
 | `$apply` | Pipeline of slash-separated transforms: `filter(...)`, `compute(...)`, `groupby((field,...))`, `groupby((field,...),aggregate(...))`, `aggregate(...)`; methods `sum`/`average`/`min`/`max`, and `aggregate($count as Alias)`. `groupby` returns one row per distinct tuple of those top-level fields, including `groupby((country,status),aggregate(...))` |
-| `$deltaToken` | Changes since a cursor: new and updated documents, plus deleted ids. The body is `{"value":[...],"deltaToken":"..."}`. A missing or empty token reads from the start and still returns a token. An unknown token is 400. The token is a file offset. Not combined with other query options |
+| `$deltaToken` | Changes since a cursor: new and updated documents, plus deletes. A delete is an append-only record, not a rewritten row. The body is `{"value":[...],"deltaToken":"..."}`. A missing or empty token reads from the start and still returns a token. An unknown token is 400. The token is a file offset. Other query options on the same request are 422 |
 
 ### `$filter`
 
@@ -57,7 +57,7 @@ No items. Nested `$expand` and multi-valued refs remain under Later.
 
 | Feature | Example |
 |---------|---------|
-| Deeper `$expand` | Nested expand, multi-valued refs (`$expand=customer($select=name)` and unique-secondary expand are shipped) |
+| Deeper `$expand` | Nested expand, multi-valued refs (`$expand=instrument($select=symbol)` and unique-secondary expand such as `instrument_isin` are shipped) |
 | `$search` | `$search=wireless` |
 | `all` | `Lines/all(l:l/Qty gt 0)` — true for an empty collection, so it is not `any` |
 | Bound actions / functions | `POST /users(1)/Default.ResetPassword` |

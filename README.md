@@ -19,7 +19,7 @@ Today each open database file still has a single writer (exclusive `.pid` lock).
 YarDB is a C++23 application that implements:
 
 - **REST API**: HTTP/1.1 status codes, structured errors, and standard response headers
-- **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter` (`eq`, `ne`, `gt`, `ge`, `lt`, `le`, `not`, `and`, `or`, `in`, `any`, `startswith`, `contains`, `endswith`, `tolower`, `toupper`, `indexof`, `substring`, `length`, `year`, `month`, `day`), `$select`, `$count`, and `$expand` (`{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` when that key is unique; `$expand=customer($select=name)` keeps those nested properties plus `_id`)
+- **OData Querying**: `$top`, `$skip`, `$orderby`, `$filter` (`eq`, `ne`, `gt`, `ge`, `lt`, `le`, `not`, `and`, `or`, `in`, `any`, `startswith`, `contains`, `endswith`, `tolower`, `toupper`, `indexof`, `substring`, `length`, `year`, `month`, `day`; `all` is not supported), `$select`, `$count`, `$expand` (`{singular}_id` → related `_id`, else `{singular}_{UniqueKey}` such as `instrument_isin` when that key is unique; `$expand=instrument($select=symbol)` keeps those nested properties plus `_id`), and `$deltaToken` (append-only delete records; the token is a file offset). Checklist: [docs/odata.md](docs/odata.md)
 - **MCP server**: Native HTTP+SSE MCP on `yardb` (`GET /_sse`, via `http::mcp` in net4cpp). Python `tools/yardb_mcp*.py` kept as reference/oracle
 - **Conditional Requests**: Complete support for `If-Match`, `If-None-Match`, `If-Modified-Since`, and `If-Unmodified-Since` headers
 - **ETag & Caching**: Resource versioning with ETag headers for efficient caching and optimistic concurrency control
@@ -189,6 +189,7 @@ See [LICENSE](LICENSE) for details.
 
 Start at [docs/README.md](docs/README.md) for the full documentation index. Key guides:
 
+- [OData support](docs/odata.md) - Shipped query options and what is still planned
 - [Programs Documentation](docs/programs.md) - `yardb`, `yarsh`, MCP bridge, `yarproxy`, `yarexport`, `yarimport`
 - [Development Guide](docs/development.md) - Build, test, roadmap
 - [Versioning](docs/versioning.md) - Ecosystem SemVer and shared tester pin rule

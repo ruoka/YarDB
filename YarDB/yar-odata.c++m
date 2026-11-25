@@ -2072,9 +2072,94 @@ inline std::optional<unsigned> take_fixed_digits(
     return value;
 }
 
+// std::chrono::parse is found by argument-dependent lookup on the calendar
+// type. The requires-expression is false when this toolchain's std module does
+// not export parse (libc++ leaves `using std::chrono::parse` commented out).
+// __cpp_lib_chrono is set either way, so it is not a check.
+template<class T>
+concept has_chrono_parse = requires(std::istream& input, T& value)
+{
+    input >> parse("%F", value);
+};
+
+// A read that ends on the last character sets eofbit, and tellg then fails.
+template<class T>
+inline bool read_chrono(std::istream& input, const char* format, T& value)
+{
+    input >> parse(format, value);
+    if(not input)
+        return false;
+    if(input.eof())
+        input.clear();
+    return true;
+}
+
+template<class T>
+inline bool read_chrono_field(std::string_view text, const char* format, T& value)
+{
+    auto input = std::istringstream{std::string{text}};
+    if(not read_chrono(input, format, value))
+        return false;
+    return input.peek() == std::char_traits<char>::eof();
+}
+
+// +HH, +HHMM, +HH:MM, or +HH: (and the minus forms). Z and z are UTC.
+// The numbers come from chrono::parse; the shape stays fixed-width.
+template<class Hour, class Minute>
+inline bool chrono_zone_ok(std::string_view zone)
+{
+    if(zone.empty())
+        return true;
+    if(zone == "Z"sv or zone == "z"sv)
+        return true;
+    if(zone.size() < 3 or (zone.front() != '+' and zone.front() != '-'))
+        return false;
+
+    const auto colon = zone.find(':');
+    auto hour_digits = std::string_view{};
+    auto minute_digits = std::string_view{};
+    if(colon == std::string_view::npos)
+    {
+        if(zone.size() == 3)
+            hour_digits = zone.substr(1);
+        else if(zone.size() == 5)
+        {
+            hour_digits = zone.substr(1, 2);
+            minute_digits = zone.substr(3);
+        }
+        else
+            return false;
+    }
+    else if(colon == 3 and (zone.size() == 4 or zone.size() == 6))
+    {
+        hour_digits = zone.substr(1, 2);
+        if(zone.size() == 6)
+            minute_digits = zone.substr(4);
+    }
+    else
+        return false;
+
+    auto hour = Hour{};
+    if(not read_chrono_field(hour_digits, "%H", hour) or hour > Hour{23})
+        return false;
+    if(minute_digits.empty())
+        return true;
+
+    auto minute = Minute{};
+    return read_chrono_field(minute_digits, "%M", minute) and minute <= Minute{59};
+}
+
+inline civil_date as_civil_date(std::chrono::year_month_day date)
+{
+    return civil_date{
+        static_cast<int>(date.year()),
+        static_cast<unsigned>(date.month()),
+        static_cast<unsigned>(date.day())};
+}
+
 // YYYY-MM-DD, or that date plus T HH:MM:SS, an optional fraction, and an
 // optional Z or numeric offset. The date part is the calendar date as written.
-inline std::optional<civil_date> civil_date_from_text(std::string_view text)
+inline std::optional<civil_date> civil_date_from_digits(std::string_view text)
 {
     auto index = std::size_t{0};
     const auto year = take_fixed_digits(text, index, 4);
@@ -2145,6 +2230,91 @@ inline std::optional<civil_date> civil_date_from_text(std::string_view text)
     if(not ymd.ok())
         return std::nullopt;
     return civil_date{static_cast<int>(*year), *month, *day};
+}
+
+// Same ISO-8601 text as civil_date_from_digits, read with std::chrono::parse.
+// Instantiated only when has_chrono_parse is true, so a library without parse
+// never looks the name up outside the requires-expression above.
+template<class Date>
+inline std::optional<civil_date> civil_date_from_chrono(std::string_view text)
+{
+    auto input = std::istringstream{std::string{text}};
+    auto date = Date{};
+    if(not read_chrono(input, "%4Y-%2m-%2d", date) or not date.ok())
+        return std::nullopt;
+
+    const auto canonical = std::format("{:%F}", date);
+    if(canonical.size() != 10
+        or not text.starts_with(canonical)
+        or input.tellg() != std::streamoff{10})
+        return std::nullopt;
+
+    if(input.peek() == std::char_traits<char>::eof())
+        return as_civil_date(date);
+    if(input.get() != 'T')
+        return std::nullopt;
+
+    auto time = std::chrono::nanoseconds{};
+    const auto time_at = input.tellg();
+    if(not read_chrono(input, "%2H:%2M:%S", time))
+        return std::nullopt;
+
+    const auto clock = std::chrono::hh_mm_ss<std::chrono::seconds>{
+        std::chrono::duration_cast<std::chrono::seconds>(time)};
+    const auto rendered = std::format("{:%T}", clock);
+    const auto time_pos = static_cast<std::size_t>(static_cast<std::streamoff>(time_at));
+    if(clock.hours() > std::chrono::hours{23}
+        or clock.minutes() > std::chrono::minutes{59}
+        or clock.seconds() > std::chrono::seconds{59})
+        return std::nullopt;
+    if(rendered.size() != 8
+        or text.size() < time_pos + rendered.size()
+        or text.substr(time_pos, rendered.size()) != rendered)
+        return std::nullopt;
+
+    const auto parsed_to = static_cast<std::size_t>(static_cast<std::streamoff>(input.tellg()));
+    if(parsed_to < time_pos + rendered.size())
+        return std::nullopt;
+    if(parsed_to > time_pos + rendered.size())
+    {
+        if(text[time_pos + rendered.size()] != '.')
+            return std::nullopt;
+        if(parsed_to < time_pos + rendered.size() + 2)
+            return std::nullopt;
+    }
+
+    while(input.peek() != std::char_traits<char>::eof())
+    {
+        const auto next = input.peek();
+        if(next < '0' or next > '9')
+            break;
+
+        auto ignored = std::chrono::year{};
+        const auto at = input.tellg();
+        if(not read_chrono(input, "%4Y", ignored))
+        {
+            input.clear();
+            break;
+        }
+        if(input.tellg() == at)
+            break;
+    }
+
+    if(input.peek() == std::char_traits<char>::eof())
+        return as_civil_date(date);
+
+    const auto zone_at = static_cast<std::size_t>(static_cast<std::streamoff>(input.tellg()));
+    if(not chrono_zone_ok<std::chrono::hours, std::chrono::minutes>(text.substr(zone_at)))
+        return std::nullopt;
+    return as_civil_date(date);
+}
+
+inline std::optional<civil_date> civil_date_from_text(std::string_view text)
+{
+    if constexpr(has_chrono_parse<std::chrono::year_month_day>)
+        return civil_date_from_chrono<std::chrono::year_month_day>(text);
+    else
+        return civil_date_from_digits(text);
 }
 
 inline std::optional<civil_date> civil_date_of(const xson::object& value)

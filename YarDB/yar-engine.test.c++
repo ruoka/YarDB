@@ -2419,6 +2419,69 @@ auto test_set()
             require_true(reopened.read(collection, object{{"_id"s, put_id}}, put_docs));
             require_eq(static_cast<string>(put_docs[0]["name"s]), "new-put"s);
         };
+
+        section("A full deleted successor keeps the live document") = []
+        {
+            // A multi-update that cannot be truncated used to stamp each
+            // complete successor deleted. That status is a tombstone, so
+            // reopen erased the still-committed prior. A full document is not
+            // an appended {_id} marker and must not hide the live row.
+            const auto test_file = "./engine_neutralized_successor_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "kept"s;
+            auto id = xson::integer_type{0};
+            auto other = xson::integer_type{0};
+            {
+                auto engine = yar::db::engine{test_file};
+                require_true(engine.index(collection, {"name"s}).has_value());
+                auto first = object{{"name"s, "ada"s}};
+                auto second = object{{"name"s, "bea"s}};
+                require_true(engine.create(collection, first).has_value());
+                require_true(engine.create(collection, second).has_value());
+                id = static_cast<xson::integer_type>(first["_id"s]);
+                other = static_cast<xson::integer_type>(second["_id"s]);
+            }
+
+            {
+                using xson::fson::operator <<;
+                auto storage = std::fstream{test_file, std::ios::in | std::ios::out | std::ios::binary};
+                require_true(storage.is_open());
+                storage.seekp(0, std::ios::end);
+                auto metadata = yar::db::metadata{std::string{collection}};
+                metadata.status = yar::db::metadata::deleted;
+                auto successor = object{{"_id"s, id}, {"name"s, "ada-new"s}};
+                storage << metadata << successor;
+                storage.flush();
+                require_false(storage.fail());
+            }
+
+            auto reopened = yar::db::engine{test_file};
+            auto ada = object{};
+            require_true(reopened.read(collection, object{{"_id"s, id}}, ada));
+            require_eq(ada.size(), 1u);
+            require_eq(static_cast<string>(ada[0]["name"s]), "ada"s);
+            auto by_name = object{};
+            require_true(reopened.read(collection, object{{"name"s, "ada"s}}, by_name));
+            require_eq(by_name.size(), 1u);
+            auto bea = object{};
+            require_true(reopened.read(collection, object{{"_id"s, other}}, bea));
+            require_eq(static_cast<string>(bea[0]["name"s]), "bea"s);
+            auto renamed = object{};
+            require_false(reopened.read(collection, object{{"name"s, "ada-new"s}}, renamed));
+            require_eq(reopened.count(collection, object{}), 2u);
+
+            const auto feed = reopened.delta(collection, 0);
+            require_true(feed.has_value());
+            require_eq(feed->changes.size(), 2u);
+            require_false(feed->changes[0].removed);
+            require_false(feed->changes[1].removed);
+
+            require_true(reopened.reindex().has_value());
+            ada = object{};
+            require_true(reopened.read(collection, object{{"_id"s, id}}, ada));
+            require_eq(static_cast<string>(ada[0]["name"s]), "ada"s);
+            require_eq(reopened.count(collection, object{}), 2u);
+        };
     };
 
     return true;

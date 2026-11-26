@@ -124,9 +124,11 @@ bool complete_appended_records(
     return static_cast<std::uintmax_t>(end_pos) == file_size;
 }
 
-// Best-effort: mark every complete record past original_size as deleted so a
-// failed multi-append that cannot be truncated does not silently apply a
-// complete prefix on reopen. Stops at the first incomplete/torn tail.
+// Best-effort: mark every complete record past original_size as updated so a
+// failed multi-append that cannot be truncated does not apply a complete
+// prefix on reopen. status=deleted is an appended tombstone and would erase
+// the still-live prior; status=updated is skipped and leaves that prior in
+// place. Stops at the first incomplete/torn tail.
 void neutralize_appended_records(
     std::fstream& storage,
     const std::string& db,
@@ -166,7 +168,7 @@ void neutralize_appended_records(
         const auto resume = storage.tellg();
         storage.clear();
         storage.seekp(record_start, storage.beg);
-        storage << yar::db::deleted;
+        storage << yar::db::updated;
         if(storage.fail())
             return;
         storage.clear();
@@ -187,6 +189,18 @@ bool is_known_status(yar::db::metadata::action status)
         or status == yar::db::metadata::updated
         or status == yar::db::metadata::deleted
         or is_group_marker(status);
+}
+
+// An appended delete record is {_id} and nothing else. A full document with
+// status deleted is an in-place tombstone or a neutralized successor. Skipping
+// it keeps a prior that was already loaded.
+bool is_appended_delete_marker(const yar::db::object& document)
+{
+    if(not document.has("_id"s) or not document["_id"s].is_integer())
+        return false;
+    if(not document.has_objects())
+        return false;
+    return document.get<yar::db::object::map>().size() == 1;
 }
 
 // A delete record carries _id and no other fields. Drop that primary key.
@@ -677,11 +691,13 @@ void yar::db::engine::populate_indexes()
             continue;
 
         // An appended delete record names the _id and does not rewrite the
-        // earlier document. Hide that id. An older in-place tombstone is
-        // already status deleted and was never loaded.
+        // earlier document. Hide that id. A full document with status deleted
+        // is an in-place tombstone or a neutralized successor: skip it so a
+        // prior created row stays live.
         if(metadata.status == metadata::deleted)
         {
-            erase_deleted_document(m_index[metadata.collection], document);
+            if(is_appended_delete_marker(document))
+                erase_deleted_document(m_index[metadata.collection], document);
             continue;
         }
 
@@ -739,7 +755,8 @@ yar::db::db_result<> yar::db::engine::reindex()
         rebuilt_index.update(document);
         if(metadata.status == metadata::deleted)
         {
-            erase_deleted_document(rebuilt_index, document);
+            if(is_appended_delete_marker(document))
+                erase_deleted_document(rebuilt_index, document);
             continue;
         }
         // Rebuilds must not mutate durable statuses; reopen already heals
@@ -1550,9 +1567,9 @@ yar::db::db_result<std::size_t> yar::db::engine::update_impl(
                 assign_revision(revision, pending.front().metadata_record);
                 return pending.size();
             }
-            // N-1 complete + torn last: delete-mark the complete prefix so reopen
-            // keeps all priors (matches the reported failure) instead of silently
-            // applying a partial update.
+            // N-1 complete + torn last: mark the complete prefix updated so
+            // reopen skips those successors and keeps every prior. Stamping
+            // deleted would erase those ids.
             neutralize_appended_records(m_storage, m_db, original_size);
             m_writable = false;
             return std::unexpected{db_error(
@@ -2792,7 +2809,7 @@ yar::db::db_result<yar::db::delta_feed> yar::db::engine::delta(
 
         if(metadata.status == metadata::deleted)
         {
-            if(not document.has("_id"s) or not document["_id"s].is_integer())
+            if(not is_appended_delete_marker(document))
                 continue;
             auto change = delta_change{};
             change.removed = true;

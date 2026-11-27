@@ -789,6 +789,29 @@ auto test_set()
         };
     };
 
+    test_case("index count and view $count of an _id in list, [yardb]") = []
+    {
+        index_fixture fixture{"./index_id_in_count.db"s};
+        fixture.add_keys({"status"s});
+        fixture.insert(object{{"status"s, "A"s}});
+        fixture.insert(object{{"status"s, "A"s}});
+        fixture.insert(object{{"status"s, "B"s}});
+        fixture.insert(object{{"status"s, "A"s}});
+
+        const auto named = object{
+            {"_id"s, object{{"$in"s, object{object::array{object{1ll}, object{3ll}}}}}}};
+        require_eq(fixture.count(named), 2u);
+
+        const auto empty = object{
+            {"_id"s, object{{"$in"s, object{object::array{}}}}}};
+        require_eq(fixture.count(empty), 0u);
+
+        const auto intersection = object{
+            {"_id"s, object{{"$in"s, object{object::array{object{1ll}, object{2ll}}}}}},
+            {"status"s, "A"s}};
+        require_eq(fixture.count(intersection), 2u);
+    };
+
     return true;
 }
 

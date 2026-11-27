@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: MIT
 // See the LICENSE file in the project root for full license text.
 
+module;
+#define _GNU_SOURCE
+#include <fcntl.h>
+#include <poll.h>
+#include <spawn.h>
+#include <sys/resource.h>
+#include <sys/wait.h>
+#include <csignal>
+#include <unistd.h>
 module yar;
 import :engine;
 import :metadata;
@@ -45,6 +54,248 @@ void dump(yar::db::engine& engine, std::string_view collection)
     engine.read(collection, all, documents);
     clog << "Dump " << collection << ":\n" << json::stringify(documents) << endl;
 };
+
+// Bytes one successor adds after the same two creates the failure test uses.
+// The live file's first append is that record, so the file-size cap stops on
+// its boundary.
+std::uintmax_t failed_append_successor_bytes()
+{
+    using namespace tester::basic;
+    using namespace tester::assertions;
+
+    const auto scratch = "./engine_failed_append_measure.db"s;
+    const auto setup = fixture{scratch};
+    constexpr auto collection = "kept"s;
+    auto engine = yar::db::engine{scratch};
+    auto ada = object{{"name"s, "ada"s}};
+    auto bea = object{{"name"s, "bea"s}};
+    require_true(engine.create(collection, ada).has_value());
+    require_true(engine.create(collection, bea).has_value());
+    const auto before = std::filesystem::file_size(scratch);
+    auto patch = object{{"rev"s, xson::integer_type{2}}};
+    require_eq(engine.update(collection, object{{"_id"s, ada["_id"s]}}, patch).value(), 1u);
+    const auto after = std::filesystem::file_size(scratch);
+    require_gt(after, before);
+    return after - before;
+}
+
+struct file_size_limit
+{
+    file_size_limit() = default;
+    file_size_limit(const file_size_limit&) = delete;
+    file_size_limit& operator=(const file_size_limit&) = delete;
+
+    rlimit previous{};
+    struct sigaction saved{};
+    bool armed = false;
+
+    void arm(rlim_t cap)
+    {
+        using namespace tester::basic;
+        using namespace tester::assertions;
+
+        require_eq(getrlimit(RLIMIT_FSIZE, &previous), 0);
+        struct sigaction ignore{};
+        ignore.sa_handler = SIG_IGN;
+        require_eq(sigaction(SIGXFSZ, &ignore, &saved), 0);
+        auto limited = previous;
+        limited.rlim_cur = cap;
+        require_eq(setrlimit(RLIMIT_FSIZE, &limited), 0);
+        armed = true;
+    }
+
+    ~file_size_limit()
+    {
+        if(not armed)
+            return;
+        setrlimit(RLIMIT_FSIZE, &previous);
+        sigaction(SIGXFSZ, &saved, nullptr);
+    }
+};
+
+// The parent runs this in a child whose truncate() fails on the live file, so
+// the append cannot be shrunk back. The child is the only place the limit and
+// the interposition are armed.
+void failed_append_keeps_live_document(std::uintmax_t delta)
+{
+    using namespace tester::basic;
+    using namespace tester::assertions;
+    using xson::fson::operator>>;
+
+    const auto test_file = "./engine_failed_append_live.db"s;
+    const auto setup = fixture{test_file};
+    constexpr auto collection = "kept"s;
+    auto ada_id = xson::integer_type{0};
+    auto bea_id = xson::integer_type{0};
+    auto original_size = std::uintmax_t{0};
+    {
+        auto engine = yar::db::engine{test_file};
+        auto ada = object{{"name"s, "ada"s}};
+        auto bea = object{{"name"s, "bea"s}};
+        require_true(engine.create(collection, ada).has_value());
+        require_true(engine.create(collection, bea).has_value());
+        ada_id = ada["_id"s];
+        bea_id = bea["_id"s];
+        original_size = std::filesystem::file_size(test_file);
+
+        auto result = yar::db::db_result<std::size_t>{};
+        {
+            file_size_limit limit;
+            limit.arm(static_cast<rlim_t>(original_size + delta));
+            result = engine.update(collection, object{}, object{{"rev"s, xson::integer_type{2}}});
+        }
+        require_eq(result.has_value(), false);
+        require_eq(result.error().code, yar::db::db_error_code::rollback_failure);
+        require_eq(result.error().message, "Update append was incomplete and could not be rolled back"s);
+        require_eq(std::filesystem::file_size(test_file), original_size + delta);
+    }
+
+    auto created = 0;
+    auto neutralized = 0;
+    auto storage = std::ifstream{test_file, std::ios::binary};
+    while(storage.peek() != std::char_traits<char>::eof())
+    {
+        auto metadata = yar::db::metadata{};
+        auto document = object{};
+        storage >> metadata >> document;
+        require_true(static_cast<bool>(storage));
+        if(metadata.collection != collection)
+            continue;
+        if(document.has("rev"s))
+        {
+            require_eq(metadata.status, yar::db::metadata::updated);
+            ++neutralized;
+        }
+        else
+        {
+            require_eq(metadata.status, yar::db::metadata::created);
+            ++created;
+        }
+    }
+    require_eq(created, 2);
+    require_eq(neutralized, 1);
+
+    auto reopened = yar::db::engine{test_file};
+    auto ada = object{};
+    require_true(reopened.read(collection, object{{"_id"s, ada_id}}, ada));
+    require_eq(ada.size(), 1u);
+    require_eq(static_cast<string>(ada[0]["name"s]), "ada"s);
+    require_eq(ada[0].has("rev"s), false);
+    auto bea = object{};
+    require_true(reopened.read(collection, object{{"_id"s, bea_id}}, bea));
+    require_eq(bea.size(), 1u);
+    require_eq(static_cast<string>(bea[0]["name"s]), "bea"s);
+    require_eq(bea[0].has("rev"s), false);
+    require_eq(reopened.count(collection, object{}), 2u);
+}
+
+int spawn_failed_append_child()
+{
+    using namespace tester::basic;
+    using namespace tester::assertions;
+
+    const auto source = "/tmp/yardb-fail-truncate.c"s;
+    const auto library = "/tmp/yardb-fail-truncate.so"s;
+    {
+        auto out = std::ofstream{source};
+        out << R"c(#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+int truncate(const char* path, off_t length)
+{
+    const char* needle = getenv("YARDB_FAIL_TRUNCATE");
+    if(needle != 0 && strstr(path, needle) != 0)
+    {
+        errno = EIO;
+        return -1;
+    }
+    int (*real_truncate)(const char*, off_t) = dlsym(RTLD_NEXT, "truncate");
+    return real_truncate(path, length);
+}
+)c";
+        require_true(static_cast<bool>(out));
+    }
+    const auto compile = "clang -shared -fPIC -O2 -o " + library + " " + source + " -ldl";
+    require_eq(std::system(compile.c_str()), 0);
+
+    auto exe = std::filesystem::read_symlink("/proc/self/exe").string();
+    int pipefd[2] = {-1, -1};
+    require_eq(pipe(pipefd), 0);
+    auto actions = posix_spawn_file_actions_t{};
+    require_eq(posix_spawn_file_actions_init(&actions), 0);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+
+    auto env_storage = std::vector<std::string>{};
+    for(char** entry = environ; *entry != nullptr; ++entry)
+    {
+        auto item = std::string{*entry};
+        if(item.starts_with("LD_PRELOAD="sv)
+            or item.starts_with("YARDB_FAILED_APPEND_CHILD="sv)
+            or item.starts_with("YARDB_FAIL_TRUNCATE="sv))
+            continue;
+        env_storage.push_back(std::move(item));
+    }
+    env_storage.push_back("YARDB_FAILED_APPEND_CHILD=1"s);
+    env_storage.push_back("YARDB_FAIL_TRUNCATE=engine_failed_append_live.db"s);
+    env_storage.push_back("LD_PRELOAD=" + library);
+    auto envp = std::vector<char*>{};
+    for(auto& item : env_storage)
+        envp.push_back(item.data());
+    envp.push_back(nullptr);
+
+    auto arg1 = "--jobs=1"s;
+    auto arg2 = "keep a live document when truncate fails"s;
+    char* argv[] = {exe.data(), arg1.data(), arg2.data(), nullptr};
+    auto pid = pid_t{0};
+    const auto spawned = posix_spawn(&pid, exe.c_str(), &actions, nullptr, argv, envp.data());
+    posix_spawn_file_actions_destroy(&actions);
+    require_eq(close(pipefd[1]), 0);
+    pipefd[1] = -1;
+    require_eq(spawned, 0);
+    require_eq(fcntl(pipefd[0], F_SETFL, O_NONBLOCK), 0);
+
+    auto output = std::string{};
+    auto status = 0;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{60};
+    while(true)
+    {
+        auto ready = pollfd{pipefd[0], POLLIN, 0};
+        poll(&ready, 1, 50);
+        auto buf = std::array<char, 4096>{};
+        while(true)
+        {
+            const auto n = read(pipefd[0], buf.data(), buf.size());
+            if(n > 0)
+                output.append(buf.data(), static_cast<std::size_t>(n));
+            else
+                break;
+        }
+        auto raw = 0;
+        if(waitpid(pid, &raw, WNOHANG) == pid)
+        {
+            status = WIFEXITED(raw) ? WEXITSTATUS(raw) : 1;
+            break;
+        }
+        if(std::chrono::steady_clock::now() > deadline)
+        {
+            kill(pid, SIGKILL);
+            waitpid(pid, &raw, 0);
+            output += "\nchild timed out\n"s;
+            status = 1;
+            break;
+        }
+    }
+    close(pipefd[0]);
+    if(status != 0)
+        clog << output << endl;
+    return status;
+}
 
 auto test_set()
 {
@@ -2482,6 +2733,19 @@ auto test_set()
             require_eq(static_cast<string>(ada[0]["name"s]), "ada"s);
             require_eq(reopened.count(collection, object{}), 2u);
         };
+    };
+
+    test_case("appended delete records keep a live document when truncate fails, [yardb]") = []
+    {
+        using namespace tester::basic;
+        using namespace tester::assertions;
+
+        if(std::getenv("YARDB_FAILED_APPEND_CHILD") != nullptr)
+        {
+            failed_append_keeps_live_document(failed_append_successor_bytes());
+            return;
+        }
+        require_eq(spawn_failed_append_child(), 0);
     };
 
     return true;

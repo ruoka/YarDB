@@ -2489,6 +2489,75 @@ auto test_set()
         }
     };
 
+    test_case("group writes keep the history chain with a previous offset, [yardb]") = []
+    {
+        const auto test_file = "./engine_batch_previous_test.db";
+        const auto setup = fixture{test_file};
+        constexpr auto collection = "batch_previous"s;
+        auto id = xson::integer_type{0};
+        {
+            auto engine = yar::db::engine{test_file};
+            auto original = object{{"name"s, "v1"s}};
+            require_true(engine.create(collection, original).has_value());
+            id = original["_id"s];
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            auto patch = yar::db::batch_request{};
+            patch.method = yar::db::batch_method::update;
+            patch.collection = collection;
+            patch.id = id;
+            patch.body = object{{"name"s, "v2"s}};
+            requests.push_back(std::move(patch));
+
+            auto replaced = yar::db::batch_request{};
+            replaced.method = yar::db::batch_method::replace;
+            replaced.collection = collection;
+            replaced.id = id;
+            replaced.body = object{{"name"s, "v3"s}};
+            requests.push_back(std::move(replaced));
+            require_true(engine.apply_group(requests).has_value());
+
+            auto history = object{};
+            require_true(engine.history(collection, object{{"_id"s, id}}, history));
+            require_eq(history.size(), 3u);
+            require_eq(history[0]["name"s].get<string>(), "v3"s);
+            require_eq(history[1]["name"s].get<string>(), "v2"s);
+            require_eq(history[2]["name"s].get<string>(), "v1"s);
+        }
+
+        using xson::fson::operator>>;
+        auto storage = std::ifstream{test_file, std::ios::binary};
+        auto v1_at = std::int64_t{-1};
+        auto v2_at = std::int64_t{-1};
+        auto v2_previous = std::int64_t{-1};
+        auto v3_previous = std::int64_t{-1};
+        while(storage.peek() != std::char_traits<char>::eof())
+        {
+            auto metadata = yar::db::metadata{};
+            auto document = object{};
+            storage >> metadata >> document;
+            require_true(static_cast<bool>(storage));
+            if(metadata.collection != collection or not document.has("name"s))
+                continue;
+            const auto name = document["name"s].get<string>();
+            if(name == "v1"s)
+            {
+                v1_at = metadata.position;
+                require_eq(metadata.previous, std::int64_t{-1});
+            }
+            else if(name == "v2"s)
+            {
+                v2_at = metadata.position;
+                v2_previous = metadata.previous;
+            }
+            else if(name == "v3"s)
+                v3_previous = metadata.previous;
+        }
+        require_gteq(v1_at, std::int64_t{0});
+        require_eq(v2_previous, v1_at);
+        require_eq(v3_previous, v2_at);
+    };
+
     return true;
 }
 

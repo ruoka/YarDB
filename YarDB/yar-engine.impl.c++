@@ -2261,6 +2261,11 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
         object document;
         bool mark_updated = false;
         metadata metadata_record{};
+        // Successor of an on-disk row. operator<< copies position into previous.
+        std::optional<position_type> chain_from_position;
+        // Successor of an earlier append in this group. That row's file position
+        // exists once it has been written, which is before this slot.
+        std::optional<std::size_t> chain_from_append;
     };
 
     // Update and replace mark the prior record updated after the commit.
@@ -2369,12 +2374,20 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             plans.push_back(std::move(plan));
         };
 
-        const auto queue_append = [&](object document, batch_effect effect, const object* prior = nullptr)
+        const auto queue_append = [&](
+            object document,
+            batch_effect effect,
+            const object* prior = nullptr,
+            std::optional<position_type> chain_from_position = std::nullopt,
+            std::optional<std::size_t> chain_from_append = std::nullopt)
         {
             const auto id = static_cast<std::int64_t>(document["_id"s]);
             // A later create or upsert in this group puts the id back. Drop the
             // delete so it is not appended after the new version, and mark the
             // superseded row updated so $deltaToken does not keep emitting it.
+            // The new row continues that version's history chain.
+            const auto adopt_chain = not chain_from_position.has_value()
+                and not chain_from_append.has_value();
             for(auto pending = pending_deletes.begin(); pending != pending_deletes.end();)
             {
                 if(pending->collection != request.collection or pending->id != id)
@@ -2383,9 +2396,23 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
                     continue;
                 }
                 if(pending->append_index.has_value())
+                {
                     appends[*pending->append_index].mark_updated = true;
+                    if(adopt_chain)
+                    {
+                        chain_from_append = *pending->append_index;
+                        chain_from_position.reset();
+                    }
+                }
                 else if(pending->prior_position.has_value())
+                {
                     priors.push_back({*pending->prior_position});
+                    if(adopt_chain)
+                    {
+                        chain_from_position = *pending->prior_position;
+                        chain_from_append.reset();
+                    }
+                }
                 pending = pending_deletes.erase(pending);
             }
             auto* log = undo.log(request.collection);
@@ -2399,7 +2426,12 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             else
                 collection_index.insert(document, placeholder, log);
             const auto slot = appends.size();
-            appends.push_back({request.collection, document, false, {}});
+            auto planned = planned_append{};
+            planned.collection = request.collection;
+            planned.document = document;
+            planned.chain_from_position = chain_from_position;
+            planned.chain_from_append = chain_from_append;
+            appends.push_back(std::move(planned));
             live_appends[{request.collection, id}] = slot;
             remember(effect, std::move(document), slot);
         };
@@ -2519,10 +2551,18 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             }
             document["_id"s] = id;
 
+            auto chain_from_position = std::optional<position_type>{};
+            auto chain_from_append = std::optional<std::size_t>{};
             if(current.append_index.has_value())
+            {
                 appends[*current.append_index].mark_updated = true;
+                chain_from_append = *current.append_index;
+            }
             else
+            {
                 priors.push_back({current.metadata_record.position});
+                chain_from_position = current.metadata_record.position;
+            }
 
             undo[request.collection].update(document, undo.log(request.collection));
             if(const auto clash = undo[request.collection].conflicts_with(document))
@@ -2530,7 +2570,12 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
             const auto effect = request.method == batch_method::update
                 ? batch_effect::updated
                 : batch_effect::replaced;
-            queue_append(std::move(document), effect, &current.document);
+            queue_append(
+                std::move(document),
+                effect,
+                &current.document,
+                chain_from_position,
+                chain_from_append);
             continue;
         }
     }
@@ -2561,7 +2606,18 @@ yar::db::db_result<std::vector<yar::db::batch_item>> yar::db::engine::apply_grou
 
         m_storage.clear();
         m_storage.seekp(0, m_storage.end);
+        // Same chain as update_impl / replace_impl: seed position with the prior
+        // row so operator<< stores it as previous. A fresh metadata would record
+        // previous = -1 and GET history would stop after this version.
         item.metadata_record = metadata{item.collection};
+        if(item.chain_from_append.has_value())
+        {
+            const auto prior_position = appends[*item.chain_from_append].metadata_record.position;
+            if(prior_position >= 0)
+                item.metadata_record.position = prior_position;
+        }
+        else if(item.chain_from_position.has_value())
+            item.metadata_record.position = *item.chain_from_position;
         m_storage << item.metadata_record << item.document;
         if(m_storage.fail())
             writes_ok = false;

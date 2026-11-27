@@ -645,6 +645,48 @@ auto test_set()
             require_eq(fixture.index().count(empty, both), 2u);
         };
 
+        section("AnIdInCountsOnlyTheNamedIds") = []
+        {
+            index_fixture fixture{"./index_id_in.db"s};
+            fixture.insert(object{{"n"s, 1ll}});
+            fixture.insert(object{{"n"s, 2ll}});
+            fixture.insert(object{{"n"s, 3ll}});
+
+            // The primary span does not understand $in. Counting it as an exact
+            // bound used to return the whole map.
+            const auto two = object{
+                {"_id"s, object{{"$in"s, object{object::array{object{1ll}, object{3ll}}}}}}};
+            require_eq(fixture.count(two), 2u);
+
+            const auto none = object{
+                {"_id"s, object{{"$in"s, object{object::array{object{9ll}, object{8ll}}}}}}};
+            require_eq(fixture.count(none), 0u);
+
+            const auto empty_list = object{
+                {"_id"s, object{{"$in"s, object{object::array{}}}}}};
+            require_eq(fixture.count(empty_list), 0u);
+
+            const auto as_map = object{
+                {"_id"s, object{{"$in"s, object{{"0"s, 1ll}, {"1"s, 3ll}}}}}};
+            require_eq(fixture.count(as_map), 2u);
+        };
+
+        section("AnIdInDoesNotWidenAnIndexedEquality") = []
+        {
+            index_fixture fixture{"./index_id_in_and.db"s};
+            fixture.add_keys({"status"s});
+            fixture.insert(object{{"status"s, "A"s}});
+            fixture.insert(object{{"status"s, "A"s}});
+            fixture.insert(object{{"status"s, "B"s}});
+            fixture.insert(object{{"status"s, "A"s}});
+
+            // status eq A is exact. _id in (1,2) must still drop id 4.
+            const auto both = object{
+                {"_id"s, object{{"$in"s, object{object::array{object{1ll}, object{2ll}}}}}},
+                {"status"s, "A"s}};
+            require_eq(fixture.count(both), 2u);
+        };
+
         section("AnInTrimsByIdRange") = []
         {
             index_fixture fixture{"./index_in_id.db"s};

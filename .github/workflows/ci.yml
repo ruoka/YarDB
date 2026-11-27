@@ -1,10 +1,23 @@
 name: C/C++ CI
 
+# Skip this workflow when every changed file is documentation.
+# Any other path in the same push or pull request still runs every job.
+# workflow_dispatch is unchanged.
 on:
   push:
     branches: [ master, main ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   pull_request:
     branches: [ master, main ]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 # Only cancel superseded PR runs (force-pushes / rapid bot updates).

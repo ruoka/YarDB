@@ -600,8 +600,11 @@ bool windowed(const yar::db::object& field)
     return field.has("$head"s) or field.has("$tail"s);
 }
 
-// Every bound is one the index answers exactly: _id, or an indexed field that
-// is not a compound name.
+// Every bound is one the index answers exactly: an _id comparison span, or an
+// indexed field that is not a compound name. A pure $in is exact on a secondary
+// map because plan() turns it into discrete runs. The primary span is only $eq
+// and $gt/$gte/$lt/$lte, so an _id $in is the whole map (or the comparison
+// span beside it) and must be counted by match().
 bool exact_bounds_only(const yar::db::object& selector, std::span<const std::string> indexed)
 {
     if(not selector.has_objects())
@@ -614,7 +617,10 @@ bool exact_bounds_only(const yar::db::object& selector, std::span<const std::str
     {
         if(key != "_id"s and (key.contains('+') or not std::ranges::contains(indexed, key)))
             return false;
-        return index_only_field_selector(selector[key]);
+        const auto& field = selector[key];
+        if(key == "_id"s and is_pure_in(field))
+            return false;
+        return index_only_field_selector(field);
     });
 }
 

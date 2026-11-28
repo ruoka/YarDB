@@ -752,24 +752,49 @@ std::span<const std::string> yar::db::index::unique_keys() const
     return m_unique_keys;
 }
 
+namespace {
+
+std::optional<yar::db::unique_conflict> non_primitive_part(
+    const std::string& field,
+    const yar::db::object& value,
+    const yar::db::object& document)
+{
+    if(value.is_null() or value.has_value())
+        return std::nullopt;
+
+    auto clash = yar::db::unique_conflict{};
+    clash.field = field;
+    clash.primitive = false;
+    if(document.has("_id"s) and document["_id"s].is_integer())
+        clash.id = make_primary_key(document["_id"s]);
+    return clash;
+}
+
+} // namespace
+
 std::optional<yar::db::unique_conflict> yar::db::index::non_primitive_unique(
     const yar::db::object& document) const
 {
     for(const auto& field : m_unique_keys)
     {
+        // "service+type" is not a document field. An object or array in any
+        // part would skip the posting list and slip past the constraint.
+        if(const auto parts = compound_parts(field))
+        {
+            for(const auto& part : *parts)
+            {
+                if(not document.has(part))
+                    continue;
+                if(const auto clash = non_primitive_part(field, document[part], document))
+                    return clash;
+            }
+            continue;
+        }
+
         if(not document.has(field))
             continue;
-
-        const auto& value = document[field];
-        if(value.is_null() or value.has_value())
-            continue;
-
-        auto clash = yar::db::unique_conflict{};
-        clash.field = field;
-        clash.primitive = false;
-        if(document.has("_id"s) and document["_id"s].is_integer())
-            clash.id = make_primary_key(document["_id"s]);
-        return clash;
+        if(const auto clash = non_primitive_part(field, document[field], document))
+            return clash;
     }
     return std::nullopt;
 }
@@ -786,18 +811,36 @@ std::optional<yar::db::unique_conflict> yar::db::index::conflicts_with(
 
     for(const auto& field : m_unique_keys)
     {
-        if(not document.has(field))
-            continue;
-
-        const auto& value = document[field];
-        if(not value.has_value() or value.is_null())
-            continue;
-
         const auto secondary = m_secondary_keys.find(field);
         if(secondary == m_secondary_keys.end())
             continue;
 
-        const auto found = secondary->second.find(make_secondary_key(value));
+        auto key = std::optional<yar::db::secondary_key_type>{};
+        if(const auto parts = compound_parts(field))
+        {
+            // Missing or null parts are not a tuple, matching a single field.
+            const auto absent = std::ranges::any_of(*parts, [&](const std::string& part)
+            {
+                return not document.has(part) or document[part].is_null();
+            });
+            if(absent)
+                continue;
+            key = indexed_value(document, field);
+        }
+        else
+        {
+            if(not document.has(field))
+                continue;
+
+            const auto& value = document[field];
+            if(not value.has_value() or value.is_null())
+                continue;
+            key = make_secondary_key(value);
+        }
+        if(not key)
+            continue;
+
+        const auto found = secondary->second.find(*key);
         if(found == secondary->second.end())
             continue;
 

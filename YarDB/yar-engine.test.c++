@@ -2111,6 +2111,83 @@ auto test_set()
             require_true(engine.read(collection, object{{"UID"s, "live"s}}, documents));
             require_eq(documents.size(), 1u);
         };
+
+        section("A compound unique key rejects a duplicate tuple") = []
+        {
+            const auto test_file = "./engine_unique_compound_test.db";
+            const auto setup = fixture{test_file};
+            constexpr auto collection = "bindings"s;
+            auto engine = yar::db::engine{test_file};
+            require_true(engine.index(collection, {"service+type"s}, {"service+type"s}).has_value());
+
+            auto first = object{{"service"s, "pay"s}, {"type"s, "card"s}};
+            require_true(engine.create(collection, first).has_value());
+            const auto first_id = static_cast<xson::integer_type>(first["_id"s]);
+
+            auto duplicate = object{{"service"s, "pay"s}, {"type"s, "card"s}};
+            const auto rejected = engine.create(collection, duplicate);
+            require_false(rejected.has_value());
+            require_eq(rejected.error().code, yar::db::db_error_code::conflict);
+            require_eq(rejected.error().message, "Unique value for service+type already exists"s);
+            require_eq(*rejected.error().conflict_id, first_id);
+
+            auto other = object{{"service"s, "pay"s}, {"type"s, "cash"s}};
+            require_true(engine.create(collection, other).has_value());
+            const auto other_id = static_cast<xson::integer_type>(other["_id"s]);
+
+            auto note = object{{"note"s, "kept"s}};
+            require_true(engine.update(collection, object{{"_id"s, first_id}}, note).has_value());
+            auto kept = object{};
+            require_true(engine.read(collection, object{{"_id"s, first_id}}, kept));
+            require_eq(static_cast<string>(kept[0]["service"s]), "pay"s);
+            require_eq(static_cast<string>(kept[0]["type"s]), "card"s);
+
+            auto stolen = object{{"type"s, "cash"s}};
+            const auto updated = engine.update(collection, object{{"_id"s, first_id}}, stolen);
+            require_false(updated.has_value());
+            require_eq(*updated.error().conflict_id, other_id);
+
+            auto replacement = object{{"service"s, "pay"s}, {"type"s, "cash"s}};
+            const auto replaced = engine.replace(collection, object{{"_id"s, first_id}}, replacement);
+            require_false(replaced.has_value());
+            require_eq(*replaced.error().conflict_id, other_id);
+
+            require_true(engine.destroy(collection, object{{"_id"s, other_id}}).has_value());
+            auto reused = object{{"service"s, "pay"s}, {"type"s, "cash"s}};
+            require_true(engine.create(collection, reused).has_value());
+
+            auto missing_a = object{{"service"s, "pay"s}};
+            auto missing_b = object{{"service"s, "pay"s}};
+            require_true(engine.create(collection, missing_a).has_value());
+            require_true(engine.create(collection, missing_b).has_value());
+
+            auto null_part = object{{"type"s, "wire"s}};
+            null_part["service"s] = nullptr;
+            auto null_again = object{{"type"s, "wire"s}};
+            null_again["service"s] = nullptr;
+            require_true(engine.create(collection, null_part).has_value());
+            require_true(engine.create(collection, null_again).has_value());
+
+            auto nested = json::parse(R"({"service":{"id":"x"},"type":"card"})");
+            const auto object_value = engine.create(collection, nested);
+            require_false(object_value.has_value());
+            require_eq(object_value.error().message, "Unique field service+type must be a primitive"s);
+
+            auto requests = std::vector<yar::db::batch_request>{};
+            for(const auto& type : {"sepa"s, "sepa"s})
+            {
+                auto create = yar::db::batch_request{};
+                create.method = yar::db::batch_method::create;
+                create.collection = collection;
+                create.body = object{{"service"s, "pay"s}, {"type"s, type}};
+                requests.push_back(std::move(create));
+            }
+            const auto applied = engine.apply_group(requests);
+            require_false(applied.has_value());
+            require_eq(*applied.error().request_index, 1u);
+            auto documents = object{};
+            require_false(engine.read(collection, object{{"type"s, "sepa"s}}, documents));
+        };
     };
 
     test_case("skiptoken resumes after the last row, [yardb]") = []

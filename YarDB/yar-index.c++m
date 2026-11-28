@@ -604,14 +604,17 @@ public:
     std::span<const std::string> unique_keys() const;
 
     // Another live row holds a unique value of document, or a unique field is an
-    // object or array. Missing fields and JSON null do not collide, and neither
-    // does the live version of document's own _id.
+    // object or array. A name of fields joined by '+' is that tuple, using the
+    // same encoding as its posting list. Missing fields and JSON null do not
+    // collide, and neither does the live version of document's own _id. A
+    // missing or null part of a compound tuple does not collide.
     std::optional<unique_conflict> conflicts_with(const xson::object& document) const;
 
     // A unique primitive value is stored on more than one live row. Nulls are ignored.
     std::optional<unique_conflict> duplicate_unique() const;
 
-    // A unique field on this document is an object or array.
+    // A unique field on this document is an object or array. For a compound
+    // name, that is any of its parts.
     std::optional<unique_conflict> non_primitive_unique(const xson::object& document) const;
 
     // Check if selector uses primary key (_id)
